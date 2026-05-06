@@ -21,6 +21,14 @@
   --smooth:cubic-bezier(0.4,0,0.2,1);
   --dur:180ms;--tb:38px;--sb:176px;
 }
+body.light{
+  --bg:#f4f4f8;--s1:#ffffff;--s2:#ebebf0;--s3:#e0e0e8;--s4:#d0d0dc;
+  --bd:rgba(0,0,0,0.08);--bd2:rgba(0,0,0,0.15);
+  --t1:#0e0e1a;--t2:#555570;--t3:#9898b4;
+  --ac:#5c5ce0;--ac2:rgba(92,92,224,0.12);--ac3:rgba(92,92,224,0.25);
+  --green:#1a9e62;--gd:rgba(26,158,98,0.1);
+  --red:#d94f4f;--rd:rgba(217,79,79,0.1);
+}
 body{
   font-family:'Inter',system-ui,sans-serif;
   font-feature-settings:'cv02','cv03','cv04','cv11';
@@ -29,6 +37,8 @@ body{
   user-select:none;-webkit-user-select:none;
   -webkit-font-smoothing:antialiased;
 }
+
+
 button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-btn:focus,.tab-btn:focus-visible{outline:none;}
 
 /* titlebar */
@@ -36,7 +46,7 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .tb-brand{width:var(--sb);flex-shrink:0;display:flex;align-items:center;padding:0 16px;border-right:1px solid var(--bd);height:100%}
 .tb-name{font-size:13px;font-weight:600;letter-spacing:-.02em;color:var(--t1)}
 .tb-drag{flex:1;height:100%;display:flex;align-items:center;justify-content:center}
-.tb-version{font-size:11px;font-family:'Inter',monospace;font-weight:500;color:var(--t3);background:var(--s2);border:1px solid var(--bd);border-radius:5px;padding:2px 9px;letter-spacing:.01em;pointer-events:none}
+.tb-version{font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:500;color:var(--t2);background:var(--s2);border:1px solid var(--bd);border-radius:5px;padding:2px 9px;letter-spacing:.01em;pointer-events:none;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tb-controls{display:flex;gap:1px;-webkit-app-region:no-drag}
 .tb-btn{width:32px;height:28px;border-radius:6px;border:none;background:transparent;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth)}
 .tb-btn:hover{background:var(--s3);color:var(--t2)}
@@ -94,6 +104,12 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .card-game{font-size:11px;color:var(--ac);background:var(--ac2);border-radius:5px;padding:2px 7px;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none}
 .card-game.visible{display:block}
 .card-row{display:flex;gap:5px;margin-top:auto}
+.gen-hist-item{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:11.5px;font-family:'JetBrains Mono',monospace;color:var(--t2);border-top:1px solid var(--bd);cursor:default}
+.gen-hist-item:first-child{border-top:none}
+.gen-hist-item:hover{background:var(--s3)}
+.gen-hist-item .gh-user{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t1)}
+.gen-hist-item .gh-time{font-size:10px;color:var(--t3);flex-shrink:0}
+.gen-hist-item .gh-actions{display:flex;gap:4px;flex-shrink:0}
 .card[draggable]{cursor:grab}
 .card[draggable]:active{cursor:grabbing}
 .card.drag-over{border-color:var(--ac);box-shadow:0 0 0 2px var(--ac3)}
@@ -201,8 +217,6 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .toast .material-icons-round{font-size:14px}
 .toast.ok{border-color:rgba(62,207,142,.3);color:var(--green)}
 .toast.err{border-color:rgba(240,111,111,.3);color:var(--red)}
-.key-status{font-size:11.5px;margin-top:5px;color:var(--green);display:none;font-weight:500}
-.key-status.visible{display:block}
 
 /* tab bars */
 .tab-bar{display:flex;gap:5px;padding:8px 18px 0;flex-shrink:0;margin-bottom:6px}
@@ -299,6 +313,8 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
   </div>
   <span class="tb-version" id="tb-roblox-ver" style="margin-left:12px;flex-shrink:0">—</span>
   <div class="tb-drag"></div>
+  <button class="tb-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark" style="-webkit-app-region:no-drag"><span class="material-icons-round" id="theme-icon" style="font-size:15px">light_mode</span></button>
+  <button class="tb-btn" onclick="openModal('m-help')" title="Help" style="-webkit-app-region:no-drag"><span class="material-icons-round" style="font-size:15px">help_outline</span></button>
   <div class="tb-controls">
     <button class="tb-btn" onclick="api.minimize()"><span class="material-icons-round">remove</span></button>
     <button class="tb-btn" onclick="api.maximize()"><span class="material-icons-round">crop_square</span></button>
@@ -435,28 +451,53 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
       </div>
 
       <!-- generator page -->
-      <div class="page" id="page-generator">
+      <div class="page" id="page-generator" style="overflow-y:auto">
         <div class="ph">
           <div class="ph-title">Generator</div>
-          <div class="ph-sub">Generate a username &amp; password combo</div>
+          <div class="ph-sub">Generate a Roblox alt via BloxGen API</div>
         </div>
         <div class="sw">
           <div class="sc">
-            <div class="sc-head">Output</div>
-            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
-              <div style="width:100%;display:flex;align-items:center;gap:8px">
-                <input type="text" id="gen-output" class="sr-input" readonly placeholder="press Generate to get next account" style="flex:1;width:auto;font-family:monospace;font-size:13px;letter-spacing:.03em;cursor:default"/>
-                <button id="gen-copy-btn" class="btn btn-ghost" style="font-size:12px;padding:7px 12px;flex-shrink:0" onclick="genCopy()" title="Copy to clipboard">
-                  <span class="material-icons-round" style="font-size:14px">content_copy</span>
-                </button>
-              </div>
-              <div id="gen-counter" style="font-size:11px;color:var(--t3)">—</div>
+            <div class="sc-head">API Key</div>
+            <div class="sr">
+              <input type="password" id="gen-apikey" class="sr-input" placeholder="BLOX-XXXXXXXXXXXXXXXX" style="flex:1;width:auto;font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;color:var(--t1)"/>
+              <button class="btn btn-ghost" style="font-size:12px;padding:7px 10px;flex-shrink:0" onclick="genToggleKey()" id="gen-eye-btn" title="Show/hide key">
+                <span class="material-icons-round" id="gen-eye-icon" style="font-size:14px">visibility</span>
+              </button>
             </div>
           </div>
-          <div style="padding:4px 0 0">
-            <button id="gen-btn" class="btn btn-primary" style="width:100%;justify-content:center;padding:10px 0;font-size:13px" onclick="genCombo()">
-              Generate
+          <div class="sc">
+            <div class="sc-head">Output</div>
+            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
+              <div style="width:100%;display:flex;align-items:stretch;gap:8px">
+                <input type="text" id="gen-output" class="sr-input" readonly placeholder="click Generate to create an account" style="flex:1;width:auto;font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;color:var(--t1);cursor:default;border-radius:var(--r2)"/>
+                <button id="gen-copy-btn" class="btn btn-ghost" style="padding:7px 12px;flex-shrink:0;border-radius:var(--r2)" onclick="genCopy()" title="Copy combo (user:pass)">
+                  <span class="material-icons-round" style="font-size:15px">content_copy</span>
+                  <span style="font-size:11.5px">combo</span>
+                </button>
+                <button id="gen-details-copy-btn" class="btn btn-ghost" style="padding:7px 12px;flex-shrink:0;border-radius:var(--r2)" onclick="genDetailsCopy()" title="Copy full details">
+                  <span class="material-icons-round" style="font-size:15px">receipt_long</span>
+                  <span style="font-size:11.5px">details</span>
+                </button>
+              </div>
+              <div id="gen-details" style="display:none;width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r2);padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t2);line-height:1.7"></div>
+              <div id="gen-counter" style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--t3);letter-spacing:.02em"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button id="gen-btn" class="btn btn-primary" style="flex:1;justify-content:center" onclick="genCombo()">
+              <span class="material-icons-round" style="font-size:15px">bolt</span>Generate
             </button>
+            <button id="gen-add-btn" class="btn btn-ghost" style="display:none" onclick="genAddToAccounts()" title="Add to accounts">
+              <span class="material-icons-round" style="font-size:15px">person_add</span>Add
+            </button>
+          </div>
+          <div class="sc" id="gen-history-sc" style="display:none;margin-top:12px">
+            <div class="sc-head" style="display:flex;align-items:center;justify-content:space-between;padding-right:10px">
+              History
+              <button class="btn btn-ghost" onclick="genClearHistory()">Clear</button>
+            </div>
+            <div id="gen-history-list" style="display:flex;flex-direction:column;gap:1px"></div>
           </div>
         </div>
       </div>
@@ -509,7 +550,6 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
                 </button>
                 <button class="btn btn-primary" style="font-size:12px;padding:7px 12px" onclick="saveKeySettings()" id="btn-save-key">Save</button>
               </div>
-              <div class="key-status" id="key-status">✓ Custom key active</div>
             </div>
           </div>
 
@@ -608,7 +648,11 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 <div class="overlay" id="m-edit" data-backdrop-close="false">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-title" id="edit-title">Edit account</div>
-    <div class="modal-sub">Set a game to launch into when you start this account. Leave blank to open Roblox on the home screen.</div>
+    <div class="modal-sub">Customize this account's display name and game target.</div>
+    <div class="field">
+      <label>Nickname</label>
+      <input type="text" id="in-nickname" placeholder="Leave blank to use Roblox username"/>
+    </div>
     <div class="field">
       <label>Game ID or Private Server Link</label>
       <input type="text" id="in-target" placeholder="e.g. 292439477 or a private server URL"/>
@@ -677,7 +721,8 @@ async function init() {
   refreshMultiStatus();
   detectRobloxVersion();
   loadFlags();
-  try { const last = localStorage.getItem('lastTab'); if (last) goTo(last); } catch {}
+  // Restore saved API key
+  try { const k = localStorage.getItem('bloxgen_apikey'); if (k) { const el = document.getElementById('gen-apikey'); if (el) el.value = k; } } catch {}
 
   // Chrome download progress
   api.onChromeProgress(data => {
@@ -699,13 +744,55 @@ async function init() {
 }
 init();
 
+// ── Theme ──────────────────────────────────────────────────────────────────
+function applyTheme(dark) {
+  document.body.classList.toggle('light', !dark);
+  const icon = document.getElementById('theme-icon');
+  if (icon) icon.textContent = dark ? 'light_mode' : 'dark_mode';
+}
+function toggleTheme() {
+  const isDark = !document.body.classList.contains('light');
+  applyTheme(!isDark);
+  try { localStorage.setItem('theme', isDark ? 'light' : 'dark'); } catch {}
+}
+(function() {
+  try {
+    const t = localStorage.getItem('theme');
+    applyTheme(t !== 'light');
+  } catch { applyTheme(true); }
+})();
+
+// ── BloxGen API key persistence ────────────────────────────────────────────
+(function() {
+  try {
+    const saved = localStorage.getItem('bloxgen_apikey');
+    if (saved) {
+      const el = document.getElementById('gen-apikey');
+      if (el) el.value = saved;
+    }
+  } catch {}
+})();
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('gen-apikey');
+  if (el) el.addEventListener('input', () => {
+    try { localStorage.setItem('bloxgen_apikey', el.value); } catch {}
+  });
+});
+
+
 async function detectRobloxVersion() {
   try {
     const ver = await api.getRobloxVersion();
-    const label = ver ? ver : '—';
-    document.getElementById('tb-roblox-ver').textContent = label;
-    const el = document.getElementById('stat-rblx-ver');
-    if (el) el.textContent = ver || 'Not detected';
+    if (ver) {
+      // Show full hash in titlebar badge, also update settings stat
+      document.getElementById('tb-roblox-ver').textContent = ver;
+      const el = document.getElementById('stat-rblx-ver');
+      if (el) el.textContent = ver;
+    } else {
+      document.getElementById('tb-roblox-ver').textContent = '—';
+      const el = document.getElementById('stat-rblx-ver');
+      if (el) el.textContent = 'Not detected';
+    }
   } catch {
     document.getElementById('tb-roblox-ver').textContent = '—';
     const el = document.getElementById('stat-rblx-ver');
@@ -721,9 +808,7 @@ function applySettings() {
       o.classList.toggle('selected', o.dataset.value === selectedEnc));
   }
   const keyIn = document.getElementById('custom-key');
-  if (keyIn) keyIn.placeholder = settings.customKey ? '••••••••' : 'Enter passphrase…';
-  const ks = document.getElementById('key-status');
-  if (ks) ks.classList.toggle('visible', !!(settings.customKey && settings.customKey.trim()));
+  if (keyIn) keyIn.value = settings.customKey || '';
 }
 
 function toggleCdd(name) {
@@ -763,8 +848,7 @@ function goTo(p) {
     refreshMultiStatus();
   }
   if (p === 'charts' && !chartsLoaded) loadCharts();
-  if (p === 'generator') { _genList = []; genRefreshCounter(); }
-  try { localStorage.setItem('lastTab', p); } catch {}
+  // generator page
 }
 
 function render() {
@@ -773,10 +857,10 @@ function render() {
   if (!accounts.length) { grid.innerHTML = ''; empty.style.display = 'flex'; return; }
   empty.style.display = 'none';
   grid.innerHTML = accounts.map((a, i) => `
-    <div class="card" draggable="true" data-id="${a.id}" style="animation-delay:${i * 18}ms">
+    <div class="card" data-id="${a.id}" style="animation-delay:${i * 18}ms">
       <span class="material-icons-round drag-handle">drag_indicator</span>
       <div class="card-av" id="av-${a.id}">${(a.username || '?')[0].toUpperCase()}</div>
-      <div class="card-name">${esc(a.username || 'Unknown')}</div>
+      <div class="card-name">${esc(a.nickname || a.username || 'Unknown')}</div>
       <div class="card-uid">${a.userId ? '#' + a.userId : '\u2014'}</div>
       <div class="card-game ${a.gameTarget ? 'visible' : ''}" id="gt-${a.id}" title="${esc(a.gameTarget || '')}">
         ${a.gameTarget ? truncate(a.gameTarget, 22) : ''}
@@ -799,52 +883,86 @@ function render() {
 
 function truncate(s, n) { return s.length > n ? s.slice(0, n) + '\u2026' : s; }
 
-let _dragSrcId = null;
 let _dragSaveTimer = null;
+let _dragging = null, _dragClone = null, _dragOffX = 0, _dragOffY = 0, _dragOverId = null;
 
 function initDrag() {
   const grid = document.getElementById('grid');
+
   grid.querySelectorAll('.card').forEach(card => {
-    card.addEventListener('dragstart', e => {
-      _dragSrcId = card.dataset.id;
-      card.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', _dragSrcId);
-    });
-    card.addEventListener('dragend', () => {
-      card.classList.remove('dragging');
-      grid.querySelectorAll('.card').forEach(c => c.classList.remove('drag-over'));
-    });
-    card.addEventListener('dragover', e => {
+    const handle = card.querySelector('.drag-handle');
+    const startEl = handle || card;
+
+    startEl.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      if (e.target.closest('button')) return;
       e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      if (card.dataset.id !== _dragSrcId) {
-        grid.querySelectorAll('.card').forEach(c => c.classList.remove('drag-over'));
-        card.classList.add('drag-over');
-      }
-    });
-    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
-    card.addEventListener('drop', e => {
-      e.preventDefault();
-      card.classList.remove('drag-over');
-      const targetId = card.dataset.id;
-      if (!_dragSrcId || _dragSrcId === targetId) return;
 
-      const srcIdx = accounts.findIndex(a => a.id === _dragSrcId);
-      const tgtIdx = accounts.findIndex(a => a.id === targetId);
-      if (srcIdx === -1 || tgtIdx === -1) return;
+      _dragging = card;
+      const rect = card.getBoundingClientRect();
+      _dragOffX = e.clientX - rect.left;
+      _dragOffY = e.clientY - rect.top;
 
-      const moved = accounts.splice(srcIdx, 1)[0];
-      accounts.splice(tgtIdx, 0, moved);
+      // Create floating clone
+      _dragClone = card.cloneNode(true);
+      _dragClone.style.cssText = `
+        position:fixed;left:${rect.left}px;top:${rect.top}px;
+        width:${rect.width}px;height:${rect.height}px;
+        opacity:0.85;pointer-events:none;z-index:9999;
+        box-shadow:0 16px 40px rgba(0,0,0,.6);
+        transform:scale(1.04);border-color:var(--ac);
+        transition:box-shadow .15s;border-radius:var(--r);
+        background:var(--s2);border:1px solid var(--ac);
+      `;
+      document.body.appendChild(_dragClone);
+      card.style.opacity = '0.3';
 
-      render();
-
-      clearTimeout(_dragSaveTimer);
-      _dragSaveTimer = setTimeout(() => {
-        api.reorderAccounts(accounts.map(a => a.id));
-      }, 400);
+      document.addEventListener('mousemove', onDragMove);
+      document.addEventListener('mouseup', onDragEnd);
     });
   });
+}
+
+function onDragMove(e) {
+  if (!_dragging || !_dragClone) return;
+  _dragClone.style.left = (e.clientX - _dragOffX) + 'px';
+  _dragClone.style.top  = (e.clientY - _dragOffY) + 'px';
+
+  // Find card under cursor (ignore clone)
+  _dragClone.style.display = 'none';
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  _dragClone.style.display = '';
+  const target = el ? el.closest('.card[data-id]') : null;
+  const newId = target ? target.dataset.id : null;
+
+  if (newId && newId !== _dragging.dataset.id && newId !== _dragOverId) {
+    // Live-reorder: swap in accounts array and re-render
+    _dragOverId = newId;
+    const srcIdx = accounts.findIndex(a => a.id === _dragging.dataset.id);
+    const tgtIdx = accounts.findIndex(a => a.id === newId);
+    if (srcIdx !== -1 && tgtIdx !== -1) {
+      const moved = accounts.splice(srcIdx, 1)[0];
+      accounts.splice(tgtIdx, 0, moved);
+      render();
+      // Re-attach drag events and dim the source card
+      const newCard = document.querySelector('.card[data-id="' + moved.id + '"]');
+      if (newCard) { _dragging = newCard; newCard.style.opacity = '0.3'; }
+    }
+  }
+}
+
+function onDragEnd() {
+  document.removeEventListener('mousemove', onDragMove);
+  document.removeEventListener('mouseup', onDragEnd);
+
+  if (_dragClone) { _dragClone.remove(); _dragClone = null; }
+  if (_dragging) { _dragging.style.opacity = ''; _dragging = null; }
+  _dragOverId = null;
+
+  clearTimeout(_dragSaveTimer);
+  _dragSaveTimer = setTimeout(() => {
+    api.reorderAccounts(accounts.map(a => a.id));
+  }, 400);
 }
 
 function loadAvatar(id, uid) {
@@ -962,7 +1080,8 @@ function openEdit(id) {
 async function saveEdit() {
   if (!editAcc) return;
   const target = document.getElementById('in-target').value.trim();
-  const updated = await api.updateAccount(editAcc.id, { gameTarget: target });
+  const nickname = document.getElementById('in-nickname').value.trim();
+  const updated = await api.updateAccount(editAcc.id, { gameTarget: target, nickname });
   if (updated) { const idx = accounts.findIndex(a => a.id === editAcc.id); if (idx !== -1) accounts[idx] = updated; render(); }
   closeModal('m-edit');
   toast('Saved', 'ok');
@@ -1415,60 +1534,151 @@ async function saveFlags() {
 }
 
 
-let _genIndex = 0;
-let _genList = [];
-
-async function genLoad() {
-  try {
-    _genList = await api.readGenAccounts();
-  } catch { _genList = []; }
+function genToggleKey() {
+  const inp = document.getElementById('gen-apikey');
+  const icon = document.getElementById('gen-eye-icon');
+  if (inp.type === 'password') { inp.type = 'text'; icon.textContent = 'visibility_off'; }
+  else { inp.type = 'password'; icon.textContent = 'visibility'; }
 }
-
-async function genRefreshCounter() {
-  if (_genList.length === 0) await genLoad();
-  const list = _genList.filter(l => typeof l === 'string' && l.includes(':'));
-  const counter = document.getElementById('gen-counter');
-  if (!counter) return;
-  if (list.length === 0) counter.textContent = 'no accounts loaded';
-  else counter.textContent = (_genIndex === 0 ? 'Ready — ' : 'Account ' + _genIndex + ' of ') + list.length + ' account' + (list.length !== 1 ? 's' : '');
-}
-
-let _genCooldownUntil = 0;
-let _genCooldownTimer = null;
 
 async function genCombo() {
-  const now = Date.now();
-  if (now < _genCooldownUntil) {
-    const secsLeft = Math.ceil((_genCooldownUntil - now) / 1000);
-    toast('Cooldown: ' + secsLeft + 's remaining', 'err');
+  const apiKey = (document.getElementById('gen-apikey').value || '').trim();
+  try { localStorage.setItem('bloxgen_apikey', document.getElementById('gen-apikey').value); } catch {}
+  if (!apiKey || !apiKey.startsWith('BLOX-')) {
+    toast('Enter a valid BloxGen API key (starts with BLOX-)', 'err');
     return;
   }
-  if (_genList.length === 0) await genLoad();
-  const list = _genList.filter(l => typeof l === 'string' && l.includes(':'));
-  if (list.length === 0) { toast('no accounts loaded', 'err'); return; }
-  if (_genIndex >= list.length) _genIndex = 0;
-  const combo = list[_genIndex];
-  const out = document.getElementById('gen-output');
-  out.value = combo;
-  out.select();
-  _genIndex++;
 
-  // 1 min cooldown
-  _genCooldownUntil = Date.now() + 60000;
   const btn = document.getElementById('gen-btn');
-  clearInterval(_genCooldownTimer);
-  _genCooldownTimer = setInterval(() => {
-    const left = Math.ceil((_genCooldownUntil - Date.now()) / 1000);
-    if (left <= 0) {
-      clearInterval(_genCooldownTimer);
-      if (btn) { btn.textContent = 'Generate'; btn.disabled = false; }
-      genRefreshCounter();
-    } else {
-      if (btn) { btn.textContent = 'Wait ' + left + 's'; btn.disabled = true; }
-    }
-  }, 500);
+  const details = document.getElementById('gen-details');
+  const out = document.getElementById('gen-output');
+  if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
 
-  document.getElementById('gen-counter').textContent = 'Account ' + _genIndex + ' of ' + list.length + ' — next in 60s';
+  try {
+    const resp = await fetch('https://core.bloxgen.net/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey, type: 'alt' })
+    });
+    const data = await resp.json();
+
+    if (!data.success) {
+      toast(data.message || data.error || 'Generation failed', 'err');
+      if (btn) { btn.textContent = 'Generate'; btn.disabled = false; }
+      return;
+    }
+
+    const d = data.data;
+    out.value = d.username + ':' + d.password;
+    out.select();
+
+    // Show details panel
+    details.style.display = '';
+    details.innerHTML =
+      '<span style="color:var(--t3)">user</span>  ' + d.username + '<br>' +
+      '<span style="color:var(--t3)">pass</span>  ' + d.password + '<br>' +
+      (d.cookie ? '<span style="color:var(--t3)">cookie</span> ' + d.cookie.slice(0, 40) + '…<br>' : '') +
+      '<span style="color:var(--t3)">type</span>  ' + (d.type || 'alt') +
+      (d.region ? '  <span style="color:var(--t3)">region</span> ' + d.region : '') +
+      (d.cost !== undefined ? '  <span style="color:var(--t3)">cost</span> $' + d.cost : '');
+
+    // Store in history
+    _lastGenData = d;
+    const now = new Date();
+    const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+    _genHistory.unshift({ username: d.username, password: d.password, cookie: d.cookie, time: timeStr });
+    if (_genHistory.length > 10) _genHistory.pop();
+    genRenderHistory();
+
+    // Show auto-add button if cookie available
+    const addBtn = document.getElementById('gen-add-btn');
+    if (addBtn) addBtn.style.display = d.cookie ? '' : 'none';
+
+    // Copy cookie to clipboard if available, else username:password
+    const toCopy = d.cookie || (d.username + ':' + d.password);
+    navigator.clipboard.writeText(toCopy).catch(() => {});
+
+    if (btn) { btn.textContent = 'Generate'; btn.disabled = false; }
+
+  } catch (e) {
+    toast('Network error: ' + e.message, 'err');
+    if (btn) { btn.textContent = 'Generate'; btn.disabled = false; }
+  }
+}
+
+// Gen history stored in memory (session only)
+let _genHistory = [];
+let _lastGenData = null;
+
+function genRenderHistory() {
+  const list = document.getElementById('gen-history-list');
+  const sc = document.getElementById('gen-history-sc');
+  if (!list || !sc) return;
+  if (_genHistory.length === 0) { sc.style.display = 'none'; return; }
+  sc.style.display = '';
+  list.innerHTML = _genHistory.map((h, i) => `
+    <div class="gen-hist-item">
+      <span class="gh-user">${esc(h.username)}</span>
+      <span class="gh-time">${h.time}</span>
+      <div class="gh-actions">
+        <button class="btn btn-ghost" onclick="genHistCopy(${i})" title="Copy combo">
+          <span class="material-icons-round" style="font-size:15px">content_copy</span>
+        </button>
+        <button class="btn btn-ghost" onclick="genHistAdd(${i})" title="Add to accounts">
+          <span class="material-icons-round" style="font-size:15px">person_add</span>
+        </button>
+      </div>
+    </div>`).join('');
+}
+
+function genHistCopy(i) {
+  const h = _genHistory[i];
+  if (!h) return;
+  navigator.clipboard.writeText(h.username + ':' + h.password).then(() => toast('Copied ' + h.username, 'ok'));
+}
+
+async function genHistAdd(i) {
+  const h = _genHistory[i];
+  if (!h || !h.cookie) { toast('No cookie available for this account', 'err'); return; }
+  try {
+    const res = await api.validateCookie(h.cookie);
+    if (!res || !res.username) { toast('Cookie invalid or expired', 'err'); return; }
+    const a = await api.addAccount({ username: res.username, userId: res.userId, cookie: h.cookie, gameTarget: '', nickname: '' });
+    if (a) { accounts.push(a); render(); toast('Added ' + res.username + ' to accounts', 'ok'); }
+  } catch(e) { toast('Failed to add: ' + e.message, 'err'); }
+}
+
+async function genAddToAccounts() {
+  if (!_lastGenData || !_lastGenData.cookie) { toast('No cookie available', 'err'); return; }
+  const btn = document.getElementById('gen-add-btn');
+  if (btn) { btn.disabled = true; }
+  try {
+    const res = await api.validateCookie(_lastGenData.cookie);
+    if (!res || !res.username) { toast('Cookie invalid or expired', 'err'); if(btn)btn.disabled=false; return; }
+    const a = await api.addAccount({ username: res.username, userId: res.userId, cookie: _lastGenData.cookie, gameTarget: '', nickname: '' });
+    if (a) { accounts.push(a); render(); toast('Added ' + res.username + ' to accounts!', 'ok'); }
+    if(btn)btn.disabled=false;
+  } catch(e) { toast('Failed: ' + e.message, 'err'); if(btn)btn.disabled=false; }
+}
+
+function genClearHistory() {
+  _genHistory = [];
+  _lastGenData = null;
+  const addBtn = document.getElementById('gen-add-btn');
+  if (addBtn) addBtn.style.display = 'none';
+  genRenderHistory();
+  toast('History cleared', 'ok');
+}
+
+function genDetailsCopy() {
+  const details = document.getElementById('gen-details');
+  const text = details ? details.innerText.replace('copy', '').trim() : '';
+  if (!text) { toast('No details to copy', 'err'); return; }
+  const btn = document.getElementById('gen-details-copy-btn');
+  navigator.clipboard.writeText(text).then(() => {
+    if (btn) { const s = btn.querySelector('span:last-child'); if(s){s.textContent='done'; setTimeout(()=>{s.textContent='details';},1500);} }
+    toast('Details copied', 'ok');
+  });
 }
 
 function genCopy() {
@@ -1499,6 +1709,48 @@ async function resetFlags() {
 
 
 
+
+
+<!-- help modal -->
+<div class="overlay" id="m-help" data-backdrop-close="true" onclick="if(event.target===this)closeModal('m-help')">
+  <div class="modal" onclick="event.stopPropagation()" style="width:420px;max-height:75vh;display:flex;flex-direction:column;overflow:hidden">
+    <div class="modal-title">How to use MultiRoblox</div>
+    <div class="modal-sub">Quick guide to get started</div>
+
+    <div style="display:flex;flex-direction:column;gap:14px;font-size:12.5px;color:var(--t2);line-height:1.65;overflow-y:auto;padding-right:4px;flex:1;min-height:0">
+
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">① Adding Accounts</div>
+        <div>Click <b style="color:var(--t1)">+ Add Account</b> in the sidebar. Choose <b style="color:var(--t1)">Login Page</b> to sign in via Chrome browser — your cookie is captured automatically. Or choose <b style="color:var(--t1)">Paste Cookie</b> to paste a <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">.ROBLOSECURITY</code> cookie directly.</div>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">② Launching Accounts</div>
+        <div>Click the <b style="color:var(--t1)">Launch</b> button on any account card to open Roblox with that account. You can launch multiple accounts simultaneously — each runs in its own isolated Roblox instance.</div>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">③ Generator</div>
+        <div>Go to the <b style="color:var(--t1)">Generator</b> tab. Paste your <b style="color:var(--t1)">BloxGen API key</b> (starts with <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">BLOX-</code>) from <b style="color:var(--t1)">bloxgen.net</b>, then click Generate. The combo and cookie are shown and copied to clipboard automatically.</div>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">④ Fast Flags</div>
+        <div>The <b style="color:var(--t1)">FFlags</b> tab lets you set Roblox client flags (like FPS unlocking or graphics tweaks). Changes are saved to <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">ClientAppSettings.json</code> and applied on the next Roblox launch.</div>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">⑤ Getting Your Cookie</div>
+        <div>Open Chrome → go to <b style="color:var(--t1)">roblox.com</b> → press <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">F12</code> → Application → Cookies → <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">.ROBLOSECURITY</code>. Copy the value and paste it into MultiRoblox.</div>
+      </div>
+
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="closeModal('m-help')">Got it</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>

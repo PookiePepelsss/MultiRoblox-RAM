@@ -22,4 +22,5 @@ contextBridge.exposeInMainWorld('api', {
   readFFlags: () => ipcRenderer.invoke('fflag:read'),
   writeFFlags: (flags) => ipcRenderer.invoke('fflag:write', flags),
   onChromeProgress: (cb) => ipcRenderer.on('chrome:download-progress', (_, data) => cb(data)),
+  getRobloxVersion: () => ipcRenderer.invoke('roblox:getVersion'),
 });
