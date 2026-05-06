@@ -85,7 +85,7 @@ fast flags page lets you edit `ClientAppSettings.json` directly. add flags one b
 
 ## generator
 
-add your accounts to `genaccounts.json` in `%AppData%\multiroblox` as `username:password` per entry. click Generate to get the next one in the list. theres a 60 second cooldown per generate.
+click Generate to get the next one in the list. theres a 60 second cooldown per generate.
 
 ---
 
