@@ -331,23 +331,6 @@ async function getAuthTicket(cookie, csrfToken) {
 
 async function getRobloxVersion() {
   try {
-    const r = await httpsGet('https://offsets.ntgetwritewatch.workers.dev/version');
-    if (r.status === 200 && r.body && r.body.trim().length > 0) {
-      const ver = r.body.trim();
-      if (ver && !ver.includes('<') && ver.length < 100) return ver;
-    }
-  } catch {}
-
-  try {
-    const r = await httpsGet('https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer');
-    if (r.status === 200) {
-      const d = JSON.parse(r.body);
-      if (d && d.clientVersionUpload) return d.clientVersionUpload;
-      if (d && d.version) return d.version;
-    }
-  } catch {}
-
-  try {
     const versionsBase = path.join(os.homedir(), 'AppData', 'Local', 'Roblox', 'Versions');
     if (fs.existsSync(versionsBase)) {
       const dirs = fs.readdirSync(versionsBase)
@@ -380,6 +363,16 @@ let puppeteerBrowserPath = null;
 
 async function ensureChrome() {
   try {
+    // Check common system Chrome install paths first
+    const systemChromePaths = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      path.join(os.homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    ];
+    for (const p of systemChromePaths) {
+      if (fs.existsSync(p)) return p;
+    }
+
     const pb = (() => { try { return require('@puppeteer/browsers'); } catch { return null; } })();
     if (!pb) return null;
     const { install, Browser, detectBrowserPlatform, getInstalledBrowsers } = pb;
@@ -462,19 +455,17 @@ async function puppeteerLogin(chromePath) {
     try {
       const puppeteer = (() => { try { return require('puppeteer-core'); } catch { return null; } })();
       if (!puppeteer) { resolve({ success: false, error: 'puppeteer-core not available in this build.' }); return; }
-      const userDataDir = path.join(app.getPath('userData'), 'chrome-login-profile');
-
       browser = await puppeteer.launch({
         executablePath: chromePath,
         headless: false,
-        userDataDir,
         defaultViewport: null,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled', '--window-size=530,700'],
         ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection'],
       });
 
-      const pages = await browser.pages();
-      const page = pages.length > 0 ? pages[0] : await browser.newPage();
+      // Use the default page that Chrome opens — reuse it instead of opening a second one
+      const defaultPages = await browser.pages();
+      const page = defaultPages.length > 0 ? defaultPages[0] : await browser.newPage();
 
       await page.evaluateOnNewDocument(`
         Object.defineProperty(navigator,'webdriver',{get:()=>false});
