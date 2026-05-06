@@ -474,7 +474,7 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
             <div class="sc-head">About</div>
             <div class="sr"><div class="sr-left"><div class="sr-label">MultiRoblox</div><div class="sr-desc">Version 1.0.0 — launch multiple Roblox accounts simultaneously</div></div></div>
             <div class="sr"><div class="sr-left"><div class="sr-label">Accounts saved</div></div><span class="badge" id="stat-count">0</span></div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Roblox version</div></div><span class="badge" id="stat-rblx-ver">Detecting…</span></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Roblox version</div></div><span class="badge" id="stat-rblx-ver">—</span></div>
           </div>
 
           <!-- Encryption -->
@@ -708,6 +708,8 @@ async function detectRobloxVersion() {
     if (el) el.textContent = ver || 'Not detected';
   } catch {
     document.getElementById('tb-roblox-ver').textContent = '—';
+    const el = document.getElementById('stat-rblx-ver');
+    if (el) el.textContent = 'Not detected';
   }
 }
 
@@ -888,9 +890,9 @@ function backToChoose() {
 
 async function startBrowserLogin() {
   _showPanel('browser');
-  // Show downloading state by default — switches to waiting once Chrome opens
-  document.getElementById('login-dl').style.display = '';
-  document.getElementById('login-waiting').style.display = 'none';
+  // Show waiting state by default — only switch to download UI if Chrome needs to be downloaded
+  document.getElementById('login-dl').style.display = 'none';
+  document.getElementById('login-waiting').style.display = '';
   document.getElementById('dl-bar').style.width = '0%';
   document.getElementById('dl-pct').textContent = '0%';
   const res = await api.openLogin();
@@ -1490,5 +1492,13 @@ async function resetFlags() {
   else toast('Could not reset flags', 'err');
 }
 </script>
+
+
+
+
+
+
+
+
 </body>
 </html>
