@@ -55,7 +55,7 @@ edits `ClientAppSettings.json` directly. you can add flags one by one, paste a f
 
 ## generator
 
-put `username:password` entries in `genaccounts.json` under `%AppData%\multiroblox`. click Generate to pull the next one. 60 second cooldown between each.
+click Generate to pull the next one. 60 second cooldown between each.
 
 ## encryption
 
