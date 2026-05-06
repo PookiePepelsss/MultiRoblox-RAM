@@ -331,15 +331,13 @@ async function getAuthTicket(cookie, csrfToken) {
 
 async function getRobloxVersion() {
   try {
-    const versionsBase = path.join(os.homedir(), 'AppData', 'Local', 'Roblox', 'Versions');
-    if (fs.existsSync(versionsBase)) {
-      const dirs = fs.readdirSync(versionsBase)
-        .filter(d => d.startsWith('version-') && fs.existsSync(path.join(versionsBase, d, 'RobloxPlayerBeta.exe')))
-        .sort().reverse();
-      if (dirs.length > 0) return dirs[0];
+    const r = await httpsGet('https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer');
+    if (r.status === 200) {
+      const d = JSON.parse(r.body);
+      if (d && d.clientVersionUpload) return d.clientVersionUpload;
+      if (d && d.version) return d.version;
     }
   } catch {}
-
   return null;
 }
 
