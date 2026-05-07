@@ -1,5 +1,10 @@
 # MultiRoblox
 
+[![Release](https://img.shields.io/github/v/release/PookiePepelss/multiroblox?style=flat-square&label=download&color=5c5ce0)](https://github.com/PookiePepelss/multiroblox/releases/latest)
+![Platform](https://img.shields.io/badge/platform-windows-333?style=flat-square)
+![Electron](https://img.shields.io/badge/built%20with-electron-47848f?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-3ecf8e?style=flat-square)
+
 run multiple roblox accounts at the same time on windows
 
 grab the exe from [releases](../../releases), no installer needed. or build from source:
