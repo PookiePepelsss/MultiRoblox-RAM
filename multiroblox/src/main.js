@@ -248,9 +248,8 @@ function httpsPost(hostname, urlPath, headers, body) {
 const _csrfCache = new Map();
 const CSRF_TTL = 90_000;
 
-const _ticketCache = new Map();
-const TICKET_TTL     = 25_000;
 const TICKET_MIN_GAP = 8_000;
+let _lastTicketTs = 0;
 
 async function getCSRFToken(cookie) {
   const cached = _csrfCache.get(cookie);
@@ -274,14 +273,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function getAuthTicket(cookie, csrfToken) {
   const now = Date.now();
-  const cached = _ticketCache.get(cookie);
-
-  if (cached && (now - cached.ts) < TICKET_TTL) {
-    return { ok: true, ticket: cached.ticket };
-  }
-
-  if (cached && (now - cached.ts) < TICKET_MIN_GAP) {
-    await sleep(TICKET_MIN_GAP - (now - cached.ts));
+  const gap = now - _lastTicketTs;
+  if (gap < TICKET_MIN_GAP) {
+    await sleep(TICKET_MIN_GAP - gap);
   }
 
   const baseHeaders = {
@@ -303,7 +297,7 @@ async function getAuthTicket(cookie, csrfToken) {
 
     const ticket = res.headers['rbx-authentication-ticket'];
     if (ticket) {
-      _ticketCache.set(cookie, { ticket, ts: Date.now() });
+      _lastTicketTs = Date.now();
       return { ok: true, ticket };
     }
 
@@ -668,14 +662,9 @@ ipcMain.handle('roblox:launch', async (_, accountId, cookie, target) => {
           } else if (parsedUrl.pathname === '/share' || (shareCode && shareType)) {
             const code = shareCode;
             if (!code) return { success: false, error: 'Invalid share link — no code found.' };
-            const linkType = shareType || 'Server';
-            const nativeUri = `roblox://navigation/share_links?code=${code}&type=${linkType}`;
-            await shell.openExternal(nativeUri);
-            _ticketCache.delete(cookie);
-            const accts = loadAccounts();
-            const aidx = accts.findIndex(a => a.id === accountId);
-            if (aidx !== -1) { accts[aidx].lastUsed = new Date().toISOString(); saveAccounts(accts); }
-            return { success: true };
+            const resolved = await resolveShareLink(code, cookie, csrfToken);
+            if (!resolved.ok) return { success: false, error: resolved.error || 'Could not resolve share link.' };
+            launcherUrl = `https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestPrivateGame&placeId=${resolved.placeId}&linkCode=${resolved.linkCode}`;
 
           } else if (placeId) {
             launcherUrl = `https://assetgame.roblox.com/game/placelauncher.ashx?request=RequestGame&placeId=${placeId}&isPlayTogetherGame=false`;
@@ -699,8 +688,6 @@ ipcMain.handle('roblox:launch', async (_, accountId, cookie, target) => {
     }
 
     await shell.openExternal(robloxUri);
-
-    _ticketCache.delete(cookie);
 
     const accounts = loadAccounts();
     const idx = accounts.findIndex(a => a.id === accountId);
