@@ -17,8 +17,6 @@ contextBridge.exposeInMainWorld('api', {
   loadSettings: () => ipcRenderer.invoke('settings:load'),
   saveSettings: (data) => ipcRenderer.invoke('settings:save', data),
   multiInstanceStatus: () => ipcRenderer.invoke('multiinstance:status'),
-  readGenAccounts: () => ipcRenderer.invoke('genaccounts:read'),
-  writeGenAccounts: (list) => ipcRenderer.invoke('genaccounts:write', list),
   readGenHistory: () => ipcRenderer.invoke('genhistory:read'),
   writeGenHistory: (list) => ipcRenderer.invoke('genhistory:write', list),
   clearGenHistory: () => ipcRenderer.invoke('genhistory:clear'),
@@ -27,4 +25,5 @@ contextBridge.exposeInMainWorld('api', {
   onChromeProgress: (cb) => ipcRenderer.on('chrome:download-progress', (_, data) => cb(data)),
   onRobloxClosed: (cb) => ipcRenderer.on('roblox:closed', (_, id) => cb(id)),
   getRobloxVersion: () => ipcRenderer.invoke('roblox:getVersion'),
+  getGameName: (placeId, cookie) => ipcRenderer.invoke('roblox:getGameName', placeId, cookie),
 });
