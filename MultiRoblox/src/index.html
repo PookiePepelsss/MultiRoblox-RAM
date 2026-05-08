@@ -1,0 +1,1812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>MultiRoblox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0e0e10;--s1:#111114;--s2:#18181d;--s3:#1f1f26;--s4:#26262f;
+  --bd:rgba(255,255,255,0.07);--bd2:rgba(255,255,255,0.13);
+  --t1:#f0f0f5;--t2:#9898b4;--t3:#5c5c78;
+  --ac:#5c5ce0;--ac2:rgba(92,92,224,0.14);--ac3:rgba(92,92,224,0.3);
+  --green:#3ecf8e;--gd:rgba(62,207,142,0.1);
+  --red:#f06f6f;--rd:rgba(240,111,111,0.1);
+  --r:10px;--r2:8px;
+  --ease:cubic-bezier(0.25,0.1,0.25,1);
+  --spring:cubic-bezier(0.34,1.4,0.64,1);
+  --smooth:cubic-bezier(0.4,0,0.2,1);
+  --dur:180ms;--tb:38px;--sb:176px;
+}
+body.light{
+  --bg:#f4f4f8;--s1:#ffffff;--s2:#ebebf0;--s3:#e0e0e8;--s4:#d0d0dc;
+  --bd:rgba(0,0,0,0.08);--bd2:rgba(0,0,0,0.15);
+  --t1:#0e0e1a;--t2:#555570;--t3:#9898b4;
+  --ac:#5c5ce0;--ac2:rgba(92,92,224,0.12);--ac3:rgba(92,92,224,0.25);
+  --green:#1a9e62;--gd:rgba(26,158,98,0.1);
+  --red:#d94f4f;--rd:rgba(217,79,79,0.1);
+}
+body{
+  font-family:'Inter',system-ui,sans-serif;
+  font-feature-settings:'cv02','cv03','cv04','cv11';
+  background:var(--bg);color:var(--t1);
+  height:100vh;overflow:hidden;
+  user-select:none;-webkit-user-select:none;
+  -webkit-font-smoothing:antialiased;
+}
+
+
+button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-btn:focus,.tab-btn:focus-visible{outline:none;}
+
+/* titlebar */
+#titlebar{height:var(--tb);display:flex;align-items:center;padding:0 10px 0 0;-webkit-app-region:drag;border-bottom:1px solid var(--bd);flex-shrink:0}
+.tb-brand{width:var(--sb);flex-shrink:0;display:flex;align-items:center;padding:0 16px;border-right:1px solid var(--bd);height:100%}
+.tb-name{font-size:13px;font-weight:600;letter-spacing:-.02em;color:var(--t1)}
+.tb-drag{flex:1;height:100%;display:flex;align-items:center;justify-content:center}
+.tb-version{font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:500;color:var(--t2);background:var(--s2);border:1px solid var(--bd);border-radius:5px;padding:2px 9px;letter-spacing:.01em;pointer-events:none;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tb-controls{display:flex;gap:1px;-webkit-app-region:no-drag}
+.tb-btn{width:32px;height:28px;border-radius:6px;border:none;background:transparent;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth)}
+.tb-btn:hover{background:var(--s3);color:var(--t2)}
+.tb-btn:active{opacity:.7}
+.tb-btn.close:hover{background:var(--rd);color:var(--red)}
+.tb-btn .material-icons-round{font-size:16px}
+
+/* layout */
+#layout{display:flex;height:calc(100vh - var(--tb));overflow:hidden}
+
+/* sidebar */
+#sidebar{width:var(--sb);flex-shrink:0;background:var(--s1);border-right:1px solid var(--bd);display:flex;flex-direction:column;padding:10px 8px;overflow:hidden}
+.nav-item{width:100%;display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--r2);border:none;background:transparent;color:var(--t3);cursor:pointer;font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;text-align:left;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth)}
+.nav-item:hover{color:var(--t2)}
+
+.nav-item.active{background:var(--ac2);color:var(--ac)}
+.nav-item .material-icons-round{font-size:17px;flex-shrink:0}
+.nav-item+.nav-item{margin-top:2px}
+.nav-spacer{flex:1}
+.nav-div{height:1px;background:var(--bd);margin:8px 2px;flex-shrink:0}
+.nav-add{width:100%;display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:var(--r2);border:1px solid var(--bd);background:transparent;color:var(--t3);cursor:pointer;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;text-align:left;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth),border-color var(--dur) var(--smooth)}
+.nav-add:hover{background:var(--ac2);color:var(--ac);border-color:var(--ac)}
+.nav-add:active{opacity:.7}
+.nav-add .material-icons-round{font-size:15px;flex-shrink:0}
+
+/* main content area */
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+
+/* pages stack on top of each other, only active one shows */
+.page-container{flex:1;display:grid;grid-template-areas:'stack';overflow:hidden}
+.page{grid-area:stack;display:flex;flex-direction:column;overflow:hidden;opacity:0;pointer-events:none;transform:translateY(6px);transition:opacity 200ms var(--smooth),transform 200ms var(--smooth)}
+.page.active{opacity:1;pointer-events:all;transform:translateY(0)}
+
+/* page header */
+.ph{padding:7px 18px 7px;flex-shrink:0;border-bottom:1px solid var(--bd)}
+.ph-title{font-size:14px;font-weight:600;letter-spacing:-.02em}
+.ph-sub{font-size:12px;color:var(--t2);margin-top:2px;font-weight:400}
+
+/* scrollable areas */
+.scroll-area{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--s4) transparent}
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-thumb{background:var(--s4);border-radius:3px}
+
+/* account grid */
+.grid-wrap{flex:1;overflow-y:auto;padding:12px 18px 18px;scrollbar-width:thin;scrollbar-color:var(--s4) transparent}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,155px));gap:9px;justify-content:start;align-items:stretch}
+
+/* account cards */
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:13px 13px 11px;transition:border-color var(--dur) var(--smooth),box-shadow 220ms var(--smooth);position:relative;overflow:hidden;display:flex;flex-direction:column;height:176px}
+.card:hover{border-color:var(--bd2);box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.card-dot{position:absolute;top:9px;right:9px;width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 0 0 rgba(240,111,111,.5)}
+.card-dot.launched{background:var(--green);box-shadow:0 0 0 0 rgba(62,207,142,.5);animation:dot-pulse-green 1.8s ease-in-out infinite}
+.card-dot:not(.launched){animation:dot-pulse-red 1.8s ease-in-out infinite}
+@keyframes dot-pulse-red{0%,100%{box-shadow:0 0 0 0 rgba(240,111,111,.5)}60%{box-shadow:0 0 0 5px rgba(240,111,111,0)}}
+@keyframes dot-pulse-green{0%,100%{box-shadow:0 0 0 0 rgba(62,207,142,.5)}60%{box-shadow:0 0 0 5px rgba(62,207,142,0)}}
+.card-av{width:38px;height:38px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;margin-bottom:9px;overflow:hidden;flex-shrink:0}
+.card-av img{width:100%;height:100%;object-fit:cover}
+.card-name{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;letter-spacing:-.01em}
+.card-uid{font-size:11px;color:var(--t2);font-weight:500;margin-bottom:10px}
+.card-game{font-size:11px;color:var(--ac);background:var(--ac2);border-radius:5px;padding:2px 7px;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none}
+.card-game.visible{display:block}
+.card-row{display:flex;gap:5px;margin-top:auto}
+.gen-hist-item{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:12.5px;font-family:'Inter',sans-serif;font-weight:500;color:var(--t2);border-top:1px solid var(--bd);cursor:default}
+.gen-hist-item:first-child{border-top:none}
+.gen-hist-item:hover{background:var(--s3)}
+.gen-hist-item .gh-user{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t1)}
+.gen-hist-item .gh-actions{display:flex;gap:4px;flex-shrink:0}
+.card[draggable]{cursor:grab}
+.card[draggable]:active{cursor:grabbing}
+.card.drag-over{border-color:var(--ac);box-shadow:0 0 0 2px var(--ac3)}
+.card.dragging{opacity:.35}
+.drag-handle{position:absolute;top:6px;right:6px;color:var(--t3);opacity:0;transition:opacity var(--dur) var(--smooth);cursor:grab;font-size:14px;line-height:1}
+.card:hover .drag-handle{opacity:.5}
+.card-add{background:transparent;border:1px dashed var(--bd);border-radius:var(--r);padding:13px 13px 11px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;cursor:pointer;transition:border-color var(--dur) var(--smooth),background var(--dur) var(--smooth);height:176px}
+.card-add:hover{border-color:var(--ac);background:var(--ac2)}
+.card-add:active{border-color:var(--ac);background:var(--ac2)}
+.card-add:hover .card-add-icon{color:var(--ac)}
+.card-add:hover .card-add-label{color:var(--ac)}
+.card-add-icon{font-size:22px;color:var(--t3);transition:color var(--dur) var(--smooth)}
+.card-add-label{font-size:11.5px;font-weight:500;color:var(--t3);transition:color var(--dur) var(--smooth)}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;border:none;border-radius:var(--r2);font-family:'Inter',sans-serif;font-size:11.5px;font-weight:500;cursor:pointer;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth),border-color var(--dur) var(--smooth),opacity var(--dur) var(--smooth),transform 180ms var(--spring),box-shadow var(--dur) var(--smooth)}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:scale(0.95) translateY(0);opacity:.85}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none !important}
+.btn .material-icons-round{font-size:13px}
+.btn-launch{flex:1;padding:6px 0;background:var(--ac2);color:var(--ac)}
+.btn-launch:hover{background:var(--ac);color:#fff;box-shadow:0 4px 12px var(--ac3)}
+.btn-edit{width:28px;height:28px;background:var(--s2);color:var(--t3)}
+.btn-edit:hover{background:var(--s4);color:var(--t1)}
+.btn-del{width:28px;height:28px;background:var(--s2);color:var(--t3)}
+.btn-del:hover{background:var(--rd);color:var(--red)}
+.btn-primary{padding:8px 16px;background:var(--ac);color:#fff;font-size:12.5px}
+.btn-primary:hover{opacity:.88;box-shadow:0 4px 14px var(--ac3)}
+.btn-ghost{padding:8px 14px;background:transparent;color:var(--t2);border:1px solid var(--bd);font-size:12.5px}
+.btn-ghost:hover{background:var(--s3);color:var(--t1);border-color:var(--bd2)}
+.btn-danger{padding:8px 14px;background:var(--rd);color:var(--red);font-size:12.5px}
+.btn-danger:hover{background:var(--red);color:#fff}
+
+/* empty state */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:7px;padding:30px}
+.empty .material-icons-round{font-size:34px;color:var(--t3);opacity:.25;margin-bottom:3px}
+.empty-title{font-size:13.5px;font-weight:600;color:var(--t2);letter-spacing:-.01em}
+.empty-sub{font-size:12px;color:var(--t2);text-align:center;max-width:190px;line-height:1.6;font-weight:400}
+
+/* settings rows */
+.sw{flex:1;overflow-y:auto;padding:12px 18px 18px;scrollbar-width:thin;scrollbar-color:var(--s4) transparent}
+.sc{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;margin-bottom:10px}
+.sc-head{padding:9px 14px;border-bottom:1px solid var(--bd);font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--t3)}
+.sr{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--bd);gap:12px}
+.sr:last-child{border-bottom:none}
+.sr-left{flex:1;min-width:0}
+.sr-label{font-size:13px;font-weight:500;margin-bottom:2px;color:var(--t1);letter-spacing:-.01em}
+.sr-desc{font-size:12px;color:var(--t2);line-height:1.6;font-weight:400}
+.badge{font-size:10.5px;font-weight:600;padding:2px 9px;border-radius:5px;background:var(--ac2);color:var(--ac);flex-shrink:0;white-space:nowrap;letter-spacing:.01em}
+.badge.g{background:var(--gd);color:var(--green)}
+.sr-input{background:var(--bg);border:1px solid var(--bd);border-radius:var(--r2);padding:7px 11px;color:var(--t1);font-size:12.5px;font-family:'Inter',sans-serif;font-weight:500;outline:none;width:200px;transition:border-color var(--dur) var(--smooth),box-shadow var(--dur) var(--smooth)}
+.sr-input:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--ac2)}
+.sr-input::placeholder{color:var(--t3)}
+
+/* custom dropdown */
+.cdd{position:relative;width:100%;flex-shrink:0}
+.cdd-trigger{display:flex;align-items:center;gap:8px;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r2);padding:7px 10px;color:var(--t1);font-size:12.5px;font-family:'Inter',sans-serif;cursor:pointer;transition:border-color var(--dur) var(--smooth),box-shadow var(--dur) var(--smooth),background var(--dur) var(--smooth);-webkit-app-region:no-drag}
+.cdd-trigger:hover{border-color:var(--bd2);background:var(--s2)}
+.cdd-trigger.open{border-color:var(--ac);box-shadow:0 0 0 3px var(--ac2);background:var(--s1)}
+.cdd-label{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.cdd-badge{font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;background:var(--ac2);color:var(--ac);flex-shrink:0}
+.cdd-badge.green{background:var(--gd);color:var(--green)}
+.cdd-badge.muted{background:var(--s4);color:var(--t2)}
+.cdd-arrow{font-size:16px;color:var(--t3);transition:transform var(--dur) var(--smooth);flex-shrink:0}
+.cdd-trigger.open .cdd-arrow{transform:rotate(180deg)}
+.cdd-menu{position:absolute;top:calc(100% + 5px);left:0;right:0;background:var(--s2);border:1px solid var(--bd);border-radius:var(--r2);overflow:hidden;z-index:500;opacity:0;transform:translateY(-6px) scale(0.97);pointer-events:none;transition:opacity 160ms var(--smooth),transform 180ms var(--spring);box-shadow:0 12px 36px rgba(0,0,0,.6)}
+.cdd-menu.open{opacity:1;transform:translateY(0) scale(1);pointer-events:all}
+.cdd-option{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;transition:background var(--dur) var(--smooth);border-bottom:1px solid var(--bd)}
+.cdd-option:last-child{border-bottom:none}
+.cdd-option:hover{background:var(--s3)}
+.cdd-option.selected{background:var(--ac2)}
+.cdd-opt-left{flex:1;display:flex;flex-direction:column;gap:2px}
+.cdd-opt-name{font-size:12.5px;font-weight:500;color:var(--t1)}
+.cdd-opt-desc{font-size:11px;color:var(--t3);line-height:1.4;font-weight:400}
+.cdd-option.selected .cdd-opt-name{color:var(--ac)}
+.cdd-option.selected .cdd-opt-desc{color:rgba(92,92,224,.55)}
+.cdd-check{font-size:15px;color:var(--ac);flex-shrink:0;opacity:0;transition:opacity var(--dur) var(--smooth)}
+.cdd-option.selected .cdd-check{opacity:1}
+
+/* modals */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;z-index:100;opacity:0;pointer-events:none;transition:opacity 200ms var(--smooth)}
+.overlay.open{opacity:1;pointer-events:all}
+.modal{background:var(--s1);border:1px solid var(--bd2);border-radius:13px;width:350px;padding:22px;transform:scale(0.94) translateY(12px);transition:transform 260ms var(--spring),opacity 200ms var(--smooth);opacity:0;box-shadow:0 28px 64px rgba(0,0,0,.75)}
+.overlay.open .modal{transform:scale(1) translateY(0);opacity:1}
+.modal-title{font-size:15px;font-weight:700;letter-spacing:-.03em;margin-bottom:4px}
+.modal-sub{font-size:12.5px;color:var(--t2);margin-bottom:18px;line-height:1.6;font-weight:400}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:11px;font-weight:600;color:var(--t2);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px}
+.field input{width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r2);padding:8px 11px;color:var(--t1);font-size:12.5px;font-family:'Inter',sans-serif;font-weight:500;outline:none;transition:border-color var(--dur) var(--smooth),box-shadow var(--dur) var(--smooth)}
+.field input:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--ac2)}
+.field input::placeholder{color:var(--t3)}
+.field-hint{font-size:12px;color:var(--t2);margin-top:6px;line-height:1.6;font-weight:400}
+.mst{display:flex;align-items:center;gap:7px;padding:9px 11px;border-radius:var(--r2);font-size:12px;font-weight:500;margin-bottom:12px;transition:all var(--dur) var(--smooth)}
+.mst.hidden{display:none}
+.mst.load{background:var(--s3);color:var(--t2)}
+.mst.ok{background:var(--gd);color:var(--green)}
+.mst.err{background:var(--rd);color:var(--red)}
+.mst .material-icons-round{font-size:14px;flex-shrink:0}
+.modal-actions{display:flex;gap:7px;justify-content:flex-end;margin-top:18px}
+.login-wait{display:flex;flex-direction:column;align-items:center;gap:9px;padding:20px 0 6px}
+.login-wait p{font-size:12.5px;color:var(--t2);text-align:center;line-height:1.6;font-weight:400}
+.prev{display:flex;align-items:center;gap:9px;padding:10px 12px;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r2);margin-bottom:14px}
+.prev-av{width:32px;height:32px;border-radius:50%;background:var(--s3);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;overflow:hidden}
+.prev-av img{width:100%;height:100%;object-fit:cover}
+.prev-name{font-size:13px;font-weight:600;letter-spacing:-.01em}
+.prev-uid{font-size:11.5px;color:var(--t2);font-weight:500}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{width:13px;height:13px;flex-shrink:0;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 500ms linear infinite;display:inline-block}
+.toast{position:fixed;bottom:14px;right:14px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--r);padding:9px 14px;font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:6px;z-index:200;opacity:0;transform:translateY(10px);transition:opacity 200ms var(--smooth),transform 240ms var(--spring);pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,.5)}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast .material-icons-round{font-size:14px}
+.toast.ok{border-color:rgba(62,207,142,.3);color:var(--green)}
+.toast.err{border-color:rgba(240,111,111,.3);color:var(--red)}
+
+/* tab bars */
+.tab-bar{display:flex;gap:5px;padding:8px 18px 0;flex-shrink:0;margin-bottom:6px}
+.num-wrap{position:relative;display:inline-flex;align-items:center;flex-shrink:0}
+.num-wrap input[type=number]{-moz-appearance:textfield;appearance:textfield;padding-right:22px}
+.num-wrap input[type=number]::-webkit-inner-spin-button,.num-wrap input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.num-arrows{position:absolute;right:4px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:1px}
+.num-arrow{width:14px;height:11px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:3px;color:var(--t3);transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth);user-select:none;-webkit-app-region:no-drag}
+.num-arrow:hover{background:var(--s4);color:var(--t1)}
+.num-arrow svg{width:8px;height:8px;display:block}
+.game-id-row{display:flex;align-items:center;gap:7px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 11px;margin-bottom:14px}
+.game-id-val{flex:1;font-family:monospace;font-size:13px;font-weight:600;color:var(--t1);letter-spacing:.02em;word-break:break-all}
+.game-thumb-preview{width:100%;height:110px;object-fit:cover;border-radius:8px;background:var(--s3);display:block;margin-bottom:14px}
+.chart-search-wrap{padding:0 18px 7px;flex-shrink:0;box-sizing:border-box}
+.chart-search-input{width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r2);padding:7px 11px 7px 30px;color:var(--t1);font-size:11.5px;font-family:'Inter',sans-serif;font-weight:500;outline:none;box-sizing:border-box;transition:border-color var(--dur) var(--smooth),box-shadow var(--dur) var(--smooth)}
+.chart-search-input:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--ac2)}
+.chart-search-wrap-inner{position:relative}
+.chart-search-icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--t3);pointer-events:none}
+.tab-btn{padding:7px 12px;border-radius:6px;border:1px solid var(--bd);background:transparent;color:var(--t3);font-family:'Inter',sans-serif;font-size:11.5px;font-weight:500;cursor:pointer;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth),border-color var(--dur) var(--smooth)}
+.tab-btn:hover{background:var(--s3);color:var(--t2)}
+.tab-btn.active{background:var(--ac2);color:var(--ac);border-color:var(--ac3)}
+
+/* charts page */
+.charts-inner{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.charts-scroll{flex:1;overflow-y:auto;padding:12px 18px 18px;scrollbar-width:thin;scrollbar-color:var(--s4) transparent}
+.charts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:7px}
+.chart-card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:border-color var(--dur) var(--smooth),transform 220ms var(--spring),box-shadow 220ms var(--smooth);animation:cardIn 220ms var(--spring) both}
+.chart-card:hover{border-color:var(--bd2);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.chart-card-thumb{width:100%;height:72px;object-fit:cover;display:block;background:var(--s3)}
+.chart-card-thumb-ph{width:100%;height:72px;background:var(--s3);display:flex;align-items:center;justify-content:center}
+.chart-card-thumb-ph .material-icons-round{font-size:28px;color:var(--t3);opacity:.35}
+.chart-card-body{padding:6px 9px 7px}
+.chart-card-rank{font-size:9.5px;font-weight:700;color:var(--t2);letter-spacing:.07em;text-transform:uppercase;margin-bottom:2px}
+.chart-card-name{font-size:12px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px;letter-spacing:-.01em}
+.chart-card-stat{font-size:10.5px;color:var(--green);display:flex;align-items:center;gap:3px;font-weight:500}
+.chart-card-stat .material-icons-round{font-size:11px}
+.charts-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:var(--t2);font-size:12.5px;padding:40px;font-weight:400}
+
+/* fflag editor */
+.fflag-inner{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.fflag-wrap{flex:1;overflow-y:auto;padding:12px 18px 18px;scrollbar-width:thin;scrollbar-color:var(--s4) transparent}
+.fflag-sc{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;margin-bottom:10px}
+.fflag-toolbar{display:flex;gap:6px;padding:12px 18px 8px;flex-shrink:0;align-items:center}
+.btn-sm{padding:7px 10px;font-size:12px;gap:4px}
+#ff-table-wrap{flex:1;overflow-y:auto;padding:0 18px 8px}
+.ff-table{width:100%;border-collapse:collapse;font-size:13px}
+.ff-table thead th{position:sticky;top:0;background:var(--s2);padding:7px 10px;text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--bd);z-index:1}
+.ff-table tbody tr{border-bottom:1px solid var(--bd);animation:ffRowIn 180ms var(--spring) both}.ff-table tbody tr.ff-removing{animation:ffRowOut 160ms var(--smooth) forwards}@keyframes ffRowIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}@keyframes ffRowOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(8px);height:0;padding:0}}
+.ff-table tbody tr:last-child{border-bottom:none}
+.ff-table td{padding:5px 6px;vertical-align:middle}
+.ff-key-input{background:transparent;border:1px solid transparent;border-radius:5px;color:var(--t1);font-size:12.5px;font-family:'JetBrains Mono',monospace;padding:4px 7px;width:100%;min-width:160px;transition:border-color .15s}
+.ff-key-input:focus{outline:none;border-color:var(--ac);background:var(--s2)}
+.ff-val-input{background:transparent;border:1px solid transparent;border-radius:5px;color:var(--ac);font-size:12.5px;font-family:'JetBrains Mono',monospace;padding:4px 7px;width:100%;min-width:80px;transition:border-color .15s}
+.ff-val-input:focus{outline:none;border-color:var(--ac);background:var(--s2)}
+.ff-del-btn{background:none;border:none;color:var(--t3);cursor:pointer;padding:4px;border-radius:4px;display:flex;align-items:center;transition:color .15s,background .15s}
+.ff-del-btn:hover{color:#e05252;background:rgba(224,82,82,.1)}
+#ff-fake-tab{display:flex;flex-direction:column;flex:1;overflow:hidden}
+.fflag-head{padding:9px 14px;border-bottom:1px solid var(--bd);font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);display:flex;align-items:center;justify-content:space-between}
+.fflag-row{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--bd);gap:12px}
+.fflag-row:last-child{border-bottom:none}
+.fflag-left{flex:1;min-width:0}
+.fflag-name{font-size:11px;font-weight:600;font-family:'Inter',monospace;color:var(--t1);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fflag-desc{font-size:11px;color:var(--t2);line-height:1.4;font-weight:400}
+.fflag-val{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:5px 9px;color:var(--t1);font-size:12px;font-family:'Inter',sans-serif;font-weight:500;outline:none;width:100px;transition:border-color var(--dur) var(--smooth),box-shadow var(--dur) var(--smooth);-webkit-app-region:no-drag;flex-shrink:0}
+.fflag-val:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--ac2)}
+.fflag-val.w60{width:64px}
+.fflag-val:disabled{opacity:.35;cursor:not-allowed}
+.ff-toggle{position:relative;width:36px;height:20px;flex-shrink:0}
+.ff-toggle input{opacity:0;width:0;height:0;position:absolute}
+.ff-slider{position:absolute;inset:0;background:var(--s4);border-radius:10px;cursor:pointer;transition:background var(--dur) var(--smooth)}
+.ff-slider::before{content:'';position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform var(--dur) var(--spring)}
+.ff-toggle input:checked+.ff-slider{background:var(--ac)}
+.ff-toggle input:checked+.ff-slider::before{transform:translateX(16px)}
+.fflag-json-area{width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r2);padding:10px 12px;color:var(--t1);font-size:11.5px;font-family:'Inter',monospace;font-weight:500;outline:none;resize:vertical;min-height:220px;transition:border-color var(--dur) var(--smooth),box-shadow var(--dur) var(--smooth);-webkit-app-region:no-drag}
+.fflag-json-area:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--ac2)}
+.fflag-actions{display:flex;gap:8px;align-items:center;padding:10px 18px;flex-shrink:0;border-top:1px solid var(--bd);background:var(--bg)}
+.fps-row{display:flex;align-items:center;gap:10px}
+.fps-slider{-webkit-appearance:none;appearance:none;width:130px;height:4px;border-radius:2px;background:var(--s4);outline:none;cursor:pointer;-webkit-app-region:no-drag;flex-shrink:0}
+.fps-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--ac);cursor:pointer;transition:transform var(--dur) var(--spring)}
+.fps-slider::-webkit-slider-thumb:hover{transform:scale(1.2)}
+.fps-val-label{font-size:12px;font-family:'Inter',sans-serif;font-weight:600;color:var(--ac);min-width:28px;text-align:right;flex-shrink:0}
+
+/* tab panel transitions */
+.tab-panel{display:none;flex:1;flex-direction:column;overflow:hidden;animation:panelIn 160ms var(--smooth) both}
+.tab-panel.active{display:flex}
+@keyframes panelIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+
+<div id="titlebar">
+  <div class="tb-brand">
+    <div class="tb-name">MultiRoblox</div>
+  </div>
+  <span class="tb-version" id="tb-roblox-ver" style="margin-left:12px;flex-shrink:0">—</span>
+  <div class="tb-drag"></div>
+  <button class="tb-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark" style="-webkit-app-region:no-drag"><span class="material-icons-round" id="theme-icon" style="font-size:15px">light_mode</span></button>
+  <button class="tb-btn" onclick="openModal('m-help')" title="Help" style="-webkit-app-region:no-drag"><span class="material-icons-round" style="font-size:15px">help_outline</span></button>
+  <div class="tb-controls">
+    <button class="tb-btn" onclick="api.minimize()"><span class="material-icons-round">remove</span></button>
+    <button class="tb-btn" onclick="api.maximize()"><span class="material-icons-round">crop_square</span></button>
+    <button class="tb-btn close" onclick="api.close()"><span class="material-icons-round">close</span></button>
+  </div>
+</div>
+
+<div id="layout">
+  <nav id="sidebar">
+    <button class="nav-item active" id="nav-accounts" onclick="goTo('accounts')">
+      <span class="material-icons-round">manage_accounts</span>Accounts
+    </button>
+    <button class="nav-item" id="nav-charts" onclick="goTo('charts')">
+      <span class="material-icons-round">bar_chart</span>Charts
+    </button>
+    <button class="nav-item" id="nav-fflag" onclick="goTo('fflag')">
+      <span class="material-icons-round">tune</span>Fast Flags
+    </button>
+    <button class="nav-item" id="nav-generator" onclick="goTo('generator')">
+      <span class="material-icons-round">shuffle</span>Generator
+    </button>
+    <button class="nav-item" id="nav-settings" onclick="goTo('settings')">
+      <span class="material-icons-round">settings</span>Settings
+    </button>
+    <div class="nav-spacer"></div>
+    <div class="nav-div"></div>
+    <button class="nav-add" onclick="openLogin()">
+      <span class="material-icons-round">add_circle_outline</span>Add account
+    </button>
+  </nav>
+
+  <main id="main">
+    <div class="page-container">
+
+      <!-- accounts page -->
+      <div class="page active" id="page-accounts">
+        <div class="ph">
+          <div class="ph-title">Accounts</div>
+          <div class="ph-sub" id="acct-sub">Loading…</div>
+        </div>
+        <div class="grid-wrap">
+          <div class="grid" id="grid"></div>
+          <div class="empty" id="empty" style="display:none">
+            <span class="material-icons-round">account_circle</span>
+            <div class="empty-title">No accounts</div>
+            <div class="empty-sub">Click "Add account" to sign in with Roblox.</div>
+            <button class="btn btn-primary" style="margin-top:8px;font-size:11.5px;padding:6px 14px" onclick="openLogin()">Add account</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- charts page -->
+      <div class="page" id="page-charts">
+        <div class="ph" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div>
+            <div class="ph-title">Charts</div>
+            <div class="ph-sub">Trending &amp; top games on Roblox</div>
+          </div>
+          <button class="btn btn-ghost" style="font-size:11px;padding:7px 10px;flex-shrink:0" onclick="loadCharts()">
+            <span class="material-icons-round" style="font-size:13px">refresh</span>Refresh
+          </button>
+        </div>
+        <div class="charts-inner">
+        <div class="tab-bar" style="flex-shrink:0">
+          <button class="tab-btn active" id="ctab-popular" onclick="switchChartTab('popular')">Top Playing Now</button>
+          <button class="tab-btn" id="ctab-trending" onclick="switchChartTab('trending')">Top Rated</button>
+          <button class="tab-btn" id="ctab-favorited" onclick="switchChartTab('favorited')">Top Earning</button>
+        </div>
+        <div class="chart-search-wrap" style="padding:0 18px 7px">
+          <div class="chart-search-wrap-inner">
+            <span class="material-icons-round chart-search-icon">search</span>
+            <input class="chart-search-input" id="chart-search" type="text" placeholder="Search games…" oninput="filterCharts(this.value)"/>
+          </div>
+        </div>
+        <div class="charts-scroll">
+          <div id="charts-loading" class="charts-loading" style="margin-top:20px">
+            <div class="spin" style="width:18px;height:18px;border-width:2.5px;color:var(--ac)"></div>
+            <span>Loading games…</span>
+          </div>
+          <div class="charts-grid" id="charts-grid" style="display:none"></div>
+          <div class="empty" id="charts-empty" style="display:none">
+            <span class="material-icons-round">wifi_off</span>
+            <div class="empty-title">Couldn't load games</div>
+            <div class="empty-sub">Check your connection and press Refresh.</div>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      <!-- fast flags page -->
+      <div class="page" id="page-fflag">
+        <div class="ph">
+          <div class="ph-title">Fast Flag Editor</div>
+          <div class="ph-sub">Edit ClientAppSettings.json — applied on next Roblox launch</div>
+        </div>
+        <div class="fflag-inner">
+        <div class="fflag-toolbar">
+          <button class="btn btn-primary btn-sm" onclick="ffAddRow()"><span class="material-icons-round" style="font-size:14px">add</span>Add Flag</button>
+          <button class="btn btn-ghost btn-sm" onclick="ffImportJson()"><span class="material-icons-round" style="font-size:14px">upload</span>Import JSON</button>
+          <button class="btn btn-ghost btn-sm" onclick="ffExportJson()"><span class="material-icons-round" style="font-size:14px">download</span>Export JSON</button>
+          <button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="ffResetAll()"><span class="material-icons-round" style="font-size:14px">delete_sweep</span>Reset All</button>
+        </div>
+        <div id="ff-fake-tab">
+          <div id="ff-table-wrap">
+            <table class="ff-table" id="ff-table">
+              <thead><tr><th>Flag Name</th><th>Value</th><th></th></tr></thead>
+              <tbody id="ff-tbody"></tbody>
+            </table>
+            <div id="ff-empty" style="display:none;padding:32px;text-align:center;color:var(--t3);font-size:13px">
+              <span class="material-icons-round" style="font-size:32px;display:block;margin-bottom:8px;opacity:.4">flag</span>
+              No flags set. Click <b>Add Flag</b> to get started.
+            </div>
+          </div>
+        </div>
+
+        <!-- import json -->
+        <div class="overlay" id="m-ff-import" data-backdrop-close="true">
+          <div class="modal" onclick="event.stopPropagation()" style="width:460px">
+            <div class="modal-title">Import JSON</div>
+            <div class="modal-sub" style="margin-bottom:10px">Paste ClientAppSettings.json content. Existing flags will be merged.</div>
+            <textarea id="ff-import-area" class="fflag-json-area" style="height:180px" spellcheck="false" placeholder='{"DFIntTaskSchedulerTargetFps":"0"}'></textarea>
+            <div class="modal-actions">
+              <button class="btn btn-ghost" onclick="closeModal('m-ff-import')">Cancel</button>
+              <button class="btn btn-primary" onclick="ffDoImport()">Import</button>
+            </div>
+          </div>
+        </div>
+
+          <div class="fflag-actions">
+            <button class="btn btn-primary" onclick="saveFlags()"><span class="material-icons-round">save</span>Save &amp; Apply</button>
+            <button class="btn btn-ghost" onclick="loadFlags()"><span class="material-icons-round">refresh</span>Reload</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- generator page -->
+      <div class="page" id="page-generator" style="overflow-y:auto">
+        <div class="ph">
+          <div class="ph-title">Generator</div>
+          <div class="ph-sub">Generate a Roblox alt via BloxGen API</div>
+        </div>
+        <div class="sw">
+          <div class="sc">
+            <div class="sc-head">API Key</div>
+            <div class="sr">
+              <input type="password" id="gen-apikey" class="sr-input" placeholder="BLOX-XXXXXXXXXXXXXXXX" style="flex:1;width:auto;font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;color:var(--t1)"/>
+              <button class="btn btn-ghost" style="font-size:12px;padding:7px 10px;flex-shrink:0" onclick="genToggleKey()" id="gen-eye-btn" title="Show/hide key">
+                <span class="material-icons-round" id="gen-eye-icon" style="font-size:14px">visibility</span>
+              </button>
+            </div>
+          </div>
+          <div class="sc">
+            <div class="sc-head">Output</div>
+            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
+              <div style="width:100%;display:flex;align-items:stretch;gap:8px">
+                <input type="text" id="gen-output" class="sr-input" readonly placeholder="click Generate to create an account" style="flex:1;width:auto;font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;color:var(--t1);cursor:default;border-radius:var(--r2)"/>
+                <button id="gen-copy-btn" class="btn btn-ghost" style="padding:7px 12px;flex-shrink:0;border-radius:var(--r2)" onclick="genCopy()" title="Copy combo (user:pass)">
+                  <span class="material-icons-round" style="font-size:15px">content_copy</span>
+                  <span style="font-size:11.5px">combo</span>
+                </button>
+              </div>
+              <div id="gen-counter" style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--t3);letter-spacing:.02em"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button id="gen-btn" class="btn btn-primary" style="flex:1;justify-content:center" onclick="genCombo()">
+              <span class="material-icons-round" style="font-size:15px">bolt</span>Generate
+            </button>
+          </div>
+          <div class="sc" id="gen-history-sc" style="display:none;margin-top:12px">
+            <div class="sc-head" style="display:flex;align-items:center;justify-content:space-between;padding-right:10px">
+              History
+              <button class="btn btn-ghost" onclick="genClearHistory()">Clear</button>
+            </div>
+            <div id="gen-history-list" style="display:flex;flex-direction:column;gap:1px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--s4) transparent"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- settings page -->
+      <div class="page" id="page-settings">
+        <div class="ph">
+          <div class="ph-title">Settings</div>
+          <div class="ph-sub">App preferences &amp; security</div>
+        </div>
+        <div class="sw">
+
+          <!-- Info row -->
+          <div class="sc">
+            <div class="sc-head">About</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">MultiRoblox</div><div class="sr-desc">Version 1.0.0 — launch multiple Roblox accounts simultaneously</div></div></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Accounts saved</div></div><span class="badge" id="stat-count">0</span></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Roblox version</div></div><span class="badge" id="stat-rblx-ver">—</span></div>
+          </div>
+
+          <!-- Encryption -->
+          <div class="sc">
+            <div class="sc-head">Encryption</div>
+            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
+              <div class="sr-left"><div class="sr-label">Algorithm</div><div class="sr-desc">Used to encrypt cookies stored on disk.</div></div>
+              <div class="cdd" id="cdd-enc" style="width:100%">
+                <div class="cdd-trigger" id="cdd-enc-trigger" onclick="toggleCdd('enc')">
+                  <span class="cdd-label" id="cdd-enc-label">AES-256-GCM</span>
+                  <span class="cdd-badge" id="cdd-enc-badge">Recommended</span>
+                  <span class="material-icons-round cdd-arrow">expand_more</span>
+                </div>
+                <div class="cdd-menu" id="cdd-enc-menu">
+                  <div class="cdd-option selected" data-value="aes-256-gcm" onclick="selectCdd('enc','aes-256-gcm')">
+                    <div class="cdd-opt-left"><div class="cdd-opt-name">AES-256-GCM</div><div class="cdd-opt-desc">Authenticated — tamper-proof</div></div>
+                    <span class="badge g">Best</span><span class="material-icons-round cdd-check">check</span>
+                  </div>
+                  <div class="cdd-option" data-value="aes-256-cbc" onclick="selectCdd('enc','aes-256-cbc')">
+                    <div class="cdd-opt-left"><div class="cdd-opt-name">AES-256-CBC</div><div class="cdd-opt-desc">Classic block cipher</div></div>
+                    <span class="badge muted">Standard</span><span class="material-icons-round cdd-check">check</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
+              <div class="sr-left" style="width:100%"><div class="sr-label">Custom passphrase</div><div class="sr-desc">Leave blank to use the machine-bound key.</div></div>
+              <div style="width:100%;display:flex;gap:8px;align-items:center">
+                <input type="password" class="sr-input" id="custom-key" placeholder="Enter passphrase…" style="flex:1;width:auto" oninput="onKeyInput()"/>
+                <button class="btn btn-ghost" style="font-size:12px;padding:7px 12px" onclick="toggleKeyVisibility()" title="Show/hide">
+                  <span class="material-icons-round" style="font-size:14px" id="key-vis-icon">visibility</span>
+                </button>
+                <button class="btn btn-primary" style="font-size:12px;padding:7px 12px" onclick="saveKeySettings()" id="btn-save-key">Save</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Multi-instance -->
+          <div class="sc">
+            <div class="sc-head">Multi-Instance</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Multiple Roblox instances</div><div class="sr-desc">Holds the singleton mutex so multiple clients run at once.</div></div><span class="badge g">Always On</span></div>
+          </div>
+
+          <!-- Data -->
+          <div class="sc">
+            <div class="sc-head">Data &amp; Privacy</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Storage</div><div class="sr-desc">Cookies are encrypted and stored locally. Nothing leaves your device.</div></div><span class="badge g">Local only</span></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Clear all accounts</div><div class="sr-desc">Remove all saved accounts and sign-in data.</div></div><button class="btn btn-danger" onclick="clearAll()">Clear all</button></div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- confirm delete -->
+<div class="overlay" id="m-confirm-delete" data-backdrop-close="true">
+  <div class="modal" onclick="event.stopPropagation()" style="width:320px">
+    <div class="modal-title">Are you sure?</div>
+    <div class="modal-sub" id="m-confirm-delete-msg">This action cannot be undone.</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('m-confirm-delete')">Cancel</button>
+      <button class="btn btn-danger" id="m-confirm-delete-btn">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- login modal -->
+<div class="overlay" id="m-login" data-backdrop-close="true">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Add Account</div>
+
+    <!-- Step 1: choose method -->
+    <div id="login-panel-choose">
+      <div class="modal-sub" style="margin-bottom:14px">How would you like to sign in?</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn btn-primary" style="justify-content:flex-start;gap:10px;padding:10px 14px" onclick="startBrowserLogin()">
+          <span class="material-icons-round" style="font-size:16px">language</span>
+          <span><span style="font-weight:600">Sign in with Roblox</span><span style="font-weight:400;opacity:.6;margin-left:8px;font-size:11.5px">Opens the Roblox login page</span></span>
+        </button>
+        <button class="btn btn-ghost" style="justify-content:flex-start;gap:10px;padding:10px 14px;border:1px solid var(--bd)" onclick="showCookiePanel()">
+          <span class="material-icons-round" style="font-size:16px">vpn_key</span>
+          <span><span style="font-weight:600">Paste Cookie</span><span style="font-weight:400;opacity:.6;margin-left:8px;font-size:11.5px">Use your .ROBLOSECURITY cookie</span></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 2a: browser login waiting -->
+    <div id="login-panel-browser" style="display:none">
+      <!-- Downloading Chrome -->
+      <div id="login-dl" style="display:none">
+        <div style="font-size:13px;font-weight:500;color:var(--t1);margin-bottom:10px">Downloading Chrome…</div>
+        <div style="background:var(--s3);border-radius:4px;height:6px;overflow:hidden;margin-bottom:6px">
+          <div id="dl-bar" style="height:100%;background:var(--ac);width:0%;transition:width .3s;border-radius:4px"></div>
+        </div>
+        <div style="font-size:11px;color:var(--t3)">First time only — <span id="dl-pct">0%</span></div>
+      </div>
+      <!-- Waiting for login -->
+      <div id="login-waiting" class="login-wait" style="display:none">
+        <div class="spin" style="width:18px;height:18px;border-width:2.5px;color:var(--ac)"></div>
+        <p>Waiting for login…<br/><span style="font-size:11px;color:var(--t3)">Sign in on the Chrome window that just opened.</span></p>
+      </div>
+    </div>
+
+    <!-- Step 2b: cookie input -->
+    <div id="login-panel-cookie" style="display:none">
+      <div class="modal-sub" style="margin-bottom:8px">Paste your <code style="font-size:11px;background:var(--s3);padding:1px 5px;border-radius:4px">.ROBLOSECURITY</code> cookie below.</div>
+      <div class="field" style="margin-bottom:4px">
+        <input type="password" id="cookie-input" placeholder="_|WARNING:-DO-NOT-SHARE..." onkeydown="if(event.key==='Enter')addByCookie()"/>
+      </div>
+      <div style="font-size:11px;color:var(--t3)">F12 → Application → Cookies → roblox.com → .ROBLOSECURITY</div>
+    </div>
+
+    <div class="mst hidden" id="login-status"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-login-back" style="display:none;margin-right:auto" onclick="backToChoose()">
+        <span class="material-icons-round" style="font-size:15px">arrow_back</span>Back
+      </button>
+      <button class="btn btn-ghost" onclick="cancelLogin()">Cancel</button>
+      <button class="btn btn-primary" id="btn-cookie-add" style="display:none" onclick="addByCookie()">
+        <span class="material-icons-round" style="font-size:15px">check</span>Add Account
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit modal -->
+<div class="overlay" id="m-edit" data-backdrop-close="false">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title" id="edit-title">Edit account</div>
+    <div class="modal-sub">Customize this account's display name and game target.</div>
+    <div class="field">
+      <label>Nickname</label>
+      <input type="text" id="in-nickname" placeholder="Leave blank to use Roblox username"/>
+    </div>
+    <div class="field">
+      <label>Game ID or Private Server Link</label>
+      <input type="text" id="in-target" placeholder="e.g. 292439477 or a private server URL"/>
+      <div class="field-hint">
+        <strong style="color:var(--t1)">Game ID:</strong> paste just the numbers from the URL.<br/>
+        <strong style="color:var(--t1)">Private server:</strong> paste the full server link.<br/>
+        <strong style="color:var(--t1)">Blank:</strong> opens Roblox normally.
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('m-edit')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEdit()"><span class="material-icons-round">save</span>Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- launch modal -->
+<div class="overlay" id="m-launch" data-backdrop-close="true">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Launch Roblox</div>
+    <div class="modal-sub">Gets an auth ticket for this account and launches Roblox logged in.</div>
+    <div class="prev" id="launch-prev"></div>
+    <div class="mst hidden" id="launch-status"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('m-launch')">Cancel</button>
+      <button class="btn btn-primary" id="btn-launch" onclick="doLaunch()"><span class="material-icons-round">rocket_launch</span>Launch</button>
+    </div>
+  </div>
+</div>
+
+<!-- game info modal -->
+<div class="overlay" id="m-game" data-backdrop-close="true">
+  <div class="modal" onclick="event.stopPropagation()" style="width:340px">
+    <img class="game-thumb-preview" id="game-modal-thumb" src="" alt=""/>
+    <div class="modal-title" id="game-modal-name" style="margin-bottom:6px">Game</div>
+    <div class="modal-sub" id="game-modal-stat" style="margin-bottom:12px"></div>
+    <div style="font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Place ID</div>
+    <div class="game-id-row">
+      <span class="game-id-val" id="game-modal-id"></span>
+      <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px;flex-shrink:0" onclick="copyGameId()"><span class="material-icons-round" style="font-size:13px">content_copy</span>Copy</button>
+    </div>
+    <div class="modal-actions" style="margin-top:0">
+      <button class="btn btn-ghost" onclick="closeModal('m-game')">Close</button>
+      <button class="btn btn-primary" onclick="gamePageOpen()"><span class="material-icons-round">open_in_new</span>Game Page</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let accounts = [], launchAcc = null, editAcc = null, toastTimer;
+const _launchedIds = new Set();
+const _avatarCache = {};
+let settings = {};
+
+const ENC_OPTIONS = {
+  'aes-256-gcm': { label: 'AES-256-GCM', badge: 'Best', badgeClass: 'green' },
+  'aes-256-cbc': { label: 'AES-256-CBC', badge: 'Standard', badgeClass: 'muted' },
+};
+let selectedEnc = 'aes-256-gcm';
+
+async function init() {
+  [accounts, settings] = await Promise.all([api.loadAccounts(), api.loadSettings()]);
+  render();
+  applySettings();
+  refreshMultiStatus();
+  detectRobloxVersion();
+  loadFlags();
+  try { const k = localStorage.getItem('bloxgen_apikey'); if (k) { const el = document.getElementById('gen-apikey'); if (el) el.value = k; } } catch {}
+  try { _genHistory = (await api.readGenHistory()) || []; genRenderHistory(); } catch {}
+
+  api.onRobloxClosed(id => {
+    _launchedIds.delete(id);
+    const dot = document.querySelector(`.card[data-id="${id}"] .card-dot`);
+    if (dot) { dot.classList.remove('launched'); dot.title = 'Not launched'; }
+  });
+
+  // Chrome download progress
+  api.onChromeProgress(data => {
+    const dlDiv = document.getElementById('login-dl');
+    const waitDiv = document.getElementById('login-waiting');
+    if (!dlDiv || !waitDiv) return;
+    if (data.status === 'downloading') {
+      dlDiv.style.display = '';
+      waitDiv.style.display = 'none';
+      if (data.percent !== undefined) {
+        document.getElementById('dl-bar').style.width = data.percent + '%';
+        document.getElementById('dl-pct').textContent = data.percent + '%';
+      }
+    } else if (data.status === 'done') {
+      dlDiv.style.display = 'none';
+      waitDiv.style.display = '';
+    }
+  });
+}
+init();
+
+// ── Theme ──────────────────────────────────────────────────────────────────
+function applyTheme(dark) {
+  document.body.classList.toggle('light', !dark);
+  const icon = document.getElementById('theme-icon');
+  if (icon) icon.textContent = dark ? 'light_mode' : 'dark_mode';
+}
+function toggleTheme() {
+  const isDark = !document.body.classList.contains('light');
+  applyTheme(!isDark);
+  try { localStorage.setItem('theme', isDark ? 'light' : 'dark'); } catch {}
+}
+(function() {
+  try {
+    const t = localStorage.getItem('theme');
+    applyTheme(t !== 'light');
+  } catch { applyTheme(true); }
+})();
+
+// ── BloxGen API key persistence ────────────────────────────────────────────
+(function() {
+  try {
+    const saved = localStorage.getItem('bloxgen_apikey');
+    if (saved) {
+      const el = document.getElementById('gen-apikey');
+      if (el) el.value = saved;
+    }
+  } catch {}
+})();
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('gen-apikey');
+  if (el) el.addEventListener('input', () => {
+    try { localStorage.setItem('bloxgen_apikey', el.value); } catch {}
+  });
+});
+
+
+async function detectRobloxVersion() {
+  try {
+    const ver = await api.getRobloxVersion();
+    if (ver) {
+      // Show full hash in titlebar badge, also update settings stat
+      document.getElementById('tb-roblox-ver').textContent = ver;
+      const el = document.getElementById('stat-rblx-ver');
+      if (el) el.textContent = ver;
+    } else {
+      document.getElementById('tb-roblox-ver').textContent = '—';
+      const el = document.getElementById('stat-rblx-ver');
+      if (el) el.textContent = 'Not detected';
+    }
+  } catch {
+    document.getElementById('tb-roblox-ver').textContent = '—';
+    const el = document.getElementById('stat-rblx-ver');
+    if (el) el.textContent = 'Not detected';
+  }
+}
+
+function applySettings() {
+  if (settings.encryptionType) {
+    selectedEnc = settings.encryptionType;
+    updateCddDisplay('enc', selectedEnc);
+    document.querySelectorAll('#cdd-enc-menu .cdd-option').forEach(o =>
+      o.classList.toggle('selected', o.dataset.value === selectedEnc));
+  }
+  const keyIn = document.getElementById('custom-key');
+  if (keyIn) keyIn.value = settings.customKey || '';
+}
+
+function toggleCdd(name) {
+  const trigger = document.getElementById('cdd-' + name + '-trigger');
+  const menu = document.getElementById('cdd-' + name + '-menu');
+  const open = menu.classList.contains('open');
+  closeAllCdd();
+  if (!open) { trigger.classList.add('open'); menu.classList.add('open'); }
+}
+function closeAllCdd() {
+  document.querySelectorAll('.cdd-trigger.open').forEach(t => t.classList.remove('open'));
+  document.querySelectorAll('.cdd-menu.open').forEach(m => m.classList.remove('open'));
+}
+function selectCdd(name, value) {
+  selectedEnc = value;
+  document.querySelectorAll('#cdd-' + name + '-menu .cdd-option').forEach(o =>
+    o.classList.toggle('selected', o.dataset.value === value));
+  updateCddDisplay(name, value);
+  closeAllCdd();
+}
+function updateCddDisplay(name, value) {
+  const meta = ENC_OPTIONS[value] || { label: value, badge: '', badgeClass: '' };
+  const lbl = document.getElementById('cdd-' + name + '-label');
+  const bdg = document.getElementById('cdd-' + name + '-badge');
+  if (lbl) lbl.textContent = meta.label;
+  if (bdg) { bdg.textContent = meta.badge; bdg.className = 'cdd-badge' + (meta.badgeClass ? ' ' + meta.badgeClass : ''); }
+}
+document.addEventListener('click', e => { if (!e.target.closest('.cdd')) closeAllCdd(); });
+
+function goTo(p) {
+  document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
+  document.getElementById('page-' + p).classList.add('active');
+  document.getElementById('nav-' + p).classList.add('active');
+  if (p === 'settings') {
+    document.getElementById('stat-count').textContent = accounts.length;
+    refreshMultiStatus();
+  }
+  if (p === 'charts' && !chartsLoaded) loadCharts();
+  // generator page
+}
+
+function render() {
+  const grid = document.getElementById('grid'), empty = document.getElementById('empty'), sub = document.getElementById('acct-sub');
+  sub.textContent = accounts.length ? accounts.length + ' account' + (accounts.length !== 1 ? 's' : '') + ' saved' : 'No accounts saved';
+  if (!accounts.length) { grid.innerHTML = ''; empty.style.display = 'flex'; return; }
+  empty.style.display = 'none';
+  grid.innerHTML = accounts.map((a, i) => `
+    <div class="card" data-id="${a.id}" style="animation-delay:${i * 18}ms">
+      <div class="card-dot${_launchedIds.has(a.id) ? ' launched' : ''}" title="${_launchedIds.has(a.id) ? 'Launched' : 'Not launched'}"></div>
+      <span class="material-icons-round drag-handle">drag_indicator</span>
+      <div class="card-av" id="av-${a.id}">${(a.username || '?')[0].toUpperCase()}</div>
+      <div class="card-name">${esc(a.nickname || a.username || 'Unknown')}</div>
+      <div class="card-uid">${a.userId ? '#' + a.userId : '\u2014'}</div>
+      <div class="card-game ${a.gameTarget ? 'visible' : ''}" id="gt-${a.id}" title="${esc(a.gameTarget || '')}">
+        ${a.gameTarget ? truncate(a.gameTarget, 22) : ''}
+      </div>
+      <div class="card-row">
+        <button class="btn btn-launch" onclick="openLaunch('${a.id}')">
+          <span class="material-icons-round">rocket_launch</span>Start
+        </button>
+        <button class="btn btn-edit" onclick="openEdit('${a.id}')" title="Set game target">
+          <span class="material-icons-round">edit</span>
+        </button>
+        <button class="btn btn-del" onclick="removeAcc('${a.id}')" title="Remove account">
+          <span class="material-icons-round">delete_outline</span>
+        </button>
+      </div>
+    </div>`).join('') + `<div class="card-add" onclick="openLogin()"><span class="material-icons-round card-add-icon">add</span><span class="card-add-label">Add account</span></div>`;
+  accounts.forEach(a => { if (a.userId) loadAvatar(a.id, a.userId); });
+  initDrag();
+}
+
+function truncate(s, n) { return s.length > n ? s.slice(0, n) + '\u2026' : s; }
+
+let _dragSaveTimer = null;
+let _dragging = null, _dragClone = null, _dragOffX = 0, _dragOffY = 0, _dragOverId = null;
+
+function initDrag() {
+  const grid = document.getElementById('grid');
+
+  grid.querySelectorAll('.card').forEach(card => {
+    const handle = card.querySelector('.drag-handle');
+    const startEl = handle || card;
+
+    startEl.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      if (e.target.closest('button')) return;
+      e.preventDefault();
+
+      _dragging = card;
+      const rect = card.getBoundingClientRect();
+      _dragOffX = e.clientX - rect.left;
+      _dragOffY = e.clientY - rect.top;
+
+      // Create floating clone
+      _dragClone = card.cloneNode(true);
+      _dragClone.style.cssText = `
+        position:fixed;left:${rect.left}px;top:${rect.top}px;
+        width:${rect.width}px;height:${rect.height}px;
+        opacity:0.85;pointer-events:none;z-index:9999;
+        box-shadow:0 16px 40px rgba(0,0,0,.6);
+        transform:scale(1.04);border-color:var(--ac);
+        transition:box-shadow .15s;border-radius:var(--r);
+        background:var(--s2);border:1px solid var(--ac);
+      `;
+      document.body.appendChild(_dragClone);
+      card.style.opacity = '0.3';
+
+      document.addEventListener('mousemove', onDragMove);
+      document.addEventListener('mouseup', onDragEnd);
+    });
+  });
+}
+
+function onDragMove(e) {
+  if (!_dragging || !_dragClone) return;
+  _dragClone.style.left = (e.clientX - _dragOffX) + 'px';
+  _dragClone.style.top  = (e.clientY - _dragOffY) + 'px';
+
+  // Find card under cursor (ignore clone)
+  _dragClone.style.display = 'none';
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  _dragClone.style.display = '';
+  const target = el ? el.closest('.card[data-id]') : null;
+  const newId = target ? target.dataset.id : null;
+
+  if (newId && newId !== _dragging.dataset.id && newId !== _dragOverId) {
+    // Live-reorder: swap in accounts array and re-render
+    _dragOverId = newId;
+    const srcIdx = accounts.findIndex(a => a.id === _dragging.dataset.id);
+    const tgtIdx = accounts.findIndex(a => a.id === newId);
+    if (srcIdx !== -1 && tgtIdx !== -1) {
+      const moved = accounts.splice(srcIdx, 1)[0];
+      accounts.splice(tgtIdx, 0, moved);
+      render();
+      // Re-attach drag events and dim the source card
+      const newCard = document.querySelector('.card[data-id="' + moved.id + '"]');
+      if (newCard) { _dragging = newCard; newCard.style.opacity = '0.3'; }
+    }
+  }
+}
+
+function onDragEnd() {
+  document.removeEventListener('mousemove', onDragMove);
+  document.removeEventListener('mouseup', onDragEnd);
+
+  if (_dragClone) { _dragClone.remove(); _dragClone = null; }
+  if (_dragging) { _dragging.style.opacity = ''; _dragging = null; }
+  _dragOverId = null;
+
+  clearTimeout(_dragSaveTimer);
+  _dragSaveTimer = setTimeout(() => {
+    api.reorderAccounts(accounts.map(a => a.id));
+  }, 400);
+}
+
+function loadAvatar(id, uid) {
+  if (_avatarCache[uid]) {
+    const el = document.getElementById('av-' + id);
+    if (el) el.innerHTML = '<img src="' + _avatarCache[uid] + '" alt=""/>';
+    return;
+  }
+  fetch('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + uid + '&size=48x48&format=Png')
+    .then(r => r.json()).then(d => {
+      const url = d?.data?.[0]?.imageUrl;
+      if (url) {
+        _avatarCache[uid] = url;
+        const el = document.getElementById('av-' + id);
+        if (el) el.innerHTML = '<img src="' + url + '" alt=""/>';
+      }
+    }).catch(() => {});
+}
+
+function _showPanel(panel) {
+  ['choose','cookie','browser'].forEach(p => {
+    document.getElementById('login-panel-' + p).style.display = p === panel ? '' : 'none';
+  });
+  document.getElementById('btn-cookie-add').style.display = panel === 'cookie' ? '' : 'none';
+  document.getElementById('btn-login-back').style.display = panel === 'choose' ? 'none' : '';
+  setStatus('login-status', 'hidden', '');
+}
+
+function openLogin() {
+  document.getElementById('cookie-input').value = '';
+  _showPanel('choose');
+  openModal('m-login');
+}
+
+function showCookiePanel() {
+  _showPanel('cookie');
+  setTimeout(() => document.getElementById('cookie-input').focus(), 50);
+}
+
+function backToChoose() {
+  _showPanel('choose');
+}
+
+async function startBrowserLogin() {
+  _showPanel('browser');
+  // Show waiting state by default — only switch to download UI if Chrome needs to be downloaded
+  document.getElementById('login-dl').style.display = 'none';
+  document.getElementById('login-waiting').style.display = '';
+  document.getElementById('dl-bar').style.width = '0%';
+  document.getElementById('dl-pct').textContent = '0%';
+  const res = await api.openLogin();
+  if (!document.getElementById('m-login').classList.contains('open')) return;
+  if (!res || !res.success) {
+    if (res && res.error && res.error !== 'Login window closed') {
+      _showPanel('choose');
+      setStatus('login-status', 'err', '<span class="material-icons-round">error_outline</span>' + esc(res.error));
+    } else {
+      closeModal('m-login');
+    }
+    return;
+  }
+  await finishLogin(res);
+}
+
+async function addByCookie() {
+  let cookie = document.getElementById('cookie-input').value.trim();
+  if (!cookie) return;
+  // Strip any prefix the user may have accidentally included
+  if (cookie.startsWith('.ROBLOSECURITY=')) cookie = cookie.slice('.ROBLOSECURITY='.length);
+  if (cookie.startsWith('ROBLOSECURITY=')) cookie = cookie.slice('ROBLOSECURITY='.length);
+  // Remove any surrounding quotes
+  cookie = cookie.replace(/^["']|["']$/g, '').trim();
+  if (!cookie || cookie.length < 100) {
+    setStatus('login-status', 'err', '<span class="material-icons-round">error_outline</span>Cookie looks too short — make sure you copied the full value');
+    return;
+  }
+  const btn = document.getElementById('btn-cookie-add');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spin"></div>Verifying…';
+  setStatus('login-status', 'load', '<div class="spin"></div>Verifying cookie…');
+  const res = await api.validateCookie(cookie);
+  btn.disabled = false;
+  btn.innerHTML = '<span class="material-icons-round" style="font-size:15px">check</span>Add Account';
+  if (!res.ok) {
+    setStatus('login-status', 'err', '<span class="material-icons-round">error_outline</span>' + (res.reason || 'Invalid cookie — make sure you copied the full .ROBLOSECURITY value'));
+    return;
+  }
+  await finishLogin({ success: true, cookie, username: res.username, userId: res.userId });
+}
+
+function cancelLogin() {
+  closeModal('m-login');
+  api.cancelLogin && api.cancelLogin();
+}
+
+async function finishLogin(res) {
+  setStatus('login-status', 'ok', '<span class="material-icons-round">check_circle</span>Signed in as ' + esc(res.username));
+  const a = await api.addAccount({ username: res.username, userId: res.userId, cookie: res.cookie, gameTarget: '' });
+  accounts.push(a); render();
+  setTimeout(() => {
+    closeModal('m-login');
+    toast('Added ' + esc(res.username), 'ok');
+    const grid = document.getElementById('grid');
+    if (grid) grid.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 800);
+}
+
+function openEdit(id) {
+  editAcc = accounts.find(a => a.id === id); if (!editAcc) return;
+  document.getElementById('edit-title').textContent = 'Edit \u2014 ' + editAcc.username;
+  document.getElementById('in-nickname').value = editAcc.nickname || '';
+  document.getElementById('in-target').value = editAcc.gameTarget || '';
+  openModal('m-edit');
+  setTimeout(() => document.getElementById('in-target').focus(), 220);
+}
+async function saveEdit() {
+  if (!editAcc) return;
+  const target = document.getElementById('in-target').value.trim();
+  const nickname = document.getElementById('in-nickname').value.trim();
+  const updated = await api.updateAccount(editAcc.id, { gameTarget: target, nickname });
+  if (updated) { const idx = accounts.findIndex(a => a.id === editAcc.id); if (idx !== -1) accounts[idx] = updated; render(); }
+  closeModal('m-edit');
+  toast('Saved', 'ok');
+}
+
+function confirmAction(message, onConfirm) {
+  document.getElementById('m-confirm-delete-msg').textContent = message;
+  const btn = document.getElementById('m-confirm-delete-btn');
+  const newBtn = btn.cloneNode(true); // clone to remove old listeners
+  btn.parentNode.replaceChild(newBtn, btn);
+  newBtn.addEventListener('click', () => { closeModal('m-confirm-delete'); onConfirm(); });
+  openModal('m-confirm-delete');
+}
+
+async function removeAcc(id) {
+  const a = accounts.find(x => x.id === id);
+  if (!a) return;
+  confirmAction('Remove "' + a.username + '"? This cannot be undone.', async () => {
+    await api.removeAccount(id); accounts = accounts.filter(x => x.id !== id); render();
+    toast('Removed ' + a.username, 'err');
+  });
+}
+async function clearAll() {
+  if (!accounts.length) return;
+  confirmAction('Remove all ' + accounts.length + ' accounts? This cannot be undone.', async () => {
+    for (const a of accounts) await api.removeAccount(a.id);
+    accounts = []; render(); document.getElementById('stat-count').textContent = '0';
+    toast('All accounts cleared', 'err');
+  });
+}
+
+function openLaunch(id) {
+  launchAcc = accounts.find(a => a.id === id); if (!launchAcc) return;
+  const target = launchAcc.gameTarget || '';
+  const p = document.getElementById('launch-prev');
+  p.innerHTML = '<div class="prev-av" id="prev-av">' + launchAcc.username[0].toUpperCase() + '</div>' +
+    '<div><div class="prev-name">' + esc(launchAcc.username) + '</div>' +
+    '<div class="prev-uid">' + (target ? '\u2192 ' + truncate(target, 28) : (launchAcc.userId ? '#' + launchAcc.userId : 'Opens home screen')) + '</div></div>';
+  if (launchAcc.userId) {
+    fetch('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + launchAcc.userId + '&size=48x48&format=Png')
+      .then(r => r.json()).then(d => {
+        const url = d?.data?.[0]?.imageUrl, el = document.getElementById('prev-av');
+        if (url && el) el.innerHTML = '<img src="' + url + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>';
+      }).catch(() => {});
+  }
+  setStatus('launch-status', 'hidden', '');
+  const btn = document.getElementById('btn-launch');
+  btn.disabled = false; btn.innerHTML = '<span class="material-icons-round">rocket_launch</span>Launch';
+  openModal('m-launch');
+}
+async function doLaunch() {
+  if (!launchAcc) return;
+  const btn = document.getElementById('btn-launch');
+  if (btn.disabled) return;
+  btn.disabled = true; btn.innerHTML = '<div class="spin"></div>Launching\u2026';
+  setStatus('launch-status', 'load', '<div class="spin"></div>Getting auth ticket\u2026');
+  const res = await api.launchRoblox(launchAcc.id, launchAcc.cookie, launchAcc.gameTarget || null);
+  if (!res.success) {
+    setStatus('launch-status', 'err', '<span class="material-icons-round">error_outline</span>' + res.error);
+    btn.disabled = false; btn.innerHTML = '<span class="material-icons-round">rocket_launch</span>Launch';
+    return;
+  }
+  setStatus('launch-status', 'ok', '<span class="material-icons-round">check_circle</span>Launched as ' + launchAcc.username);
+  _launchedIds.add(launchAcc.id);
+  const dot = document.querySelector(`.card[data-id="${launchAcc.id}"] .card-dot`);
+  if (dot) { dot.classList.add('launched'); dot.title = 'Launched'; }
+  setTimeout(() => { closeModal('m-launch'); toast('Launched as ' + launchAcc.username, 'ok'); }, 700);
+}
+
+function toggleKeyVisibility() {
+  const input = document.getElementById('custom-key'), icon = document.getElementById('key-vis-icon');
+  if (input.type === 'password') { input.type = 'text'; icon.textContent = 'visibility_off'; }
+  else { input.type = 'password'; icon.textContent = 'visibility'; }
+}
+let _saveKeyTimer;
+async function saveKeySettings() {
+  const keyVal = document.getElementById('custom-key').value;
+  const btn = document.getElementById('btn-save-key');
+  if (btn.disabled) return;
+  clearTimeout(_saveKeyTimer);
+  btn.disabled = true; btn.textContent = 'Saving\u2026';
+  _saveKeyTimer = setTimeout(async () => {
+    try {
+      await api.saveSettings({ encryptionType: selectedEnc, customKey: keyVal });
+      settings.encryptionType = selectedEnc; settings.customKey = keyVal;
+      if (accounts.length > 0) await api.reencryptAccounts(accounts);
+      toast('Encryption settings saved', 'ok');
+      applySettings();
+    } catch (e) {
+      toast('Save failed: ' + e.message, 'err');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Save';
+    }
+  }, 300);
+}
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function setStatus(id, type, html) { const el = document.getElementById(id); el.className = 'mst ' + type; el.innerHTML = html; }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function toast(msg, type) {
+  type = type || '';
+  const el = document.getElementById('toast'), icon = type === 'ok' ? 'check_circle' : 'cancel';
+  el.innerHTML = '<span class="material-icons-round">' + icon + '</span>' + msg;
+  el.className = 'toast show ' + type; clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2700);
+}
+
+async function refreshMultiStatus() {
+  const s = await api.multiInstanceStatus();
+  if (!s.enabled) { await api.saveSettings({ multiInstance: true }); settings.multiInstance = true; }
+}
+
+document.querySelectorAll('.overlay').forEach(o => {
+  o.addEventListener('mousedown', e => {
+    if (e.target === o && o.dataset.backdropClose === 'true') o.classList.remove('open');
+  });
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closeAllCdd();
+    const editEl = document.getElementById('m-edit');
+    if (editEl.classList.contains('open')) {
+      if (document.activeElement !== document.getElementById('in-target') && document.activeElement !== document.getElementById('in-nickname')) closeModal('m-edit');
+    } else document.querySelectorAll('.overlay.open').forEach(m => m.classList.remove('open'));
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); openLogin(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 's' && document.getElementById('m-edit').classList.contains('open')) {
+    e.preventDefault(); saveEdit();
+  }
+});
+
+let chartTab = 'popular';
+let allCharts = {};
+let chartsLoaded = false;
+
+function switchChartTab(tab) {
+  chartTab = tab;
+  document.querySelectorAll('#page-charts .tab-btn').forEach(t => t.classList.remove('active'));
+  document.getElementById('ctab-' + tab).classList.add('active');
+  const s = document.getElementById('chart-search'); if (s) s.value = '';
+  _searchMode = false;
+  if (chartsLoaded) renderCharts(allCharts[tab] || [], false);
+}
+
+async function loadCharts() {
+  const grid = document.getElementById('charts-grid');
+  const loading = document.getElementById('charts-loading');
+  const empty = document.getElementById('charts-empty');
+  chartsLoaded = false;
+  grid.style.display = 'none'; empty.style.display = 'none'; loading.style.display = 'flex';
+
+  try {
+    // Use official Roblox explore-api with a random sessionId per load
+    const [popular, trending, favorited] = await Promise.all([
+      fetchRobloxGames('top-playing-now'),
+      fetchRobloxGames('top-rated'),
+      fetchRobloxGames('top-earning'),
+    ]);
+    allCharts = { popular, trending, favorited };
+    chartsLoaded = true;
+    loading.style.display = 'none';
+    renderCharts(allCharts[chartTab] || [], false);
+  } catch(e) {
+    console.error('Charts load error:', e);
+    loading.style.display = 'none';
+    empty.style.display = 'flex';
+  }
+}
+
+function randomGuid() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+async function fetchRobloxGames(sortId) {
+  // Official Roblox explore API
+  const sessionId = randomGuid();
+  const url = `https://apis.roblox.com/explore-api/v1/get-sort-content?sessionId=${sessionId}&sortId=${sortId}&device=computer&country=all`;
+  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+
+  // Response shape: { sorts: [{ games: [...] }] } or { games: [...] }
+  const games = d.games || (d.sorts && d.sorts[0] && d.sorts[0].games) || [];
+  if (!games.length) throw new Error('No games in response');
+
+  // Fetch thumbnails for all universeIds
+  let thumbMap = {};
+  try {
+    const universeIds = games.map(g => g.universeId).filter(Boolean).join(',');
+    const thumbRes = await fetch(
+      `https://thumbnails.roblox.com/v1/games/icons?universeIds=${universeIds}&returnPolicy=PlaceHolder&size=512x512&format=Png&isCircular=false`
+    );
+    if (thumbRes.ok) {
+      const thumbData = await thumbRes.json();
+      (thumbData.data || []).forEach(t => { thumbMap[t.targetId] = t.imageUrl; });
+    }
+  } catch {}
+
+  return games.map(g => ({
+    universeId: g.universeId,
+    placeId: g.rootPlaceId || g.placeId,
+    name: g.name,
+    playerCount: g.playerCount,
+    thumbUrl: thumbMap[g.universeId] || ''
+  }));
+}
+
+let _chartGameMap = {};
+let _searchDebounce = null;
+let _searchMode = false;
+
+function renderCharts(games, searchMode) {
+  const grid = document.getElementById('charts-grid');
+  const emptyEl = document.getElementById('charts-empty');
+  const loading = document.getElementById('charts-loading');
+  loading.style.display = 'none';
+  _chartGameMap = {};
+  if (!games || !games.length) {
+    emptyEl.style.display = 'flex';
+    grid.style.display = 'none';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  grid.style.display = 'grid';
+  grid.innerHTML = games.map((g, i) => {
+    _chartGameMap[i] = g;
+    const players = typeof g.playerCount === 'number' ? Number(g.playerCount).toLocaleString() + ' playing' : '';
+    const rankLabel = searchMode ? `<div class="chart-card-rank">Search result</div>` : `<div class="chart-card-rank">#${i + 1}</div>`;
+    const thumb = g.thumbUrl
+      ? `<img class="chart-card-thumb" src="${g.thumbUrl}" alt="" loading="lazy" onerror="this.outerHTML='<div class=chart-card-thumb-ph><span class=material-icons-round>videogame_asset</span></div>'"/>`
+      : `<div class="chart-card-thumb-ph"><span class="material-icons-round">videogame_asset</span></div>`;
+    return `<div class="chart-card" style="animation-delay:${i * 12}ms" onclick="openGameModal(${i})" title="View game info">
+      ${thumb}
+      <div class="chart-card-body">
+        ${rankLabel}
+        <div class="chart-card-name">${esc(g.name || 'Unknown')}</div>
+        ${players ? `<div class="chart-card-stat"><span class="material-icons-round">people</span>${players}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function searchRobloxGames(query) {
+  const sessionId = randomGuid();
+  const url = `https://apis.roblox.com/search-api/omni-search?searchQuery=${encodeURIComponent(query)}&sessionId=${sessionId}`;
+  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+
+  // Extract game universe IDs from omni-search results
+  const contents = d.searchResults || [];
+  const gameSection = contents.find(s => s.contentGroupType === 'Game') || contents[0];
+  if (!gameSection || !gameSection.contents) return [];
+
+  const universeIds = gameSection.contents.map(c => c.contentId).filter(Boolean);
+  if (!universeIds.length) return [];
+
+  // Fetch full game details
+  const detailsRes = await fetch(`https://games.roblox.com/v1/games?universeIds=${universeIds.join(',')}`);
+  const details = detailsRes.ok ? await detailsRes.json() : { data: [] };
+  const detailMap = {};
+  (details.data || []).forEach(g => { detailMap[g.id] = g; });
+
+  // Fetch thumbnails
+  let thumbMap = {};
+  try {
+    const thumbRes = await fetch(
+      `https://thumbnails.roblox.com/v1/games/icons?universeIds=${universeIds.join(',')}&returnPolicy=PlaceHolder&size=512x512&format=Png&isCircular=false`
+    );
+    if (thumbRes.ok) {
+      const td = await thumbRes.json();
+      (td.data || []).forEach(t => { thumbMap[t.targetId] = t.imageUrl; });
+    }
+  } catch {}
+
+  return universeIds.map(uid => {
+    const det = detailMap[uid] || {};
+    return {
+      universeId: uid,
+      placeId: det.rootPlaceId,
+      name: det.name,
+      playerCount: det.playing,
+      thumbUrl: thumbMap[uid] || ''
+    };
+  }).filter(g => g.placeId);
+}
+
+function filterCharts(val) {
+  clearTimeout(_searchDebounce);
+  const query = val.trim();
+  if (!query) {
+    _searchMode = false;
+    if (chartsLoaded) renderCharts(allCharts[chartTab] || [], false);
+    else {
+      document.getElementById('charts-grid').style.display = 'none';
+      document.getElementById('charts-empty').style.display = 'none';
+      document.getElementById('charts-loading').style.display = 'flex';
+    }
+    return;
+  }
+  _searchMode = true;
+  _searchDebounce = setTimeout(async () => {
+    const grid = document.getElementById('charts-grid');
+    const loading = document.getElementById('charts-loading');
+    const emptyEl = document.getElementById('charts-empty');
+    grid.style.display = 'none';
+    emptyEl.style.display = 'none';
+    loading.style.display = 'flex';
+    try {
+      const results = await searchRobloxGames(query);
+      // Only apply if search box still has same value
+      if (document.getElementById('chart-search').value.trim() === query) {
+        renderCharts(results, true);
+      }
+    } catch(e) {
+      console.error('Search error:', e);
+      loading.style.display = 'none';
+      emptyEl.style.display = 'flex';
+    }
+  }, 420);
+}
+
+let _gameModal = {};
+function openGameModal(idx) {
+  const g = _chartGameMap[idx];
+  if (!g) return;
+  _gameModal = g;
+  const thumb = document.getElementById('game-modal-thumb');
+  if (g.thumbUrl) { thumb.src = g.thumbUrl; thumb.style.display = 'block'; }
+  else { thumb.style.display = 'none'; }
+  document.getElementById('game-modal-name').textContent = g.name || 'Unknown';
+  document.getElementById('game-modal-id').textContent = g.placeId || '—';
+  const stat = typeof g.playerCount === 'number' ? Number(g.playerCount).toLocaleString() + ' playing now' : '';
+  document.getElementById('game-modal-stat').textContent = stat;
+  openModal('m-game');
+}
+function copyGameId() {
+  const id = String(_gameModal.placeId || '');
+  if (!id) return;
+  navigator.clipboard.writeText(id).then(() => toast('Place ID copied', 'ok'));
+}
+function gamePageOpen() {
+  if (_gameModal.placeId) api.openExternal('https://www.roblox.com/games/' + _gameModal.placeId);
+}
+
+let currentFlags = {};
+
+function ffRenderTable() {
+  const tbody = document.getElementById('ff-tbody');
+  const empty = document.getElementById('ff-empty');
+  const keys = Object.keys(currentFlags);
+  tbody.innerHTML = '';
+  empty.style.display = keys.length === 0 ? '' : 'none';
+  document.querySelector('.ff-table').style.display = keys.length === 0 ? 'none' : '';
+  keys.forEach(k => {
+    const tr = document.createElement('tr');
+    tr.dataset.ffkey = k;
+    tr.innerHTML = `
+      <td><input class="ff-key-input" value="${esc(k)}" onchange="ffRenameKey('${esc(k)}', this.value)" spellcheck="false"/></td>
+      <td><input class="ff-val-input" value="${esc(currentFlags[k])}" onchange="ffSetVal('${esc(k)}', this.value)" spellcheck="false"/></td>
+      <td style="width:32px"><button class="ff-del-btn" onclick="ffDelete('${esc(k)}')" title="Remove"><span class="material-icons-round" style="font-size:16px">close</span></button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function ffRenameKey(oldKey, newKey) {
+  newKey = newKey.trim();
+  if (!newKey || newKey === oldKey) return;
+  const val = currentFlags[oldKey];
+  delete currentFlags[oldKey];
+  currentFlags[newKey] = val;
+  ffRenderTable();
+}
+
+function ffSetVal(key, val) { currentFlags[key] = val.trim(); }
+
+function ffDelete(key) {
+  const targetRow = document.querySelector('tr[data-ffkey="' + CSS.escape(key) + '"]');
+  if (targetRow) {
+    targetRow.classList.add('ff-removing');
+    setTimeout(() => { delete currentFlags[key]; ffRenderTable(); }, 150);
+  } else {
+    delete currentFlags[key]; ffRenderTable();
+  }
+}
+
+function ffAddRow() {
+  let key = 'FFlagNew'; // avoid collisions if they add multiple
+  if (currentFlags[key] !== undefined) {
+    let n = 2;
+    while (currentFlags['FFlagNew' + n] !== undefined) n++;
+    key = 'FFlagNew' + n;
+  }
+  currentFlags[key] = 'True';
+  ffRenderTable();
+  const inputs = document.querySelectorAll('.ff-key-input');
+  if (inputs.length) {
+    const last = inputs[inputs.length - 1];
+    last.focus();
+    last.select();
+    last.closest('tr')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function ffImportJson() {
+  document.getElementById('ff-import-area').value = '';
+  openModal('m-ff-import');
+}
+
+function ffDoImport() {
+  const raw = document.getElementById('ff-import-area').value.trim();
+  try {
+    const parsed = JSON.parse(raw);
+    for (const [k, v] of Object.entries(parsed)) {
+      currentFlags[k] = String(v);
+    }
+    ffRenderTable();
+    closeModal('m-ff-import');
+    toast('Imported ' + Object.keys(parsed).length + ' flags', 'ok');
+  } catch (e) {
+    toast('Invalid JSON: ' + e.message, 'err');
+  }
+}
+
+function ffExportJson() {
+  const json = JSON.stringify(currentFlags, null, 2);
+  navigator.clipboard.writeText(json).then(() => toast('Copied JSON to clipboard', 'ok'));
+}
+
+function ffResetAll() {
+  currentFlags = {};
+  ffRenderTable();
+  toast('All flags cleared', 'err');
+}
+
+async function loadFlags() {
+  try {
+    const raw = await api.readFFlags();
+    currentFlags = (raw && typeof raw === 'object') ? raw : {};
+  } catch { currentFlags = {}; }
+  ffRenderTable();
+}
+
+async function saveFlags() {
+  try {
+    await api.writeFFlags(currentFlags);
+    toast('Flags saved', 'ok');
+  } catch (e) { toast('Save failed: ' + e.message, 'err'); }
+}
+
+
+function genToggleKey() {
+  const inp = document.getElementById('gen-apikey');
+  const icon = document.getElementById('gen-eye-icon');
+  if (inp.type === 'password') { inp.type = 'text'; icon.textContent = 'visibility_off'; }
+  else { inp.type = 'password'; icon.textContent = 'visibility'; }
+}
+
+async function genCombo() {
+  const apiKey = (document.getElementById('gen-apikey').value || '').trim();
+  try { localStorage.setItem('bloxgen_apikey', document.getElementById('gen-apikey').value); } catch {}
+  if (!apiKey || !apiKey.startsWith('BLOX-')) {
+    toast('Enter a valid BloxGen API key (starts with BLOX-)', 'err');
+    return;
+  }
+
+  const btn = document.getElementById('gen-btn');
+  const out = document.getElementById('gen-output');
+  if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
+
+  try {
+    const resp = await fetch('https://core.bloxgen.net/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey, type: 'alt' })
+    });
+    const data = await resp.json();
+
+    if (!data.success) {
+      toast(data.message || data.error || 'Generation failed', 'err');
+      if (btn) { btn.textContent = 'Generate'; btn.disabled = false; }
+      return;
+    }
+
+    const d = data.data;
+    out.value = d.username + ':' + d.password;
+    out.select();
+
+    // Store in history
+    _lastGenData = d;
+    _genHistory.unshift({ username: d.username, password: d.password, cookie: d.cookie });
+    api.writeGenHistory(_genHistory).catch(() => {});
+    _ghPrepend();
+
+    // Copy cookie to clipboard if available, else username:password
+    const toCopy = d.cookie || (d.username + ':' + d.password);
+    navigator.clipboard.writeText(toCopy).catch(() => {});
+
+    if (btn) { btn.textContent = 'Generate'; btn.disabled = false; }
+
+  } catch (e) {
+    toast('Network error: ' + e.message, 'err');
+    if (btn) { btn.textContent = 'Generate'; btn.disabled = false; }
+  }
+}
+
+let _genHistory = [];
+let _lastGenData = null;
+
+const GH_ITEM_H = 36;
+const GH_VISIBLE = 4;
+const GH_BATCH = 40;
+let _ghRendered = 0;
+
+function genRenderHistory() {
+  const list = document.getElementById('gen-history-list');
+  const sc = document.getElementById('gen-history-sc');
+  if (!list || !sc) return;
+  if (_genHistory.length === 0) { sc.style.display = 'none'; return; }
+  sc.style.display = '';
+  if (_genHistory.length > GH_VISIBLE) {
+    list.style.maxHeight = (GH_ITEM_H * GH_VISIBLE) + 'px';
+  } else {
+    list.style.maxHeight = '';
+  }
+  _ghRendered = 0;
+  list.innerHTML = '';
+  _ghAppendBatch(list);
+  list.onscroll = () => {
+    if (list.scrollTop + list.clientHeight >= list.scrollHeight - 20) _ghAppendBatch(list);
+  };
+}
+
+function _ghAppendBatch(list) {
+  const end = Math.min(_ghRendered + GH_BATCH, _genHistory.length);
+  if (_ghRendered >= end) return;
+  const frag = document.createDocumentFragment();
+  for (let i = _ghRendered; i < end; i++) {
+    const h = _genHistory[i];
+    const row = document.createElement('div');
+    row.className = 'gen-hist-item';
+    row.dataset.idx = i;
+    row.innerHTML =
+      '<span class="gh-user"><span style="color:var(--t3)">User:</span> ' + esc(h.username) + '  <span style="color:var(--t3)">Pass:</span> ' + esc(h.password) + '</span>' +
+      '<div class="gh-actions">' +
+        '<button class="btn btn-ghost" title="Copy combo"><span class="material-icons-round" style="font-size:15px">content_copy</span></button>' +
+        '<button class="btn btn-ghost" title="Add to accounts"><span class="material-icons-round" style="font-size:15px">person_add</span></button>' +
+      '</div>';
+    const btns = row.querySelectorAll('button');
+    btns[0].onclick = () => genHistCopy(i);
+    btns[1].onclick = () => genHistAdd(i);
+    frag.appendChild(row);
+  }
+  list.appendChild(frag);
+  _ghRendered = end;
+}
+
+function _ghPrepend() {
+  const list = document.getElementById('gen-history-list');
+  const sc = document.getElementById('gen-history-sc');
+  if (!list || !sc) return;
+  sc.style.display = '';
+  if (_genHistory.length > GH_VISIBLE) list.style.maxHeight = (GH_ITEM_H * GH_VISIBLE) + 'px';
+  // Re-index existing rows so their onclick indices stay correct
+  list.querySelectorAll('.gen-hist-item').forEach(row => {
+    const old = +row.dataset.idx;
+    const ni = old + 1;
+    row.dataset.idx = ni;
+    const btns = row.querySelectorAll('button');
+    btns[0].onclick = () => genHistCopy(ni);
+    btns[1].onclick = () => genHistAdd(ni);
+  });
+  _ghRendered++;
+  const h = _genHistory[0];
+  const row = document.createElement('div');
+  row.className = 'gen-hist-item';
+  row.dataset.idx = 0;
+  row.innerHTML =
+    '<span class="gh-user"><span style="color:var(--t3)">User:</span> ' + esc(h.username) + '  <span style="color:var(--t3)">Pass:</span> ' + esc(h.password) + '</span>' +
+    '<div class="gh-actions">' +
+      '<button class="btn btn-ghost" title="Copy combo"><span class="material-icons-round" style="font-size:15px">content_copy</span></button>' +
+      '<button class="btn btn-ghost" title="Add to accounts"><span class="material-icons-round" style="font-size:15px">person_add</span></button>' +
+    '</div>';
+  const btns = row.querySelectorAll('button');
+  btns[0].onclick = () => genHistCopy(0);
+  btns[1].onclick = () => genHistAdd(0);
+  list.insertBefore(row, list.firstChild);
+  list.scrollTop = 0;
+}
+
+function genHistCopy(i) {
+  const h = _genHistory[i];
+  if (!h) return;
+  navigator.clipboard.writeText(h.username + ':' + h.password).then(() => toast('Copied ' + h.username, 'ok'));
+}
+
+async function genHistAdd(i) {
+  const h = _genHistory[i];
+  if (!h || !h.cookie) { toast('No cookie available for this account', 'err'); return; }
+  try {
+    const res = await api.validateCookie(h.cookie);
+    if (!res || !res.username) { toast('Cookie invalid or expired', 'err'); return; }
+    const a = await api.addAccount({ username: res.username, userId: res.userId, cookie: h.cookie, gameTarget: '', nickname: '' });
+    if (a) { accounts.push(a); render(); toast('Added ' + res.username + ' to accounts', 'ok'); }
+  } catch(e) { toast('Failed to add: ' + e.message, 'err'); }
+}
+
+async function genAddToAccounts() {
+  if (!_lastGenData || !_lastGenData.cookie) { toast('No cookie available', 'err'); return; }
+  const btn = document.getElementById('gen-add-btn');
+  if (btn) { btn.disabled = true; }
+  try {
+    const res = await api.validateCookie(_lastGenData.cookie);
+    if (!res || !res.username) { toast('Cookie invalid or expired', 'err'); if(btn)btn.disabled=false; return; }
+    const a = await api.addAccount({ username: res.username, userId: res.userId, cookie: _lastGenData.cookie, gameTarget: '', nickname: '' });
+    if (a) { accounts.push(a); render(); toast('Added ' + res.username + ' to accounts!', 'ok'); }
+    if(btn)btn.disabled=false;
+  } catch(e) { toast('Failed: ' + e.message, 'err'); if(btn)btn.disabled=false; }
+}
+
+function genClearHistory() {
+  _genHistory = [];
+  _lastGenData = null;
+  api.clearGenHistory().catch(() => {});
+  genRenderHistory();
+  toast('History cleared', 'ok');
+}
+
+function genDetailsCopy() {
+  const details = document.getElementById('gen-details');
+  const text = details ? details.innerText.replace('copy', '').trim() : '';
+  if (!text) { toast('No details to copy', 'err'); return; }
+  const btn = document.getElementById('gen-details-copy-btn');
+  navigator.clipboard.writeText(text).then(() => {
+    if (btn) { const s = btn.querySelector('span:last-child'); if(s){s.textContent='done'; setTimeout(()=>{s.textContent='details';},1500);} }
+    toast('Details copied', 'ok');
+  });
+}
+
+function genCopy() {
+  const val = document.getElementById('gen-output').value;
+  if (!val) { toast('Nothing to copy', 'err'); return; }
+  const btn = document.getElementById('gen-copy-btn');
+  navigator.clipboard.writeText(val).then(() => {
+    if (btn) {
+      const icon = btn.querySelector('.material-icons-round');
+      if (icon) { icon.textContent = 'check'; setTimeout(() => { icon.textContent = 'content_copy'; }, 1500); }
+    }
+    toast('Copied to clipboard', 'ok');
+  });
+}
+
+async function resetFlags() {
+  currentFlags = {};
+  const ok = await api.writeFFlags({});
+  ffRenderTable();
+  if (ok) toast('All flags reset to default', 'ok');
+  else toast('Could not reset flags', 'err');
+}
+</script>
+
+
+
+
+
+
+
+
+
+<!-- help modal -->
+<div class="overlay" id="m-help" data-backdrop-close="true" onclick="if(event.target===this)closeModal('m-help')">
+  <div class="modal" onclick="event.stopPropagation()" style="width:420px;max-height:75vh;display:flex;flex-direction:column;overflow:hidden">
+    <div class="modal-title">How to use MultiRoblox</div>
+    <div class="modal-sub">Quick guide to get started</div>
+
+    <div style="display:flex;flex-direction:column;gap:14px;font-size:12.5px;color:var(--t2);line-height:1.65;overflow-y:auto;padding-right:4px;flex:1;min-height:0">
+
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">① Adding Accounts</div>
+        <div>Click <b style="color:var(--t1)">+ Add Account</b> in the sidebar. Choose <b style="color:var(--t1)">Login Page</b> to sign in via Chrome browser — your cookie is captured automatically. Or choose <b style="color:var(--t1)">Paste Cookie</b> to paste a <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">.ROBLOSECURITY</code> cookie directly.</div>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">② Launching Accounts</div>
+        <div>Click the <b style="color:var(--t1)">Launch</b> button on any account card to open Roblox with that account. You can launch multiple accounts simultaneously — each runs in its own isolated Roblox instance.</div>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">③ Generator</div>
+        <div>Go to the <b style="color:var(--t1)">Generator</b> tab. Paste your <b style="color:var(--t1)">BloxGen API key</b> (starts with <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">BLOX-</code>) from <b style="color:var(--t1)">bloxgen.net</b>, then click Generate. The combo and cookie are shown and copied to clipboard automatically.</div>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">④ Fast Flags</div>
+        <div>The <b style="color:var(--t1)">FFlags</b> tab lets you set Roblox client flags (like FPS unlocking or graphics tweaks). Changes are saved to <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">ClientAppSettings.json</code> and applied on the next Roblox launch.</div>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">⑤ Getting Your Cookie</div>
+        <div>Open Chrome → go to <b style="color:var(--t1)">roblox.com</b> → press <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">F12</code> → Application → Cookies → <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">.ROBLOSECURITY</code>. Copy the value and paste it into MultiRoblox.</div>
+      </div>
+
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="closeModal('m-help')">Got it</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
