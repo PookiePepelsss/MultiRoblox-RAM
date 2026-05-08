@@ -12,7 +12,7 @@
   --bg:#0e0e10;--s1:#111114;--s2:#18181d;--s3:#1f1f26;--s4:#26262f;
   --bd:rgba(255,255,255,0.07);--bd2:rgba(255,255,255,0.13);
   --t1:#f0f0f5;--t2:#9898b4;--t3:#5c5c78;
-  --ac:#5c5ce0;--ac2:rgba(92,92,224,0.14);--ac3:rgba(92,92,224,0.3);
+  --ac:#5c5ce0;--ac2:rgba(92,92,224,0.35);--ac3:rgba(92,92,224,0.5);
   --green:#3ecf8e;--gd:rgba(62,207,142,0.1);
   --red:#f06f6f;--rd:rgba(240,111,111,0.1);
   --r:10px;--r2:8px;
@@ -25,7 +25,7 @@ body.light{
   --bg:#f4f4f8;--s1:#ffffff;--s2:#ebebf0;--s3:#e0e0e8;--s4:#d0d0dc;
   --bd:rgba(0,0,0,0.08);--bd2:rgba(0,0,0,0.15);
   --t1:#0e0e1a;--t2:#555570;--t3:#9898b4;
-  --ac:#5c5ce0;--ac2:rgba(92,92,224,0.12);--ac3:rgba(92,92,224,0.25);
+  --ac:#5c5ce0;--ac2:rgba(92,92,224,0.3);--ac3:rgba(92,92,224,0.45);
   --green:#1a9e62;--gd:rgba(26,158,98,0.1);
   --red:#d94f4f;--rd:rgba(217,79,79,0.1);
 }
@@ -43,10 +43,10 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 
 /* titlebar */
 #titlebar{height:var(--tb);display:flex;align-items:center;padding:0 10px 0 0;-webkit-app-region:drag;border-bottom:1px solid var(--bd);flex-shrink:0}
-.tb-brand{width:var(--sb);flex-shrink:0;display:flex;align-items:center;padding:0 16px;border-right:1px solid var(--bd);height:100%}
+.tb-brand{width:auto;min-width:var(--sb);flex-shrink:0;display:flex;align-items:center;padding:0 16px;gap:16px;height:100%}
 .tb-name{font-size:13px;font-weight:600;letter-spacing:-.02em;color:var(--t1)}
 .tb-drag{flex:1;height:100%;display:flex;align-items:center;justify-content:center}
-.tb-version{font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:500;color:var(--t2);background:var(--s2);border:1px solid var(--bd);border-radius:5px;padding:2px 9px;letter-spacing:.01em;pointer-events:none;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tb-version{font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:500;color:var(--t2);background:var(--s2);border:1px solid var(--bd);border-radius:5px;padding:2px 9px;letter-spacing:.01em;pointer-events:none;white-space:nowrap}
 .tb-controls{display:flex;gap:1px;-webkit-app-region:no-drag}
 .tb-btn{width:32px;height:28px;border-radius:6px;border:none;background:transparent;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth)}
 .tb-btn:hover{background:var(--s3);color:var(--t2)}
@@ -62,13 +62,14 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .nav-item{width:100%;display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--r2);border:none;background:transparent;color:var(--t3);cursor:pointer;font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;text-align:left;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth)}
 .nav-item:hover{color:var(--t2)}
 
-.nav-item.active{background:var(--ac2);color:var(--ac)}
+.nav-item.active{background:var(--ac);color:#fff}
 .nav-item .material-icons-round{font-size:17px;flex-shrink:0}
 .nav-item+.nav-item{margin-top:2px}
 .nav-spacer{flex:1}
 .nav-div{height:1px;background:var(--bd);margin:8px 2px;flex-shrink:0}
-.nav-add{width:100%;display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:var(--r2);border:1px solid var(--bd);background:transparent;color:var(--t3);cursor:pointer;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;text-align:left;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth),border-color var(--dur) var(--smooth)}
-.nav-add:hover{background:var(--ac2);color:var(--ac);border-color:var(--ac)}
+.nav-add{width:100%;display:none;align-items:center;gap:6px;padding:7px 10px;border-radius:var(--r2);border:1px solid var(--bd);background:transparent;color:var(--t3);cursor:pointer;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;text-align:left;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth),border-color var(--dur) var(--smooth)}
+.nav-add.visible{display:flex}
+.nav-add:hover{background:var(--ac);color:#fff;border-color:var(--ac)}
 .nav-add:active{opacity:.7}
 .nav-add .material-icons-round{font-size:15px;flex-shrink:0}
 
@@ -91,7 +92,7 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 ::-webkit-scrollbar-thumb{background:var(--s4);border-radius:3px}
 
 /* account grid */
-.grid-wrap{flex:1;overflow-y:auto;padding:12px 18px 18px;scrollbar-width:thin;scrollbar-color:var(--s4) transparent}
+.grid-wrap{flex:1;overflow-y:auto;padding:12px 18px 18px;scrollbar-width:thin;scrollbar-color:var(--s4) transparent;display:flex;flex-direction:column}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,155px));gap:9px;justify-content:start;align-items:stretch}
 
 /* account cards */
@@ -106,11 +107,10 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .card-av img{width:100%;height:100%;object-fit:cover}
 .card-name{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;letter-spacing:-.01em}
 .card-uid{font-size:11px;color:var(--t2);font-weight:500;margin-bottom:10px}
-.card-game{font-size:11px;color:var(--ac);background:var(--ac2);border-radius:5px;padding:2px 7px;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none}
+.card-game{font-size:11px;font-weight:700;color:var(--t2);background:var(--s3);border-radius:5px;padding:2px 7px;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none}
 .card-game.visible{display:block}
 .card-row{display:flex;gap:5px;margin-top:auto}
-.gen-hist-item{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:12.5px;font-family:'Inter',sans-serif;font-weight:500;color:var(--t2);border-top:1px solid var(--bd);cursor:default}
-.gen-hist-item:first-child{border-top:none}
+.gen-hist-item{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:12.5px;font-family:'Inter',sans-serif;font-weight:500;color:var(--t2);cursor:default}
 .gen-hist-item:hover{background:var(--s3)}
 .gen-hist-item .gh-user{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t1)}
 .gen-hist-item .gh-actions{display:flex;gap:4px;flex-shrink:0}
@@ -121,8 +121,8 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .drag-handle{position:absolute;top:6px;right:6px;color:var(--t3);opacity:0;transition:opacity var(--dur) var(--smooth);cursor:grab;font-size:14px;line-height:1}
 .card:hover .drag-handle{opacity:.5}
 .card-add{background:transparent;border:1px dashed var(--bd);border-radius:var(--r);padding:13px 13px 11px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;cursor:pointer;transition:border-color var(--dur) var(--smooth),background var(--dur) var(--smooth);height:176px}
-.card-add:hover{border-color:var(--ac);background:var(--ac2)}
-.card-add:active{border-color:var(--ac);background:var(--ac2)}
+.card-add:hover{border-color:var(--ac);background:transparent}
+.card-add:active{border-color:var(--ac);background:transparent}
 .card-add:hover .card-add-icon{color:var(--ac)}
 .card-add:hover .card-add-label{color:var(--ac)}
 .card-add-icon{font-size:22px;color:var(--t3);transition:color var(--dur) var(--smooth)}
@@ -134,12 +134,12 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .btn:active{transform:scale(0.95) translateY(0);opacity:.85}
 .btn:disabled{opacity:.35;cursor:not-allowed;transform:none !important}
 .btn .material-icons-round{font-size:13px}
-.btn-launch{flex:1;padding:6px 0;background:var(--ac2);color:var(--ac)}
-.btn-launch:hover{background:var(--ac);color:#fff;box-shadow:0 4px 12px var(--ac3)}
+.btn-launch{flex:1;padding:6px 0;background:var(--ac);color:#fff}
+.btn-launch:hover{background:var(--ac);color:#fff;opacity:.85;box-shadow:0 4px 12px var(--ac3)}
 .btn-edit{width:28px;height:28px;background:var(--s2);color:var(--t3)}
 .btn-edit:hover{background:var(--s4);color:var(--t1)}
-.btn-del{width:28px;height:28px;background:var(--s2);color:var(--t3)}
-.btn-del:hover{background:var(--rd);color:var(--red)}
+.btn-del{width:28px;height:28px;background:var(--rd);color:var(--red)}
+.btn-del:hover{background:var(--red);color:#fff}
 .btn-primary{padding:8px 16px;background:var(--ac);color:#fff;font-size:12.5px}
 .btn-primary:hover{opacity:.88;box-shadow:0 4px 14px var(--ac3)}
 .btn-ghost{padding:8px 14px;background:transparent;color:var(--t2);border:1px solid var(--bd);font-size:12.5px}
@@ -156,13 +156,12 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 /* settings rows */
 .sw{flex:1;overflow-y:auto;padding:12px 18px 18px;scrollbar-width:thin;scrollbar-color:var(--s4) transparent}
 .sc{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;margin-bottom:10px}
-.sc-head{padding:9px 14px;border-bottom:1px solid var(--bd);font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--t3)}
-.sr{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--bd);gap:12px}
-.sr:last-child{border-bottom:none}
+.sc-head{padding:9px 14px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--t3)}
+.sr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;gap:12px}
 .sr-left{flex:1;min-width:0}
 .sr-label{font-size:13px;font-weight:500;margin-bottom:2px;color:var(--t1);letter-spacing:-.01em}
 .sr-desc{font-size:12px;color:var(--t2);line-height:1.6;font-weight:400}
-.badge{font-size:10.5px;font-weight:600;padding:2px 9px;border-radius:5px;background:var(--ac2);color:var(--ac);flex-shrink:0;white-space:nowrap;letter-spacing:.01em}
+.badge{font-size:10.5px;font-weight:600;padding:2px 9px;border-radius:5px;background:var(--s3);color:var(--t2);flex-shrink:0;white-space:nowrap;letter-spacing:.01em}
 .badge.g{background:var(--gd);color:var(--green)}
 .sr-input{background:var(--bg);border:1px solid var(--bd);border-radius:var(--r2);padding:7px 11px;color:var(--t1);font-size:12.5px;font-family:'Inter',sans-serif;font-weight:500;outline:none;width:200px;transition:border-color var(--dur) var(--smooth),box-shadow var(--dur) var(--smooth)}
 .sr-input:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--ac2)}
@@ -189,7 +188,7 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .cdd-opt-name{font-size:12.5px;font-weight:500;color:var(--t1)}
 .cdd-opt-desc{font-size:11px;color:var(--t3);line-height:1.4;font-weight:400}
 .cdd-option.selected .cdd-opt-name{color:var(--ac)}
-.cdd-option.selected .cdd-opt-desc{color:rgba(92,92,224,.55)}
+.cdd-option.selected .cdd-opt-desc{color:var(--t3)}
 .cdd-check{font-size:15px;color:var(--ac);flex-shrink:0;opacity:0;transition:opacity var(--dur) var(--smooth)}
 .cdd-option.selected .cdd-check{opacity:1}
 
@@ -214,7 +213,7 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .mst .material-icons-round{font-size:14px;flex-shrink:0}
 .modal-actions{display:flex;gap:7px;justify-content:flex-end;margin-top:18px}
 .login-wait{display:flex;flex-direction:column;align-items:center;gap:9px;padding:20px 0 6px}
-.login-wait p{font-size:12.5px;color:var(--t2);text-align:center;line-height:1.6;font-weight:400}
+.login-wait p{font-size:13px;color:var(--t1);text-align:center;line-height:1.6;font-weight:500}
 .prev{display:flex;align-items:center;gap:9px;padding:10px 12px;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r2);margin-bottom:14px}
 .prev-av{width:32px;height:32px;border-radius:50%;background:var(--s3);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;overflow:hidden}
 .prev-av img{width:100%;height:100%;object-fit:cover}
@@ -246,9 +245,9 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .chart-search-input:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--ac2)}
 .chart-search-wrap-inner{position:relative}
 .chart-search-icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--t3);pointer-events:none}
-.tab-btn{padding:7px 12px;border-radius:6px;border:1px solid var(--bd);background:transparent;color:var(--t3);font-family:'Inter',sans-serif;font-size:11.5px;font-weight:500;cursor:pointer;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth),border-color var(--dur) var(--smooth)}
-.tab-btn:hover{background:var(--s3);color:var(--t2)}
-.tab-btn.active{background:var(--ac2);color:var(--ac);border-color:var(--ac3)}
+.tab-btn{padding:7px 12px;border-radius:6px;border:1px solid var(--bd);background:var(--s2);color:var(--t3);font-family:'Inter',sans-serif;font-size:11.5px;font-weight:500;cursor:pointer;transition:background var(--dur) var(--smooth),color var(--dur) var(--smooth),border-color var(--dur) var(--smooth)}
+.tab-btn:hover{background:var(--s3);color:var(--t2);border-color:var(--bd2)}
+.tab-btn.active{background:var(--ac);color:#fff}
 
 /* charts page */
 .charts-inner{flex:1;display:flex;flex-direction:column;overflow:hidden}
@@ -272,7 +271,7 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 .fflag-sc{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;margin-bottom:10px}
 .fflag-toolbar{display:flex;gap:6px;padding:12px 18px 8px;flex-shrink:0;align-items:center}
 .btn-sm{padding:7px 10px;font-size:12px;gap:4px}
-#ff-table-wrap{flex:1;overflow-y:auto;padding:0 18px 8px}
+#ff-table-wrap{flex:1;overflow-y:auto;padding:0 18px 8px;display:flex;flex-direction:column}
 .ff-table{width:100%;border-collapse:collapse;font-size:13px}
 .ff-table thead th{position:sticky;top:0;background:var(--s2);padding:7px 10px;text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--bd);z-index:1}
 .ff-table tbody tr{border-bottom:1px solid var(--bd);animation:ffRowIn 180ms var(--spring) both}.ff-table tbody tr.ff-removing{animation:ffRowOut 160ms var(--smooth) forwards}@keyframes ffRowIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}@keyframes ffRowOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(8px);height:0;padding:0}}
@@ -321,8 +320,8 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 <div id="titlebar">
   <div class="tb-brand">
     <div class="tb-name">MultiRoblox</div>
+    <span class="tb-version" id="tb-roblox-ver">—</span>
   </div>
-  <span class="tb-version" id="tb-roblox-ver" style="margin-left:12px;flex-shrink:0">—</span>
   <div class="tb-drag"></div>
   <button class="tb-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark" style="-webkit-app-region:no-drag"><span class="material-icons-round" id="theme-icon" style="font-size:15px">light_mode</span></button>
   <button class="tb-btn" onclick="openModal('m-help')" title="Help" style="-webkit-app-region:no-drag"><span class="material-icons-round" style="font-size:15px">help_outline</span></button>
@@ -351,10 +350,6 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
       <span class="material-icons-round">settings</span>Settings
     </button>
     <div class="nav-spacer"></div>
-    <div class="nav-div"></div>
-    <button class="nav-add" onclick="openLogin()">
-      <span class="material-icons-round">add_circle_outline</span>Add account
-    </button>
   </nav>
 
   <main id="main">
@@ -434,7 +429,7 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
               <thead><tr><th>Flag Name</th><th>Value</th><th></th></tr></thead>
               <tbody id="ff-tbody"></tbody>
             </table>
-            <div id="ff-empty" style="display:none;padding:32px;text-align:center;color:var(--t3);font-size:13px">
+            <div id="ff-empty" style="display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--t3);font-size:13px">
               <span class="material-icons-round" style="font-size:32px;display:block;margin-bottom:8px;opacity:.4">flag</span>
               No flags set. Click <b>Add Flag</b> to get started.
             </div>
@@ -516,7 +511,7 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
           <!-- Info row -->
           <div class="sc">
             <div class="sc-head">About</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">MultiRoblox</div><div class="sr-desc">Version 1.0.0 — launch multiple Roblox accounts simultaneously</div></div></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">MultiRoblox</div><div class="sr-desc">Version 1.0.0</div></div></div>
             <div class="sr"><div class="sr-left"><div class="sr-label">Accounts saved</div></div><span class="badge" id="stat-count">0</span></div>
             <div class="sr"><div class="sr-left"><div class="sr-label">Roblox version</div></div><span class="badge" id="stat-rblx-ver">—</span></div>
           </div>
@@ -621,7 +616,7 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
       <!-- Waiting for login -->
       <div id="login-waiting" class="login-wait" style="display:none">
         <div class="spin" style="width:18px;height:18px;border-width:2.5px;color:var(--ac)"></div>
-        <p>Waiting for login…<br/><span style="font-size:11px;color:var(--t3)">Sign in on the Chrome window that just opened.</span></p>
+        <p>Waiting for login…<br/><span style="font-size:12px;color:var(--t2);font-weight:500">Sign in on the Chrome window that just opened.</span></p>
       </div>
     </div>
 
@@ -651,7 +646,6 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 <div class="overlay" id="m-edit" data-backdrop-close="false">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-title" id="edit-title">Edit account</div>
-    <div class="modal-sub">Customize this account's display name and game target.</div>
     <div class="field">
       <label>Nickname</label>
       <input type="text" id="in-nickname" placeholder="Leave blank to use Roblox username"/>
@@ -674,14 +668,12 @@ button:focus-visible,button:focus,.nav-item:focus,.nav-item:focus-visible,.tab-b
 
 <!-- launch modal -->
 <div class="overlay" id="m-launch" data-backdrop-close="true">
-  <div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-title">Launch Roblox</div>
-    <div class="modal-sub">Gets an auth ticket for this account and launches Roblox logged in.</div>
+  <div class="modal" onclick="event.stopPropagation()" style="width:340px">
     <div class="prev" id="launch-prev"></div>
     <div class="mst hidden" id="launch-status"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('m-launch')">Cancel</button>
-      <button class="btn btn-primary" id="btn-launch" onclick="doLaunch()"><span class="material-icons-round">rocket_launch</span>Launch</button>
+      <button class="btn btn-primary" id="btn-launch" onclick="doLaunch()"><span class="material-icons-round">rocket_launch</span>Start</button>
     </div>
   </div>
 </div>
@@ -872,24 +864,80 @@ function render() {
       <span class="material-icons-round drag-handle">drag_indicator</span>
       <div class="card-av" id="av-${a.id}">${(a.username || '?')[0].toUpperCase()}</div>
       <div class="card-name">${esc(a.nickname || a.username || 'Unknown')}</div>
-      <div class="card-uid">${a.userId ? '#' + a.userId : '\u2014'}</div>
+      <div class="card-uid">${a.userId ? 'ID ' + a.userId : '\u2014'}</div>
       <div class="card-game ${a.gameTarget ? 'visible' : ''}" id="gt-${a.id}" title="${esc(a.gameTarget || '')}">
-        ${a.gameTarget ? truncate(a.gameTarget, 22) : ''}
+        ${a.gameTarget ? (truncate(_gameNameCache[a.id] || extractTargetLabel(a.gameTarget), 22)) : ''}
       </div>
       <div class="card-row">
         <button class="btn btn-launch" onclick="openLaunch('${a.id}')">
           <span class="material-icons-round">rocket_launch</span>Start
         </button>
-        <button class="btn btn-edit" onclick="openEdit('${a.id}')" title="Set game target">
+        <button class="btn btn-edit" onclick="openEdit('${a.id}')" title="Edit">
           <span class="material-icons-round">edit</span>
         </button>
-        <button class="btn btn-del" onclick="removeAcc('${a.id}')" title="Remove account">
+        <button class="btn btn-del" onclick="removeAcc('${a.id}')" title="Remove">
           <span class="material-icons-round">delete_outline</span>
         </button>
       </div>
     </div>`).join('') + `<div class="card-add" onclick="openLogin()"><span class="material-icons-round card-add-icon">add</span><span class="card-add-label">Add account</span></div>`;
-  accounts.forEach(a => { if (a.userId) loadAvatar(a.id, a.userId); });
+  accounts.forEach(a => { if (a.userId) loadAvatar(a.id, a.userId); if (a.gameTarget && !_gameNameCache[a.id]) fetchGameName(a.id, a.gameTarget); });
   initDrag();
+}
+
+
+const _gameNameCache = {}; // accountId -> resolved game name
+
+function extractTargetLabel(target) {
+  if (!target) return '';
+  const t = target.trim();
+  if (/^\d+$/.test(t)) return t;
+  try {
+    const u = new URL(t.startsWith('http') ? t : 'https://' + t);
+    const parts = u.pathname.split('/').filter(Boolean);
+    // extract linkCode or share code for private servers
+    const name = (parts[2] || parts[1] || '').replace(/-/g, ' ').trim();
+    return name || u.hostname;
+  } catch { return truncate(target, 22); }
+}
+
+async function fetchGameName(accountId, target) {
+  if (!target) return;
+  const t = target.trim();
+  // Find the account to get its cookie for authenticated requests
+  const acct = accounts.find(a => a.id === accountId);
+  const cookie = acct ? acct.cookie : null;
+  let placeId = null;
+  if (/^\d+$/.test(t)) {
+    placeId = t;
+  } else {
+    try {
+      const u = new URL(t.startsWith('http') ? t : 'https://' + t);
+      const parts = u.pathname.split('/').filter(Boolean);
+      // /games/<placeId>/... or /games/<placeId>
+      if (parts[0] === 'games' && parts[1] && /^\d+$/.test(parts[1])) placeId = parts[1];
+      if (!placeId) placeId = u.searchParams.get('placeId');
+      // PlaceLauncher URLs: ?placeId=...
+      if (!placeId) { const m = t.match(/[?&]placeId=(\d+)/); if (m) placeId = m[1]; }
+    } catch {}
+  }
+  if (!cookie) {
+    _gameNameCache[accountId] = extractTargetLabel(target);
+    updateGameLabel(accountId);
+    return;
+  }
+  // Fetch via main process (authenticated with cookie)
+  // Pass placeId if resolved, otherwise pass full target and let main.js handle it
+  const name = await api.getGameName(placeId || t, cookie);
+  _gameNameCache[accountId] = name || extractTargetLabel(target);
+  updateGameLabel(accountId);
+}
+
+function updateGameLabel(accountId) {
+  const el = document.getElementById('gt-' + accountId);
+  if (!el) return;
+  const a = accounts.find(x => x.id === accountId);
+  if (!a || !a.gameTarget) return;
+  el.textContent = truncate(_gameNameCache[accountId] || extractTargetLabel(a.gameTarget), 22);
 }
 
 function truncate(s, n) { return s.length > n ? s.slice(0, n) + '\u2026' : s; }
@@ -1083,7 +1131,7 @@ async function finishLogin(res) {
 
 function openEdit(id) {
   editAcc = accounts.find(a => a.id === id); if (!editAcc) return;
-  document.getElementById('edit-title').textContent = 'Edit \u2014 ' + editAcc.username;
+  document.getElementById('edit-title').textContent = 'Edit — ' + (editAcc.nickname || editAcc.username);
   document.getElementById('in-nickname').value = editAcc.nickname || '';
   document.getElementById('in-target').value = editAcc.gameTarget || '';
   openModal('m-edit');
@@ -1094,7 +1142,15 @@ async function saveEdit() {
   const target = document.getElementById('in-target').value.trim();
   const nickname = document.getElementById('in-nickname').value.trim();
   const updated = await api.updateAccount(editAcc.id, { gameTarget: target, nickname });
-  if (updated) { const idx = accounts.findIndex(a => a.id === editAcc.id); if (idx !== -1) accounts[idx] = updated; render(); }
+  if (updated) {
+    const idx = accounts.findIndex(a => a.id === editAcc.id);
+    if (idx !== -1) {
+      accounts[idx] = updated;
+      delete _gameNameCache[editAcc.id]; // clear stale name
+      render();
+      if (target) fetchGameName(editAcc.id, target); // fetch new name immediately
+    } else { render(); }
+  }
   closeModal('m-edit');
   toast('Saved', 'ok');
 }
@@ -1128,10 +1184,12 @@ async function clearAll() {
 function openLaunch(id) {
   launchAcc = accounts.find(a => a.id === id); if (!launchAcc) return;
   const target = launchAcc.gameTarget || '';
+  const gameName = _gameNameCache[launchAcc.id] || (target ? extractTargetLabel(target) : '');
   const p = document.getElementById('launch-prev');
   p.innerHTML = '<div class="prev-av" id="prev-av">' + launchAcc.username[0].toUpperCase() + '</div>' +
     '<div><div class="prev-name">' + esc(launchAcc.username) + '</div>' +
-    '<div class="prev-uid">' + (target ? '\u2192 ' + truncate(target, 28) : (launchAcc.userId ? '#' + launchAcc.userId : 'Opens home screen')) + '</div></div>';
+    '<div class="prev-uid">' + (gameName || 'Opens home screen') + '</div></div>';
+  // Avatar
   if (launchAcc.userId) {
     fetch('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + launchAcc.userId + '&size=48x48&format=Png')
       .then(r => r.json()).then(d => {
@@ -1139,9 +1197,10 @@ function openLaunch(id) {
         if (url && el) el.innerHTML = '<img src="' + url + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>';
       }).catch(() => {});
   }
+
   setStatus('launch-status', 'hidden', '');
   const btn = document.getElementById('btn-launch');
-  btn.disabled = false; btn.innerHTML = '<span class="material-icons-round">rocket_launch</span>Launch';
+  btn.disabled = false; btn.innerHTML = '<span class="material-icons-round">rocket_launch</span>Start';
   openModal('m-launch');
 }
 async function doLaunch() {
@@ -1153,7 +1212,7 @@ async function doLaunch() {
   const res = await api.launchRoblox(launchAcc.id, launchAcc.cookie, launchAcc.gameTarget || null);
   if (!res.success) {
     setStatus('launch-status', 'err', '<span class="material-icons-round">error_outline</span>' + res.error);
-    btn.disabled = false; btn.innerHTML = '<span class="material-icons-round">rocket_launch</span>Launch';
+    btn.disabled = false; btn.innerHTML = '<span class="material-icons-round">rocket_launch</span>Start';
     return;
   }
   setStatus('launch-status', 'ok', '<span class="material-icons-round">check_circle</span>Launched as ' + launchAcc.username);
@@ -1450,7 +1509,7 @@ function ffRenderTable() {
   const empty = document.getElementById('ff-empty');
   const keys = Object.keys(currentFlags);
   tbody.innerHTML = '';
-  empty.style.display = keys.length === 0 ? '' : 'none';
+  empty.style.display = keys.length === 0 ? 'flex' : 'none';
   document.querySelector('.ff-table').style.display = keys.length === 0 ? 'none' : '';
   keys.forEach(k => {
     const tr = document.createElement('tr');
@@ -1769,39 +1828,26 @@ async function resetFlags() {
 
 <!-- help modal -->
 <div class="overlay" id="m-help" data-backdrop-close="true" onclick="if(event.target===this)closeModal('m-help')">
-  <div class="modal" onclick="event.stopPropagation()" style="width:420px;max-height:75vh;display:flex;flex-direction:column;overflow:hidden">
-    <div class="modal-title">How to use MultiRoblox</div>
-    <div class="modal-sub">Quick guide to get started</div>
-
-    <div style="display:flex;flex-direction:column;gap:14px;font-size:12.5px;color:var(--t2);line-height:1.65;overflow-y:auto;padding-right:4px;flex:1;min-height:0">
-
-      <div>
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">① Adding Accounts</div>
-        <div>Click <b style="color:var(--t1)">+ Add Account</b> in the sidebar. Choose <b style="color:var(--t1)">Login Page</b> to sign in via Chrome browser — your cookie is captured automatically. Or choose <b style="color:var(--t1)">Paste Cookie</b> to paste a <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">.ROBLOSECURITY</code> cookie directly.</div>
+  <div class="modal" onclick="event.stopPropagation()" style="width:380px">
+    <div class="modal-title">How to use</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin:14px 0">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <span class="material-icons-round" style="font-size:16px;color:var(--ac);margin-top:1px;flex-shrink:0">person_add</span>
+        <div><div style="font-size:12.5px;font-weight:600;color:var(--t1);margin-bottom:2px">Add Account</div><div style="font-size:12px;color:var(--t2)">Click Add Account in the sidebar. Sign in via browser or paste your <code style="font-family:'JetBrains Mono',monospace;font-size:10.5px;background:var(--s3);padding:1px 5px;border-radius:4px">.ROBLOSECURITY</code> cookie.</div></div>
       </div>
-
-      <div>
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">② Launching Accounts</div>
-        <div>Click the <b style="color:var(--t1)">Launch</b> button on any account card to open Roblox with that account. You can launch multiple accounts simultaneously — each runs in its own isolated Roblox instance.</div>
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <span class="material-icons-round" style="font-size:16px;color:var(--ac);margin-top:1px;flex-shrink:0">rocket_launch</span>
+        <div><div style="font-size:12.5px;font-weight:600;color:var(--t1);margin-bottom:2px">Launch</div><div style="font-size:12px;color:var(--t2)">Click Start on any card. Set a game ID or private server link via the edit button to launch directly into a game.</div></div>
       </div>
-
-      <div>
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">③ Generator</div>
-        <div>Go to the <b style="color:var(--t1)">Generator</b> tab. Paste your <b style="color:var(--t1)">BloxGen API key</b> (starts with <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">BLOX-</code>) from <b style="color:var(--t1)">bloxgen.net</b>, then click Generate. The combo and cookie are shown and copied to clipboard automatically.</div>
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <span class="material-icons-round" style="font-size:16px;color:var(--ac);margin-top:1px;flex-shrink:0">shuffle</span>
+        <div><div style="font-size:12.5px;font-weight:600;color:var(--t1);margin-bottom:2px">Generator</div><div style="font-size:12px;color:var(--t2)">Paste a BloxGen API key from bloxgen.net and click Generate to create an alt account.</div></div>
       </div>
-
-      <div>
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">④ Fast Flags</div>
-        <div>The <b style="color:var(--t1)">FFlags</b> tab lets you set Roblox client flags (like FPS unlocking or graphics tweaks). Changes are saved to <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">ClientAppSettings.json</code> and applied on the next Roblox launch.</div>
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <span class="material-icons-round" style="font-size:16px;color:var(--ac);margin-top:1px;flex-shrink:0">tune</span>
+        <div><div style="font-size:12.5px;font-weight:600;color:var(--t1);margin-bottom:2px">Fast Flags</div><div style="font-size:12px;color:var(--t2)">Set Roblox client flags like FPS cap. Saved to ClientAppSettings.json and applied on next launch.</div></div>
       </div>
-
-      <div>
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin-bottom:5px">⑤ Getting Your Cookie</div>
-        <div>Open Chrome → go to <b style="color:var(--t1)">roblox.com</b> → press <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">F12</code> → Application → Cookies → <code style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);padding:1px 5px;border-radius:4px">.ROBLOSECURITY</code>. Copy the value and paste it into MultiRoblox.</div>
-      </div>
-
     </div>
-
     <div class="modal-actions">
       <button class="btn btn-primary" onclick="closeModal('m-help')">Got it</button>
     </div>

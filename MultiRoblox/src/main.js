@@ -23,15 +23,11 @@ function isMultiInstanceEnabled() {
 
 function startMutexHolder() {
   if (_mutexProc) return;
-  const psScript = app.isPackaged
-    ? path.join(process.resourcesPath, 'mutex.ps1')
-    : path.join(__dirname, 'mutex.ps1');
+  const exePath = app.isPackaged
+    ? path.join(process.resourcesPath, 'mutex.exe')
+    : path.join(__dirname, 'mutex.exe');
   try {
-    _mutexProc = spawn('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
-      '-ExecutionPolicy', 'Bypass',
-      '-File', psScript,
-    ], {
+    _mutexProc = spawn(exePath, [], {
       stdio: ['pipe', 'pipe', 'ignore'],
       windowsHide: true,
     });
@@ -717,6 +713,54 @@ async function getAccessCode(placeId, linkCode, cookie, csrfToken) {
     req.end();
   });
 }
+
+
+ipcMain.handle('roblox:getGameName', async (_, placeIdOrTarget, cookie) => {
+  try {
+    // If given a full URL/link, extract placeId first
+    let placeId = placeIdOrTarget;
+    if (!/^\d+$/.test(String(placeIdOrTarget).trim())) {
+      // Try to extract placeId from URL
+      try {
+        const u = new URL(placeIdOrTarget.startsWith('http') ? placeIdOrTarget : 'https://' + placeIdOrTarget);
+        const parts = u.pathname.split('/').filter(Boolean);
+        if (parts[0] === 'games' && parts[1] && /^\d+$/.test(parts[1])) {
+          placeId = parts[1];
+        } else {
+          const m = placeIdOrTarget.match(/[?&]placeId=(\d+)/);
+          if (m) placeId = m[1];
+        }
+      } catch {}
+      if (!/^\d+$/.test(String(placeId).trim())) return null;
+    }
+    const result = await new Promise((resolve) => {
+      const req = https.request({
+        hostname: 'games.roblox.com',
+        path: '/v1/games/multiget-place-details?placeIds=' + placeId,
+        method: 'GET',
+        headers: {
+          'Cookie': `.ROBLOSECURITY=${cookie}`,
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      }, res => {
+        let body = '';
+        res.on('data', c => body += c);
+        res.on('end', () => {
+          try {
+            const d = JSON.parse(body);
+            const name = Array.isArray(d) ? d[0]?.name : null;
+            resolve(name || null);
+          } catch { resolve(null); }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.setTimeout(5000, () => { req.destroy(); resolve(null); });
+      req.end();
+    });
+    return result;
+  } catch { return null; }
+});
 
 ipcMain.handle('roblox:launch', async (_, accountId, cookie, target) => {
   const result = await (_launchQueue = _launchQueue.then(() => _doLaunch(accountId, cookie, target)));
