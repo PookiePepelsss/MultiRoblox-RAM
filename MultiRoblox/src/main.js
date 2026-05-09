@@ -23,11 +23,15 @@ function isMultiInstanceEnabled() {
 
 function startMutexHolder() {
   if (_mutexProc) return;
-  const exePath = app.isPackaged
-    ? path.join(process.resourcesPath, 'mutex.exe')
-    : path.join(__dirname, 'mutex.exe');
+  const psScript = app.isPackaged
+    ? path.join(process.resourcesPath, 'mutex.ps1')
+    : path.join(__dirname, 'mutex.ps1');
   try {
-    _mutexProc = spawn(exePath, [], {
+    _mutexProc = spawn('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', psScript,
+    ], {
       stdio: ['pipe', 'pipe', 'ignore'],
       windowsHide: true,
     });
