@@ -1,10 +1,19 @@
+<div align="center">
+
 # MultiRoblox
 
-run multiple roblox accounts at the same time on windows
+**run as many roblox accounts as you want, all at once, on windows**
 
-built with electron — no installer needed. grab the exe from releases or build from source:
+[![platform](https://img.shields.io/badge/platform-windows-blue?style=flat-square&logo=windows)](https://github.com/PookiePepelss/multiroblox/releases)
+[![built with electron](https://img.shields.io/badge/built%20with-electron-47848f?style=flat-square&logo=electron)](https://www.electronjs.org/)
+[![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![download](https://img.shields.io/badge/download-latest%20release-brightgreen?style=flat-square)](https://github.com/PookiePepelss/multiroblox/releases)
 
-```
+</div>
+
+no installer needed. grab the exe from [releases](https://github.com/PookiePepelss/multiroblox/releases) and run it, or build from source:
+
+```bash
 git clone https://github.com/PookiePepelss/multiroblox.git
 cd multiroblox
 npm install && npm run build
@@ -18,7 +27,7 @@ npm install && npm run build
 - set a game id or private server link per account so it launches straight there
 - assign nicknames to accounts for easy identification
 - filter and search across all saved accounts
-- cookies are encrypted with AES-256-GCM and stored locally — nothing leaves your device
+- cookies are encrypted with AES-256-GCM and stored locally. nothing leaves your device
 
 **packages**
 - group accounts into packages (e.g. farm squad, trading alts)
@@ -44,7 +53,7 @@ npm install && npm run build
 - light/dark theme toggle
 
 **anti-afk**
-- toggle from the sidebar — taps a benign key into every open roblox window on a configurable interval so the idle kick never fires
+- toggle from the sidebar. taps a benign key into every open roblox window on a configurable interval so the idle kick never fires
 
 **fast flags**
 - per-account fast flag editor, saved to `ClientAppSettings.json` and applied on next launch
