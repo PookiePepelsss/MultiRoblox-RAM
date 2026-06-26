@@ -44,7 +44,7 @@ npm install && npm run build
 - search and launch any game directly from the charts page
 
 **generator**
-- generate roblox accounts using a blox.gg api key
+- generate roblox accounts using a [bloxgen.net](https://bloxgen.net/) api key
 
 **settings**
 - general, themes, and sounds tabs
