@@ -1,0 +1,97 @@
+{
+  "name": "multiroblox",
+  "version": "1.0.0",
+  "description": "MultiRoblox",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "prebuild": "node scripts/build-native.js",
+    "build": "electron-builder --win --x64",
+    "build:fast": "node scripts/build-native.js && electron-builder --win --x64 --dir"
+  },
+  "build": {
+    "appId": "com.multiroblox.app",
+    "productName": "MultiRoblox",
+    "icon": "src/icon.ico",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "!src/RobloxNative.exe",
+      "node_modules/**/*",
+      "!node_modules/**/test/**",
+      "!node_modules/**/tests/**",
+      "!node_modules/**/__tests__/**",
+      "!node_modules/**/*.md",
+      "!node_modules/**/*.markdown",
+      "!node_modules/**/*.ts",
+      "!node_modules/**/*.d.ts",
+      "!node_modules/**/*.map",
+      "!node_modules/**/*.flow",
+      "!node_modules/**/*.tsbuildinfo",
+      "!node_modules/**/tsconfig*.json",
+      "!node_modules/**/*.yml",
+      "!node_modules/**/*.yaml",
+      "!node_modules/**/README*",
+      "!node_modules/**/CHANGELOG*",
+      "!node_modules/**/AUTHORS*",
+      "!node_modules/**/LICENSE*",
+      "!node_modules/**/LICENCE*",
+      "!node_modules/**/docs/**",
+      "!node_modules/**/example/**",
+      "!node_modules/**/examples/**",
+      "!node_modules/**/.github/**",
+      "!node_modules/**/.bin/**",
+      "!node_modules/**/.editorconfig",
+      "!node_modules/**/.eslintrc*",
+      "!node_modules/**/.prettierrc*",
+      "!node_modules/**/.npmignore",
+      "!node_modules/**/.gitignore",
+      "!node_modules/**/.gitattributes",
+      "!node_modules/**/.travis.yml",
+      "!node_modules/**/benchmark/**",
+      "!node_modules/**/coverage/**"
+    ],
+    "win": {
+      "icon": "src/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "portable": {
+      "artifactName": "MultiRoblox.exe"
+    },
+    "compression": "normal",
+    "asar": true,
+    "electronLanguages": [
+      "en-US"
+    ],
+    "extraResources": [
+      {
+        "from": "src",
+        "to": ".",
+        "filter": [
+          "RobloxNative.cs",
+          "RobloxNative.exe"
+        ]
+      }
+    ],
+    "nodeGypRebuild": false,
+    "buildDependenciesFromSource": false
+  },
+  "devDependencies": {
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "puppeteer-core": "^22.0.0",
+    "@puppeteer/browsers": "^2.0.0"
+  }
+}
