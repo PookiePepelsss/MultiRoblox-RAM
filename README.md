@@ -55,9 +55,6 @@ npm install && npm run build
 **anti-afk**
 - toggle from the sidebar. taps a benign key into every open roblox window on a configurable interval so the idle kick never fires
 
-**fast flags**
-- per-account fast flag editor, saved to `ClientAppSettings.json` and applied on next launch
-
 **logs**
 - real-time log viewer with in-page search (ctrl+f)
 
