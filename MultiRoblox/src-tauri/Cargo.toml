@@ -1,0 +1,55 @@
+[package]
+name = "mr_tauri"
+version = "1.0.0"
+description = "MultiRoblox"
+authors = ["MultiRoblox"]
+edition = "2021"
+
+[lib]
+name = "mr_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+aes-gcm = "0.10"
+aes = "0.8"
+cbc = { version = "0.1", features = ["std"] }
+scrypt = "0.11"
+pbkdf2 = { version = "0.12", features = ["simple"] }
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.22"
+hex = "0.4"
+chrono = "0.4"
+urlencoding = "2"
+once_cell = "1"
+regex = "1"
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
+futures = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Security_Cryptography",
+  "Win32_System_Memory",
+  "Win32_System_Threading",
+  "Win32_System_ProcessStatus",
+] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

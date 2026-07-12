@@ -382,8 +382,9 @@ internal static class AudioControl
 // was minimised), given a real key tap via keybd_event, then put back. The
 // originally-focused window is restored after each pass. Per-instance timers
 // mean each account is tapped the moment IT reaches the deadline (instances
-// launched at different times have independent countdowns), and an instance
-// you're actively playing in the foreground is never tapped.
+// launched at different times have independent countdowns) -- including
+// whichever one you're currently playing, since being focused doesn't by
+// itself prove Roblox saw real input.
 internal static class AntiAfk
 {
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
@@ -500,6 +501,12 @@ internal static class AntiAfk
             foreach (var pid in gone) lastReset.Remove(pid);
             foreach (var pid in windows.Keys) if (!lastReset.ContainsKey(pid)) lastReset[pid] = now;
 
+            // Foreground state alone doesn't prove Roblox saw real input --
+            // being focused without pressing anything still reads as idle to
+            // Roblox's own kick timer, so exempting the foreground window let
+            // it get missed and kicked anyway. Every window is tapped on its
+            // own deadline regardless of focus; the tap is a harmless single
+            // key and focus is handed back right after (see below).
             var due = new System.Collections.Generic.List<uint>();
             foreach (var kv in windows)
             {

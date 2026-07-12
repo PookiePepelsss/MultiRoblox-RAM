@@ -16,22 +16,42 @@ function logEntry(level, category, message, meta) {
   if (document.getElementById('page-logs')?.classList.contains('active')) renderLogs();
 }
 
+// An uncaught invoke() rejection (e.g. a Tauri IPC arg-type mismatch) used to
+// just vanish -- no error toast, no log line, the triggering button just sat
+// there. Surface anything that slips through a missing catch so it's visible
+// in the Logs page instead of silently doing nothing.
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = (e.reason && (e.reason.message || e.reason)) || 'Unknown error';
+  logEntry('err', 'system', `Unhandled error: ${msg}`);
+});
+
+// div/span elements using role="button" (theme cards, dropdown options) only
+// had a click handler -- keyboard/AT users tabbing to them had no way to
+// activate. Enter/Space now triggers the same click.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest('[role="button"]');
+  if (!el) return;
+  e.preventDefault();
+  el.click();
+});
+
 function _logLine(e) {
   const t = new Date(e.ts);
   const ts = t.toLocaleTimeString('en-GB', { hour12:false }) + '.' + String(t.getMilliseconds()).padStart(3,'0');
-  const cat = String(e.category || '').toUpperCase().padEnd(7);
+  const cat = String(e.category || '').toUpperCase();
   const keys = Object.keys(e.meta || {}).filter(k => e.meta[k] !== null && e.meta[k] !== undefined);
-  const meta = keys.length ? '  ' + keys.map(k => `${k}=${e.meta[k]}`).join(' ') : '';
-  return `<span class="lg-ts">${esc(ts)}</span>  <span class="lg-${esc(e.level)}">${esc(cat)}</span> ${esc(e.message + meta)}`;
+  const meta = keys.length ? ' <span class="lg-meta">' + keys.map(k => `${esc(k)}=${esc(e.meta[k])}`).join(' ') + '</span>' : '';
+  return `<div class="log-row log-row-${esc(e.level)}"><span class="lg-ts">${esc(ts)}</span><span class="lg-cat">${esc(cat)}</span><span class="lg-msg">${esc(e.message)}${meta}</span></div>`;
 }
 
 function renderLogs() {
   const el = document.getElementById('logs-list');
   if (!el) return;
-  if (!_logs.length) { el.textContent = 'No log entries yet.'; return; }
+  if (!_logs.length) { el.innerHTML = '<div class="logs-empty"><span class="material-icons-round">terminal</span>No log entries yet.</div>'; return; }
   // Tail behaviour: only auto-scroll to the newest line if already near the end.
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  el.innerHTML = _logs.map(_logLine).join('\n');
+  el.innerHTML = _logs.map(_logLine).join('');
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
@@ -136,9 +156,21 @@ async function init() {
   await continueInit();
 }
 
+// Decrypt failure is itself proof a cookie is unusable -- flag it instantly
+// (no network round-trip needed) instead of waiting on recheckAllCookies.
+function flagInvalidCookies(list) {
+  for (const a of list) {
+    if (a._cookieInvalid) {
+      _cookieStatus[a.id] = 'dead';
+      logEntry('warn', 'cookie', `Cookie could not be decrypted for ${a.username || a.id} (corrupted or wrong key)`, { accountId: a.id, username: a.username || null, userId: a.userId || null });
+    }
+  }
+}
+
 async function continueInit() {
   [accounts, settings, packages] = await Promise.all([api.loadAccounts(), api.loadSettings(), api.loadPackages()]);
   logEntry('info', 'system', `Loaded ${accounts.length} account${accounts.length === 1 ? '' : 's'} from storage`);
+  flagInvalidCookies(accounts);
   recheckAllCookies(true); // kick a full check off the moment cookies are readable, not on the 60s tick
   render();
   // put the toolbar back to the saved view + filter
@@ -150,7 +182,8 @@ async function continueInit() {
   applySettings();
   refreshMultiStatus();
   detectRobloxVersion();
-  startRunningPoll();
+  startStatusPoll();
+  if (settings.autoTrim) startAutoTrimLoop();
   logEntry('info', 'system', 'MultiRoblox started', { version: 'v1', accounts: accounts.length, platform: navigator.platform });
   try { const k = localStorage.getItem('bloxgen_apikey'); if (k) { const el = document.getElementById('gen-apikey'); if (el) el.value = k; } } catch {}
   try { const afkStat = await api.antiAfkStatus(); if (afkStat && afkStat.enabled) logEntry('info', 'afk', `Anti-AFK is enabled on startup (active: ${afkStat.active})`, { enabled: afkStat.enabled, active: afkStat.active }); } catch {}
@@ -286,6 +319,24 @@ function applySettings() {
   if (afk) afk.checked = !!settings.antiAfk;
   const afkSb = document.getElementById('sb-antiafk');
   if (afkSb) afkSb.checked = !!settings.antiAfk;
+  const afkIv = document.getElementById('set-antiafk-interval');
+  if (afkIv) {
+    const mins = Math.round((settings.antiAfkInterval || 19 * 60) / 60);
+    afkIv.value = mins;
+    updateSliderFill(afkIv);
+    const afkIvVal = document.getElementById('set-antiafk-interval-val');
+    if (afkIvVal) afkIvVal.textContent = mins + ' min';
+  }
+  const trim = document.getElementById('set-autotrim');
+  if (trim) trim.checked = !!settings.autoTrim;
+  const trimIv = document.getElementById('set-autotrim-interval');
+  if (trimIv) {
+    const mins = settings.autoTrimIntervalMin || 5;
+    trimIv.value = mins;
+    updateSliderFill(trimIv);
+    const trimIvVal = document.getElementById('set-autotrim-interval-val');
+    if (trimIvVal) trimIvVal.textContent = mins + ' min';
+  }
 }
 
 let _acctQuery = '', _acctFilter = (() => { try { const f = localStorage.getItem('mr-acct-filter'); return (f && f !== 'running' && f !== 'idle') ? f : 'all'; } catch { return 'all'; } })(), _acctView = (() => { try { return localStorage.getItem('mr-acct-view') === 'list' ? 'list' : 'grid'; } catch { return 'grid'; } })();
@@ -342,6 +393,55 @@ function toggleAntiAfk(src) {
   const a = document.getElementById('set-antiafk'); if (a) a.checked = on;
   const b = document.getElementById('sb-antiafk'); if (b) b.checked = on;
   toast(on ? 'Anti-AFK on, accounts stay connected' : 'Anti-AFK off', on ? 'ok' : 'err');
+}
+
+function antiAfkIntervalInput(v) {
+  document.getElementById('set-antiafk-interval-val').textContent = v + ' min';
+  updateSliderFill(document.getElementById('set-antiafk-interval'));
+}
+function antiAfkIntervalCommit() {
+  const mins = parseInt(document.getElementById('set-antiafk-interval').value, 10);
+  const secs = mins * 60;
+  settings.antiAfkInterval = secs;
+  api.saveSettings({ antiAfkInterval: secs });
+  toast('Anti-AFK interval: ' + mins + ' min', 'ok');
+}
+
+// Silent trim -- no toast/button spinner, just logs. Skips the tasklist
+// round-trip entirely when nothing is running.
+let _autoTrimTimer = null;
+async function _autoTrimTick() {
+  if (_mixRunning <= 0) return;
+  let res;
+  try { res = await api.trimRobloxMemory(); } catch { return; }
+  if (res && res.ok && res.total > 0) logEntry('info', 'system', `Auto-trimmed ${res.trimmed}/${res.total} Roblox instance(s)`);
+}
+function startAutoTrimLoop() {
+  stopAutoTrimLoop();
+  const mins = settings.autoTrimIntervalMin || 5;
+  _autoTrimTimer = setInterval(_autoTrimTick, mins * 60 * 1000);
+}
+function stopAutoTrimLoop() {
+  if (_autoTrimTimer) { clearInterval(_autoTrimTimer); _autoTrimTimer = null; }
+}
+function toggleAutoTrim() {
+  const el = document.getElementById('set-autotrim');
+  const on = el.checked;
+  settings.autoTrim = on;
+  api.saveSettings({ autoTrim: on });
+  if (on) startAutoTrimLoop(); else stopAutoTrimLoop();
+  toast(on ? 'Auto trim on' : 'Auto trim off', on ? 'ok' : 'err');
+}
+function autoTrimIntervalInput(v) {
+  document.getElementById('set-autotrim-interval-val').textContent = v + ' min';
+  updateSliderFill(document.getElementById('set-autotrim-interval'));
+}
+function autoTrimIntervalCommit() {
+  const mins = parseInt(document.getElementById('set-autotrim-interval').value, 10);
+  settings.autoTrimIntervalMin = mins;
+  api.saveSettings({ autoTrimIntervalMin: mins });
+  if (settings.autoTrim) startAutoTrimLoop();
+  toast('Auto trim interval: ' + mins + ' min', 'ok');
 }
 
 function toggleCdd(name) {
@@ -436,6 +536,8 @@ function showCardMenu(id, x, y) {
     <div class="ctx-sep"></div>
     <button class="ctx-item" onclick="ctxCopyId('${id}')"><span class="material-icons-round">tag</span>Copy user ID</button>
     <button class="ctx-item" onclick="ctxCopyUser('${id}')"><span class="material-icons-round">person</span>Copy username</button>
+    <button class="ctx-item" onclick="ctxCopyCookie('${id}')"><span class="material-icons-round">cookie</span>Copy cookie</button>
+    <button class="ctx-item" onclick="ctxOpenBrowser('${id}')"><span class="material-icons-round">open_in_browser</span>Open in browser</button>
   `;
   document.body.appendChild(menu);
   // Position: keep on screen
@@ -451,6 +553,16 @@ function ctxLaunch(id) { closeCardMenu(); const a = accounts.find(x => x.id === 
 function ctxEdit(id) { closeCardMenu(); editAccount(id); }
 function ctxCopyId(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a?.userId) navigator.clipboard.writeText(a.userId).then(() => toast('User ID copied', 'ok')); else toast('No user ID', 'err'); }
 function ctxCopyUser(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a?.username) navigator.clipboard.writeText(a.username).then(() => toast('Username copied', 'ok')); else toast('No username', 'err'); }
+function ctxCopyCookie(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a?.cookie) navigator.clipboard.writeText(a.cookie).then(() => toast('Cookie copied', 'ok')); else toast('No cookie saved for this account', 'err'); }
+async function ctxOpenBrowser(id) {
+  closeCardMenu();
+  const a = accounts.find(x => x.id === id);
+  if (!a?.cookie) { toast('No cookie saved for this account', 'err'); return; }
+  toast('Opening browser…', 'ok');
+  let res;
+  try { res = await api.openAccountInBrowser(a.cookie); } catch { res = null; }
+  if (!res || !res.ok) toast((res && res.error) || 'Could not open browser', 'err');
+}
 
 function refreshPkgAvatarStatus() {
   document.querySelectorAll('.pkg-avatar[data-acc-id]').forEach(av => {
@@ -476,9 +588,9 @@ function render() {
   grid.innerHTML = list.map((a, i) => `
     <div class="card${_launchedIds.has(a.id) ? ' is-live' : ''}${_cookieStatus[a.id] === 'dead' ? ' cookie-dead' : ''}" data-id="${a.id}" style="animation-delay:${i * 18}ms">
       <div class="card-dot${_launchedIds.has(a.id) ? ' launched' : ''}" title="${_launchedIds.has(a.id) ? 'Launched' : 'Not launched'}"></div>
-      ${_launchedIds.has(a.id) ? `<button class="card-kill" onclick="event.stopPropagation();killOne('${a.id}')" title="Kill this instance"><span class="material-icons-round">close</span></button>` : ''}
+      ${_launchedIds.has(a.id) ? `<button class="card-kill" onclick="event.stopPropagation();killOne('${a.id}')" title="Kill this instance" aria-label="Kill this instance"><span class="material-icons-round">close</span></button>` : ''}
       <span class="material-icons-round drag-handle">drag_indicator</span>
-      <div class="card-av" id="av-${a.id}">${(a.username || '?')[0].toUpperCase()}</div>
+      <div class="card-av" id="av-${a.id}">${esc((a.username || '?')[0].toUpperCase())}</div>
       <div class="card-id">
         <div class="card-name-row">
           <div class="card-name">${esc(a.nickname || a.username || 'Unknown')}</div>
@@ -486,17 +598,15 @@ function render() {
         </div>
         <div class="card-uid">${a.userId ? 'ID ' + a.userId : 'No ID'}</div>
       </div>
-      <div class="card-game ${a.gameTarget ? 'visible' : ''}" id="gt-${a.id}" title="${esc(a.gameTarget || '')}">
-        ${a.gameTarget ? esc(truncate(_gameNameCache[a.id] || extractTargetLabel(a.gameTarget), 22)) : ''}
-      </div>
+      <div class="card-game ${a.gameTarget ? 'visible' : ''}" id="gt-${a.id}" title="${esc(a.gameTarget || '')}">${a.gameTarget ? esc(truncate(_gameNameCache[a.id] || extractTargetLabel(a.gameTarget), 22)) : ''}</div>
       <div class="card-row">
         <button class="btn btn-launch" onclick="openLaunch('${a.id}')">
           Start
         </button>
-        <button class="btn btn-edit" onclick="openEdit('${a.id}')" title="Edit">
+        <button class="btn btn-edit" onclick="openEdit('${a.id}')" title="Edit" aria-label="Edit account">
           <span class="material-icons-round">edit</span>
         </button>
-        <button class="btn btn-del" onclick="removeAcc('${a.id}')" title="Remove">
+        <button class="btn btn-del" onclick="removeAcc('${a.id}')" title="Remove" aria-label="Remove account">
           <span class="material-icons-round">delete_outline</span>
         </button>
       </div>
@@ -785,8 +895,8 @@ function loadAvatar(id, uid) {
     if (el) el.innerHTML = '<img src="' + _avatarCache[uid] + '" alt=""/>';
     return;
   }
-  fetch('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + uid + '&size=48x48&format=Png')
-    .then(r => r.json()).then(d => {
+  api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + uid + '&size=48x48&format=Png')
+    .then(res => res.data).then(d => {
       const url = d?.data?.[0]?.imageUrl;
       if (url) {
         _avatarCache[uid] = url;
@@ -815,8 +925,8 @@ async function loadAvatarsBatch(list) {
   for (let i = 0; i < need.length; i += 100) {
     const chunk = need.slice(i, i + 100);
     try {
-      const r = await fetch('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + chunk.join(',') + '&size=48x48&format=Png');
-      const d = await r.json();
+      const res = await api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + chunk.join(',') + '&size=48x48&format=Png');
+      const d = res.data;
       (d?.data || []).forEach(item => { if (item && item.targetId && item.imageUrl) _avatarCache[item.targetId] = item.imageUrl; });
       list.forEach(paint);
     } catch {
@@ -833,8 +943,8 @@ function loadPkgAvatar(pkgId, accountId, uid, attempt) {
     if (el) el.innerHTML = '<img src="' + esc(url) + '" alt=""/><span class="pkg-avatar-dot"></span>';
   };
   if (_avatarCache[uid]) { paint(_avatarCache[uid]); return; }
-  fetch('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + uid + '&size=48x48&format=Png')
-    .then(r => r.json()).then(d => {
+  api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + uid + '&size=48x48&format=Png')
+    .then(res => res.data).then(d => {
       const item = d?.data?.[0];
       if (item && item.imageUrl && item.state === 'Completed') { paint(item.imageUrl); return; }
       // Roblox returns Pending while it generates the thumbnail; retry briefly.
@@ -848,8 +958,8 @@ function loadPkgAvatar(pkgId, accountId, uid, attempt) {
 const _userInfoCache = {};
 function loadUserInfo(uid, cb) {
   if (_userInfoCache[uid]) { cb(_userInfoCache[uid]); return; }
-  fetch('https://users.roblox.com/v1/users/' + uid)
-    .then(r => r.json()).then(d => { _userInfoCache[uid] = d; cb(d); })
+  api.robloxGet('https://users.roblox.com/v1/users/' + uid)
+    .then(res => res.data).then(d => { _userInfoCache[uid] = d; cb(d); })
     .catch(() => cb(null));
 }
 
@@ -1064,8 +1174,8 @@ function openLaunch(id) {
     '<div class="prev-uid">' + esc(gameName || 'Opens home screen') + '</div></div>';
   // Avatar
   if (launchAcc.userId) {
-    fetch('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + launchAcc.userId + '&size=48x48&format=Png')
-      .then(r => r.json()).then(d => {
+    api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + launchAcc.userId + '&size=48x48&format=Png')
+      .then(res => res.data).then(d => {
         const url = d?.data?.[0]?.imageUrl, el = document.getElementById('prev-av');
         if (url && el) el.innerHTML = '<img src="' + esc(url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>';
       }).catch(() => {});
@@ -1107,7 +1217,7 @@ function renderPackages() {
     const members = (p.accountIds || []).map(id => accounts.find(a => a.id === id)).filter(Boolean);
     const shown = members.slice(0, 6);
     const extra = members.length - shown.length;
-    const avatarsHtml = shown.map(m => `<div class="pkg-avatar${_launchedIds.has(m.id) ? ' online' : ''}" id="pkg-av-${p.id}-${m.id}" data-acc-id="${m.id}" data-uid="${m.userId || ''}" data-uname="${esc(m.username || '')}" data-nick="${esc(m.nickname || '')}">${(m.username || '?')[0].toUpperCase()}<span class="pkg-avatar-dot"></span></div>`).join('')
+    const avatarsHtml = shown.map(m => `<div class="pkg-avatar${_launchedIds.has(m.id) ? ' online' : ''}" id="pkg-av-${p.id}-${m.id}" data-acc-id="${m.id}" data-uid="${m.userId || ''}" data-uname="${esc(m.username || '')}" data-nick="${esc(m.nickname || '')}">${esc((m.username || '?')[0].toUpperCase())}<span class="pkg-avatar-dot"></span></div>`).join('')
       + (extra > 0 ? `<div class="pkg-avatar more">+${extra}</div>` : '');
     return `
     <div class="pkg-card" data-id="${p.id}" style="animation-delay:${i * 18}ms">
@@ -1118,10 +1228,10 @@ function renderPackages() {
         </div>
         <div class="pkg-avatars">${avatarsHtml}</div>
         <div class="pkg-card-actions">
-          <button class="btn btn-edit" onclick="openEditPackage('${p.id}')" title="Manage accounts">
+          <button class="btn btn-edit" onclick="openEditPackage('${p.id}')" title="Manage accounts" aria-label="Manage accounts">
             <span class="material-icons-round">group</span>
           </button>
-          <button class="btn btn-del" onclick="deletePackage('${p.id}')" title="Delete package">
+          <button class="btn btn-del" onclick="deletePackage('${p.id}')" title="Delete package" aria-label="Delete package">
             <span class="material-icons-round">delete_outline</span>
           </button>
         </div>
@@ -1202,7 +1312,7 @@ function savePackageModal() {
     const p = packages.find(x => x.id === editingPackageId);
     if (p) { p.name = name; p.accountIds = checked; }
   } else {
-    packages.push({ id: Date.now().toString(), name, accountIds: checked, link: '' });
+    packages.push({ id: crypto.randomUUID(), name, accountIds: checked, link: '' });
   }
   api.savePackages(packages);
   renderPackages();
@@ -1266,8 +1376,8 @@ async function launchPackage(id) {
   toast('Launched ' + okCount + '/' + members.length + ' accounts in "' + p.name + '"', okCount === members.length ? 'ok' : 'err');
 }
 
-function toggleKeyVisibility() {
-  const input = document.getElementById('custom-key'), icon = document.getElementById('key-vis-icon');
+function toggleKeyVisibility(inputId = 'custom-key', iconId = 'key-vis-icon') {
+  const input = document.getElementById(inputId), icon = document.getElementById(iconId);
   if (input.type === 'password') { input.type = 'text'; icon.textContent = 'visibility_off'; }
   else { input.type = 'password'; icon.textContent = 'visibility'; }
 }
@@ -1292,7 +1402,7 @@ async function saveKeySettings() {
       settings.encryptionType = selectedEnc; settings.keySet = true;
       document.getElementById('custom-key').value = '';
       // Reload accounts so the renderer holds cookies under the new key.
-      try { accounts = await api.loadAccounts(); render(); } catch {}
+      try { accounts = await api.loadAccounts(); flagInvalidCookies(accounts); render(); } catch {}
       toast('Encryption key updated', 'ok');
       applySettings();
     } catch (e) {
@@ -1405,9 +1515,9 @@ async function fetchRobloxGames(sortId) {
   // Official Roblox explore API
   const sessionId = randomGuid();
   const url = `https://apis.roblox.com/explore-api/v1/get-sort-content?sessionId=${sessionId}&sortId=${sortId}&device=computer&country=all`;
-  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  const r = await api.robloxGet(url);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const d = await r.json();
+  const d = r.data;
 
   // Response shape: { sorts: [{ games: [...] }] } or { games: [...] }
   const games = d.games || (d.sorts && d.sorts[0] && d.sorts[0].games) || [];
@@ -1417,11 +1527,11 @@ async function fetchRobloxGames(sortId) {
   let thumbMap = {};
   try {
     const universeIds = games.map(g => g.universeId).filter(Boolean).join(',');
-    const thumbRes = await fetch(
+    const thumbRes = await api.robloxGet(
       `https://thumbnails.roblox.com/v1/games/icons?universeIds=${universeIds}&returnPolicy=PlaceHolder&size=512x512&format=Png&isCircular=false`
     );
     if (thumbRes.ok) {
-      const thumbData = await thumbRes.json();
+      const thumbData = thumbRes.data;
       (thumbData.data || []).forEach(t => { thumbMap[t.targetId] = t.imageUrl; });
     }
   } catch {}
@@ -1473,9 +1583,9 @@ function renderCharts(games, searchMode) {
 async function searchRobloxGames(query) {
   const sessionId = randomGuid();
   const url = `https://apis.roblox.com/search-api/omni-search?searchQuery=${encodeURIComponent(query)}&sessionId=${sessionId}`;
-  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  const r = await api.robloxGet(url);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const d = await r.json();
+  const d = r.data;
 
   // Extract game universe IDs from omni-search results
   const contents = d.searchResults || [];
@@ -1486,19 +1596,19 @@ async function searchRobloxGames(query) {
   if (!universeIds.length) return [];
 
   // Fetch full game details
-  const detailsRes = await fetch(`https://games.roblox.com/v1/games?universeIds=${universeIds.join(',')}`);
-  const details = detailsRes.ok ? await detailsRes.json() : { data: [] };
+  const detailsRes = await api.robloxGet(`https://games.roblox.com/v1/games?universeIds=${universeIds.join(',')}`);
+  const details = detailsRes.ok ? detailsRes.data : { data: [] };
   const detailMap = {};
   (details.data || []).forEach(g => { detailMap[g.id] = g; });
 
   // Fetch thumbnails
   let thumbMap = {};
   try {
-    const thumbRes = await fetch(
+    const thumbRes = await api.robloxGet(
       `https://thumbnails.roblox.com/v1/games/icons?universeIds=${universeIds.join(',')}&returnPolicy=PlaceHolder&size=512x512&format=Png&isCircular=false`
     );
     if (thumbRes.ok) {
-      const td = await thumbRes.json();
+      const td = thumbRes.data;
       (td.data || []).forEach(t => { thumbMap[t.targetId] = t.imageUrl; });
     }
   } catch {}
@@ -1660,9 +1770,11 @@ function setRunningBadges(n) {
   }
 }
 
-// Lightweight global poll so the titlebar counter stays current off the Mixer
-// page too. Cheap (tasklist under the hood); 3s cadence matches the rest of UI.
-let _runningPoll = null;
+// Single shared poll covering both the running-count badge and the
+// per-account live/closed reconcile -- was two separate intervals each
+// firing their own invoke() round-trip; merged so there's one IPC round
+// trip per tick instead of two on overlapping cadences.
+let _statusPoll = null;
 let _lastCountPushAt = 0;
 async function pollRunningCount() {
   // main pushes the count every ~5s while watching; skip our own tasklist
@@ -1673,10 +1785,38 @@ async function pollRunningCount() {
   _mixRunning = n;
   setRunningBadges(n);
 }
-function startRunningPoll() {
-  if (_runningPoll) return;
+
+// Ground-truth reconcile: push events (onRobloxClosed/onAllRobloxClosed) can
+// be missed or lag, leaving a card stuck showing "closed" for an account
+// that's still actually running (or vice versa). Asks the backend which
+// accounts it still considers watched/alive and corrects any card that
+// disagrees, instead of trusting events alone.
+async function pollWatchedIds() {
+  let ids;
+  try { ids = await api.getWatchedIds(); } catch { return; }
+  const watched = new Set(ids);
+  document.querySelectorAll('.card[data-id]').forEach(card => {
+    const id = card.dataset.id;
+    const shouldBeLive = watched.has(id);
+    const isLive = card.classList.contains('is-live');
+    if (shouldBeLive === isLive) return;
+    card.classList.toggle('is-live', shouldBeLive);
+    const dot = card.querySelector('.card-dot');
+    if (dot) {
+      dot.classList.toggle('launched', shouldBeLive);
+      dot.title = shouldBeLive ? 'Launched' : 'Not launched';
+    }
+    if (shouldBeLive) _launchedIds.add(id); else _launchedIds.delete(id);
+  });
+}
+function pollStatus() {
   pollRunningCount();
-  _runningPoll = setInterval(pollRunningCount, 3000);
+  pollWatchedIds();
+}
+function startStatusPoll() {
+  if (_statusPoll) return;
+  pollStatus();
+  _statusPoll = setInterval(pollStatus, 3000);
 }
 
 async function mixRefreshRunning() {
@@ -1781,56 +1921,44 @@ async function mixKillAll() {
 
 // Apply graphics/fps to instances that are already open by relaunching the
 // accounts currently marked as launched (each with its saved target).
-async function mixApplyAndRelaunch() {
+// Graphics/FPS/volume sliders already save on change -- this just re-pushes
+// the current values in one action and confirms, without touching any
+// running Roblox process (killing/relaunching is a separate explicit action
+// via the Kill all Roblox button).
+async function mixApply() {
   const btn = document.getElementById('mix-relaunch-btn');
   if (btn.disabled) return;
-
-  // Re-check running count first so a fresh app session still works.
-  await mixRefreshRunning();
-  let ids = Array.from(_launchedIds);
-
-  // If no tracked IDs but Roblox is actually running, fall back to recently
-  // used accounts (sorted newest first, capped to running count).
-  if (!ids.length && _mixRunning > 0) {
-    const sorted = accounts
-      .filter(a => a.lastUsed)
-      .sort((a, b) => new Date(b.lastUsed) - new Date(a.lastUsed))
-      .slice(0, _mixRunning);
-    ids = sorted.map(a => a.id);
-  }
-
-  if (!ids.length) {
-    toast('No running accounts to relaunch', 'err');
-    return;
-  }
   btn.disabled = true;
   const orig = btn.innerHTML;
-  btn.innerHTML = '<div class="spin"></div>Relaunching\u2026';
+  btn.innerHTML = '<div class="spin"></div>Applying\u2026';
 
-  await api.killAllRoblox();
-  _launchedIds.clear();
-  document.querySelectorAll('.card-dot.launched').forEach(d => { d.classList.remove('launched'); d.title = 'Not launched'; });
-  refreshPkgAvatarStatus();
+  mixGfxCommit();
+  mixFpsCommit();
+  try { await api.setRobloxVolume(document.getElementById('mix-vol').value); } catch {}
 
-  // Give Roblox a moment to fully exit before relaunching.
-  await new Promise(r => setTimeout(r, 1500));
-
-  let ok = 0;
-  for (const id of ids) {
-    const acc = accounts.find(a => a.id === id);
-    if (!acc) continue;
-    const res = await api.launchRoblox(acc.id, acc.cookie, acc.gameTarget || null);
-    if (res && res.success) {
-      ok++;
-      markLaunched(acc.id);
-    }
-  }
-  await mixRefreshRunning();
   btn.disabled = false;
   btn.innerHTML = orig;
-  toast('Relaunched ' + ok + ' account' + (ok !== 1 ? 's' : '') + ' with new settings', ok ? 'ok' : 'err');
+  toast('Settings applied', 'ok');
 }
 
+async function mixTrimMemory(btnId = 'mix-trim-btn') {
+  const btn = document.getElementById(btnId);
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<div class="spin"></div>Trimming…';
+
+  let res;
+  try { res = await api.trimRobloxMemory(); } catch { res = null; }
+
+  btn.disabled = false;
+  btn.innerHTML = orig;
+  if (res && res.ok) {
+    toast(res.total > 0 ? `Trimmed ${res.trimmed}/${res.total} instance(s)` : 'No running instances', 'ok');
+  } else {
+    toast('Trim failed', 'err');
+  }
+}
 
 function genToggleKey() {
   const inp = document.getElementById('gen-apikey');
@@ -1839,11 +1967,17 @@ function genToggleKey() {
   else { inp.type = 'password'; icon.textContent = 'visibility'; }
 }
 
+// Provider is auto-detected from the key's prefix so the single API-key field
+// works for either service: BLOX- = BloxGen, MG_ = Altgen (altgen.me/docs).
 async function genCombo() {
   const apiKey = (document.getElementById('gen-apikey').value || '').trim();
   try { localStorage.setItem('bloxgen_apikey', document.getElementById('gen-apikey').value); } catch {}
-  if (!apiKey || !apiKey.startsWith('BLOX-')) {
-    toast('Enter a valid BloxGen API key (starts with BLOX-)', 'err');
+
+  let provider;
+  if (apiKey.startsWith('BLOX-')) provider = 'bloxgen';
+  else if (apiKey.startsWith('MG_')) provider = 'altgen';
+  else {
+    toast('Enter a valid API key (BloxGen: BLOX-... or Altgen: MG_...)', 'err');
     return;
   }
 
@@ -1852,24 +1986,13 @@ async function genCombo() {
   if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
 
   try {
-    const resp = await fetch('https://core.bloxgen.net/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey, type: 'alt' })
-    });
-    const data = await resp.json();
+    const d = provider === 'bloxgen' ? await genBloxgen(apiKey) : await genAltgen(apiKey);
 
-    if (!data.success) {
-      toast(data.message || data.error || 'Generation failed', 'err');
-      if (btn) { btn.textContent = 'Generate'; btn.disabled = false; }
-      return;
-    }
-
-    const d = data.data;
     out.value = d.username + ':' + d.password;
     out.select();
 
     // Store in history
+    if (_genClearPromise) await _genClearPromise; // let a pending Clear's disk write land first
     _lastGenData = d;
     _genHistory.unshift({ username: d.username, password: d.password, cookie: d.cookie });
     if (_genHistory.length > 500) _genHistory.length = 500; // bound the persisted history
@@ -1883,9 +2006,31 @@ async function genCombo() {
     if (btn) { btn.textContent = 'Generate'; btn.disabled = false; }
 
   } catch (e) {
-    toast('Network error: ' + e.message, 'err');
+    toast(e.message || 'Generation failed', 'err');
     if (btn) { btn.textContent = 'Generate'; btn.disabled = false; }
   }
+}
+
+async function genBloxgen(apiKey) {
+  const resp = await fetch('https://core.bloxgen.net/api/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey, type: 'alt' })
+  });
+  const data = await resp.json();
+  if (!data.success) throw new Error(data.message || data.error || 'Generation failed');
+  return data.data;
+}
+
+async function genAltgen(apiKey) {
+  const res = await api.altgenGenerate(apiKey, 1);
+  const data = res.data;
+  if (!data || !data.success) {
+    throw new Error((data && data.error && data.error.message) || 'Generation failed');
+  }
+  const acct = data.data && data.data.accounts && data.data.accounts[0];
+  if (!acct) throw new Error('No account returned');
+  return { username: acct.username, password: acct.password, cookie: acct.cookie };
 }
 
 let _genHistory = [];
@@ -2002,12 +2147,19 @@ async function genAddToAccounts() {
   } catch(e) { toast('Failed: ' + e.message, 'err'); if(btn)btn.disabled=false; }
 }
 
-function genClearHistory() {
+// Tracked so a Generate click right after Clear can wait for the clear's disk
+// write to actually land first -- otherwise writeGenHistory() from the new
+// generation and this clear-to-[] both hit disk, and whichever finishes last
+// wins, silently dropping or resurrecting entries depending on timing.
+let _genClearPromise = null;
+async function genClearHistory() {
   _genHistory = [];
   _lastGenData = null;
-  api.clearGenHistory().catch(() => {});
   genRenderHistory();
   toast('History cleared', 'ok');
+  _genClearPromise = api.clearGenHistory().catch(() => {});
+  await _genClearPromise;
+  _genClearPromise = null;
 }
 
 function genDetailsCopy() {
