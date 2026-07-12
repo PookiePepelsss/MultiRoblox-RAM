@@ -5,7 +5,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.rbxcdn.com https://*.roblox.com; connect-src 'self' https://*.roblox.com https://core.bloxgen.net; object-src 'none'; base-uri 'self'; frame-src 'none'"/>
 <title>MultiRoblox</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet"/>
 <link rel="stylesheet" href="styles.css"/>
 </head>
@@ -20,9 +20,9 @@
   <button class="tb-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark" style="-webkit-app-region:no-drag"><span class="material-icons-round" id="theme-icon" style="font-size:15px">light_mode</span></button>
   <button class="tb-btn" onclick="openModal('m-help')" title="Help" style="-webkit-app-region:no-drag"><span class="material-icons-round" style="font-size:15px">help_outline</span></button>
   <div class="tb-controls">
-    <button class="tb-btn" onclick="api.minimize()"><span class="material-icons-round">remove</span></button>
-    <button class="tb-btn" onclick="api.maximize()"><span class="material-icons-round">crop_square</span></button>
-    <button class="tb-btn close" onclick="api.close()"><span class="material-icons-round">close</span></button>
+    <button class="tb-btn" onclick="api.minimize()" aria-label="Minimize"><span class="material-icons-round">remove</span></button>
+    <button class="tb-btn" onclick="api.maximize()" aria-label="Maximize"><span class="material-icons-round">crop_square</span></button>
+    <button class="tb-btn close" onclick="api.close()" aria-label="Close"><span class="material-icons-round">close</span></button>
   </div>
 </div>
 
@@ -80,7 +80,7 @@
             <div class="ph-sub" id="acct-sub">Loading…</div>
           </div>
           <div class="ph-actions">
-            <div class="search"><span class="material-icons-round">search</span><input id="acct-search" placeholder="Search accounts..." oninput="onAcctSearch(this.value)"/></div>
+            <div class="search"><span class="material-icons-round">search</span><input id="acct-search" placeholder="Search accounts..." aria-label="Search accounts" oninput="onAcctSearch(this.value)"/></div>
             <div class="filter-wrap">
               <button class="btn-out" id="filter-btn" onclick="toggleFilterMenu(event)"><span class="material-icons-round">filter_list</span>Filter</button>
               <div class="filter-menu" id="filter-menu">
@@ -150,7 +150,7 @@
         <div class="chart-search-wrap" style="padding:0 18px 8px">
           <div class="search" style="width:100%">
             <span class="material-icons-round">search</span>
-            <input id="chart-search" type="text" placeholder="Search games…" oninput="filterCharts(this.value)"/>
+            <input id="chart-search" type="text" placeholder="Search games…" aria-label="Search games" oninput="filterCharts(this.value)"/>
           </div>
         </div>
         <div class="charts-scroll">
@@ -229,17 +229,23 @@
             </div>
           </div>
 
+          <!-- Memory -->
+          <div class="sc">
+            <div class="sc-head">Memory</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Trim RAM</div><div class="sr-desc">Frees idle memory from every running instance. Safe - doesn't touch or slow the game.</div></div><button class="btn btn-ghost" onclick="mixTrimMemory()" id="mix-trim-btn"><span class="material-icons-round" style="font-size:15px">compress</span>Trim now</button></div>
+          </div>
+
           <!-- Apply / actions -->
           <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
-            <button class="btn btn-primary" style="flex:1;justify-content:center;min-width:150px" onclick="mixApplyAndRelaunch()" id="mix-relaunch-btn">
-              <span class="material-icons-round" style="font-size:15px">restart_alt</span>Apply &amp; relaunch running
+            <button class="btn btn-primary" style="flex:1;justify-content:center;min-width:150px" onclick="mixApply()" id="mix-relaunch-btn">
+              <span class="material-icons-round" style="font-size:15px">check</span>Apply
             </button>
             <button class="btn btn-danger kill-roblox-btn" style="flex:1;justify-content:center;min-width:150px" onclick="mixKillAll()" id="mix-kill-btn">
               <span class="material-icons-round" style="font-size:15px">power_settings_new</span>Kill all Roblox
             </button>
           </div>
           <div class="sr-desc" style="margin-top:8px;padding:0 2px">
-            Graphics quality is saved to your Fast Flags and takes effect on next launch. Use <b>Apply &amp; relaunch</b> to push graphics changes to already-open instances. Note: FPS cap via Fast Flags is currently blocked by Roblox - use the in-game Settings menu to change your FPS cap.
+            Graphics quality is saved to your Fast Flags and takes effect on next launch. Note: FPS cap via Fast Flags is currently blocked by Roblox - use the in-game Settings menu to change your FPS cap.
           </div>
 
         </div>
@@ -249,14 +255,14 @@
       <div class="page" id="page-generator" style="overflow-y:auto">
         <div class="ph">
           <div class="ph-title">Generator</div>
-          <div class="ph-sub">Generate a Roblox alt via BloxGen API</div>
+          <div class="ph-sub">Generate a Roblox alt via BloxGen or Altgen API</div>
         </div>
         <div class="sw">
           <div class="sc">
             <div class="sc-head">API Key</div>
             <div class="sr">
-              <input type="password" id="gen-apikey" class="sr-input" placeholder="BLOX-XXXXXXXXXXXXXXXX" style="flex:1;width:auto;font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;color:var(--t1)"/>
-              <button class="btn btn-ghost" style="font-size:12px;padding:7px 10px;flex-shrink:0" onclick="genToggleKey()" id="gen-eye-btn" title="Show/hide key">
+              <input type="password" id="gen-apikey" class="sr-input" placeholder="BLOX-XXXX... or MG_XXXX..." aria-label="BloxGen or Altgen API key" style="flex:1;width:auto;font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;color:var(--t1)"/>
+              <button class="btn btn-ghost" style="font-size:12px;height:40px;padding:0 12px;flex-shrink:0" onclick="genToggleKey()" id="gen-eye-btn" title="Show/hide key">
                 <span class="material-icons-round" id="gen-eye-icon" style="font-size:14px">visibility</span>
               </button>
             </div>
@@ -316,17 +322,17 @@
             <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
               <div class="sr-left"><div class="sr-label">Algorithm</div><div class="sr-desc">Used to encrypt cookies stored on disk.</div></div>
               <div class="cdd" id="cdd-enc" style="width:100%">
-                <div class="cdd-trigger" id="cdd-enc-trigger" onclick="toggleCdd('enc')">
+                <div class="cdd-trigger" id="cdd-enc-trigger" onclick="toggleCdd('enc')" role="button" tabindex="0" aria-label="Encryption algorithm">
                   <span class="cdd-label" id="cdd-enc-label">AES-256-GCM</span>
                   <span class="cdd-badge" id="cdd-enc-badge">Recommended</span>
                   <span class="material-icons-round cdd-arrow">expand_more</span>
                 </div>
                 <div class="cdd-menu" id="cdd-enc-menu">
-                  <div class="cdd-option selected" data-value="aes-256-gcm" onclick="selectCdd('enc','aes-256-gcm')">
+                  <div class="cdd-option selected" data-value="aes-256-gcm" onclick="selectCdd('enc','aes-256-gcm')" role="button" tabindex="0">
                     <div class="cdd-opt-left"><div class="cdd-opt-name">AES-256-GCM</div><div class="cdd-opt-desc">Authenticated - tamper-proof</div></div>
                     <span class="badge g">Best</span><span class="material-icons-round cdd-check">check</span>
                   </div>
-                  <div class="cdd-option" data-value="aes-256-cbc" onclick="selectCdd('enc','aes-256-cbc')">
+                  <div class="cdd-option" data-value="aes-256-cbc" onclick="selectCdd('enc','aes-256-cbc')" role="button" tabindex="0">
                     <div class="cdd-opt-left"><div class="cdd-opt-name">AES-256-CBC</div><div class="cdd-opt-desc">Classic block cipher</div></div>
                     <span class="badge muted">Standard</span><span class="material-icons-round cdd-check">check</span>
                   </div>
@@ -336,11 +342,11 @@
             <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
               <div class="sr-left" style="width:100%"><div class="sr-label">Encryption key</div><div class="sr-desc">Change your encryption key here. You will need to re-enter it on your next launch.</div></div>
               <div style="width:100%;display:flex;gap:8px;align-items:center">
-                <input type="password" class="sr-input" id="custom-key" placeholder="e.g. SecureKey1234@A#" style="flex:1;width:auto" oninput="onKeyInput()"/>
-                <button class="btn btn-ghost" style="font-size:12px;padding:7px 12px" onclick="toggleKeyVisibility()" title="Show/hide">
+                <input type="password" class="sr-input" id="custom-key" placeholder="e.g. SecureKey1234@A#" aria-label="Encryption key" style="flex:1;width:auto" oninput="onKeyInput()"/>
+                <button class="btn btn-ghost" style="font-size:12px;height:40px;padding:0 12px" onclick="toggleKeyVisibility()" title="Show/hide">
                   <span class="material-icons-round" style="font-size:14px" id="key-vis-icon">visibility</span>
                 </button>
-                <button class="btn btn-primary" style="font-size:12px;padding:7px 12px" onclick="saveKeySettings()" id="btn-save-key">Save</button>
+                <button class="btn btn-primary" style="font-size:12px;height:40px;padding:0 12px" onclick="saveKeySettings()" id="btn-save-key">Save</button>
               </div>
             </div>
           </div>
@@ -349,6 +355,43 @@
           <div class="sc">
             <div class="sc-head">Multi-Instance</div>
             <div class="sr"><div class="sr-left"><div class="sr-label">Multiple Roblox instances</div><div class="sr-desc">Holds the singleton mutex so multiple clients run at once.</div></div><span class="badge g">Always On</span></div>
+          </div>
+
+          <!-- Memory -->
+          <div class="sc">
+            <div class="sc-head">Memory</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Trim RAM</div><div class="sr-desc">Frees idle memory from every running instance. Safe - doesn't touch or slow the game.</div></div><button class="btn btn-ghost" onclick="mixTrimMemory('set-trim-btn')" id="set-trim-btn"><span class="material-icons-round" style="font-size:15px">compress</span>Trim now</button></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Auto trim</div><div class="sr-desc">Trims every running instance automatically on an interval.</div></div><label class="toggle"><input type="checkbox" id="set-autotrim" onchange="toggleAutoTrim()"/><span class="toggle-trk"></span></label></div>
+            <div class="sr" style="flex-direction:column;align-items:stretch;gap:10px">
+              <div class="sr-left">
+                <div class="sr-label">Trim interval</div>
+                <div class="sr-desc">How often auto trim runs while instances are open.</div>
+              </div>
+              <div class="mix-row">
+                <span class="material-icons-round" style="font-size:17px;color:var(--t3);flex-shrink:0">compress</span>
+                <input type="range" class="fps-slider" id="set-autotrim-interval" min="1" max="30" step="1" value="5"
+                       oninput="autoTrimIntervalInput(this.value)" onchange="autoTrimIntervalCommit()"/>
+                <span class="fps-val-label" id="set-autotrim-interval-val" style="min-width:50px">5 min</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Anti-AFK -->
+          <div class="sc">
+            <div class="sc-head">Anti-AFK</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Keep instances active</div><div class="sr-desc">Taps a benign key into every running instance before Roblox's ~20-minute idle kick.</div></div><label class="toggle"><input type="checkbox" id="set-antiafk" onchange="toggleAntiAfk('set')"/><span class="toggle-trk"></span></label></div>
+            <div class="sr" style="flex-direction:column;align-items:stretch;gap:10px">
+              <div class="sr-left">
+                <div class="sr-label">Tap interval</div>
+                <div class="sr-desc">How long an instance can sit idle before it gets tapped. Stays under the ~20-minute kick.</div>
+              </div>
+              <div class="mix-row">
+                <span class="material-icons-round" style="font-size:17px;color:var(--t3);flex-shrink:0">bolt</span>
+                <input type="range" class="fps-slider" id="set-antiafk-interval" min="5" max="19" step="1" value="19"
+                       oninput="antiAfkIntervalInput(this.value)" onchange="antiAfkIntervalCommit()"/>
+                <span class="fps-val-label" id="set-antiafk-interval-val" style="min-width:50px">19 min</span>
+              </div>
+            </div>
           </div>
 
 
@@ -364,7 +407,7 @@
         <div class="sw" id="stab-panel-themes" style="display:none">
           <div class="themes-grid" id="themes-grid-inner">
 
-            <div class="theme-card" data-theme="dark" onclick="setTheme('dark')">
+            <div class="theme-card" data-theme="dark" onclick="setTheme('dark')" role="button" tabindex="0" aria-label="Dark theme">
               <div class="tc-mini" style="--m-bg:#0e0e10;--m-panel:#18181d;--m-ac:#5c5ce0;--m-text:#f0f0f5;--m-dim:rgba(255,255,255,.18);--m-bd:rgba(255,255,255,.06)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -376,7 +419,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="light" onclick="setTheme('light')">
+            <div class="theme-card" data-theme="light" onclick="setTheme('light')" role="button" tabindex="0" aria-label="Light theme">
               <div class="tc-mini" style="--m-bg:#f4f4f8;--m-panel:#ffffff;--m-ac:#5c5ce0;--m-text:#0e0e1a;--m-dim:rgba(0,0,0,.14);--m-bd:rgba(0,0,0,.08)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -388,7 +431,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="midnight" onclick="setTheme('midnight')">
+            <div class="theme-card" data-theme="midnight" onclick="setTheme('midnight')" role="button" tabindex="0" aria-label="Midnight theme">
               <div class="tc-mini" style="--m-bg:#0a0e1a;--m-panel:#141a2e;--m-ac:#4f7cff;--m-text:#eaf0ff;--m-dim:rgba(255,255,255,.16);--m-bd:rgba(120,150,255,.14)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -401,7 +444,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="aurora" onclick="setTheme('aurora')">
+            <div class="theme-card" data-theme="aurora" onclick="setTheme('aurora')" role="button" tabindex="0" aria-label="Aurora theme">
               <div class="tc-mini" style="--m-bg:#07140f;--m-panel:#11221b;--m-ac:#2dd4bf;--m-text:#e6fff7;--m-dim:rgba(255,255,255,.16);--m-bd:rgba(120,255,220,.14)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -413,7 +456,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="sunset" onclick="setTheme('sunset')">
+            <div class="theme-card" data-theme="sunset" onclick="setTheme('sunset')" role="button" tabindex="0" aria-label="Sunset theme">
               <div class="tc-mini" style="--m-bg:#170b12;--m-panel:#281320;--m-ac:#ff7a59;--m-text:#ffe9df;--m-dim:rgba(255,255,255,.16);--m-bd:rgba(255,170,140,.14)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -425,7 +468,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="crimson" onclick="setTheme('crimson')">
+            <div class="theme-card" data-theme="crimson" onclick="setTheme('crimson')" role="button" tabindex="0" aria-label="Crimson theme">
               <div class="tc-mini" style="--m-bg:#160a0c;--m-panel:#271216;--m-ac:#f43f5e;--m-text:#ffe4e8;--m-dim:rgba(255,255,255,.16);--m-bd:rgba(255,120,130,.14)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -437,7 +480,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="ocean" onclick="setTheme('ocean')">
+            <div class="theme-card" data-theme="ocean" onclick="setTheme('ocean')" role="button" tabindex="0" aria-label="Ocean theme">
               <div class="tc-mini" style="--m-bg:#07121a;--m-panel:#0f2030;--m-ac:#38bdf8;--m-text:#dff1ff;--m-dim:rgba(255,255,255,.16);--m-bd:rgba(110,190,255,.14)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -449,7 +492,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="grape" onclick="setTheme('grape')">
+            <div class="theme-card" data-theme="grape" onclick="setTheme('grape')" role="button" tabindex="0" aria-label="Grape theme">
               <div class="tc-mini" style="--m-bg:#120a1c;--m-panel:#211333;--m-ac:#a855f7;--m-text:#f0e4ff;--m-dim:rgba(255,255,255,.16);--m-bd:rgba(190,140,255,.14)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -461,7 +504,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="forest" onclick="setTheme('forest')">
+            <div class="theme-card" data-theme="forest" onclick="setTheme('forest')" role="button" tabindex="0" aria-label="Forest theme">
               <div class="tc-mini" style="--m-bg:#0a1410;--m-panel:#13251c;--m-ac:#4ade80;--m-text:#e2ffec;--m-dim:rgba(255,255,255,.16);--m-bd:rgba(140,220,160,.14)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -473,7 +516,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="amber" onclick="setTheme('amber')">
+            <div class="theme-card" data-theme="amber" onclick="setTheme('amber')" role="button" tabindex="0" aria-label="Amber theme">
               <div class="tc-mini" style="--m-bg:#161106;--m-panel:#271e0d;--m-ac:#f59e0b;--m-text:#fff1d8;--m-dim:rgba(255,255,255,.16);--m-bd:rgba(255,200,110,.14)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -485,7 +528,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="rose" onclick="setTheme('rose')">
+            <div class="theme-card" data-theme="rose" onclick="setTheme('rose')" role="button" tabindex="0" aria-label="Rose theme">
               <div class="tc-mini" style="--m-bg:#170b11;--m-panel:#29131f;--m-ac:#fb7185;--m-text:#ffe6ee;--m-dim:rgba(255,255,255,.16);--m-bd:rgba(255,150,190,.14)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -497,7 +540,7 @@
               </div>
             </div>
 
-            <div class="theme-card" data-theme="graphite" onclick="setTheme('graphite')">
+            <div class="theme-card" data-theme="graphite" onclick="setTheme('graphite')" role="button" tabindex="0" aria-label="Graphite theme">
               <div class="tc-mini" style="--m-bg:#0d0e10;--m-panel:#1a1c21;--m-ac:#94a3b8;--m-text:#eef1f6;--m-dim:rgba(255,255,255,.16);--m-bd:rgba(160,170,190,.14)">
                 <span class="tcm-bg"></span>
                 <span class="tcm-side"><i></i><i class="on"></i><i></i><i></i></span>
@@ -566,10 +609,12 @@
         </div>
         <div id="log-find" class="log-find" style="display:none">
           <span class="material-icons-round">search</span>
-          <input id="log-find-input" placeholder="Find in logs…" spellcheck="false" autocomplete="off"/>
+          <input id="log-find-input" placeholder="Find in logs…" aria-label="Find in logs" spellcheck="false" autocomplete="off"/>
           <span id="log-find-count" class="log-find-count"></span>
         </div>
-        <pre id="logs-list" class="logs-text" tabindex="0">No log entries yet.</pre>
+        <div id="logs-list" class="logs-text" tabindex="0">
+          <div class="logs-empty"><span class="material-icons-round">terminal</span>No log entries yet.</div>
+        </div>
       </div>
 
       <div class="page" id="page-credits">
@@ -580,7 +625,7 @@
         <div class="sw">
           <div class="credits-list">
             <div class="credit-card">
-              <div class="credit-av">P</div>
+              <div class="credit-av" id="credit-av-pookiepepelss" data-discord-id="1411269394683658270">P</div>
               <div class="credit-info">
                 <div class="credit-role">Lead Developer</div>
                 <div class="credit-name">pookiepepelss</div>
@@ -588,7 +633,7 @@
               <div class="credit-discord"><span class="material-icons-round">alternate_email</span>pookiepepelss</div>
             </div>
             <div class="credit-card">
-              <div class="credit-av">X</div>
+              <div class="credit-av" id="credit-av-xern" data-discord-id="1376700787878531167">X</div>
               <div class="credit-info">
                 <div class="credit-role">Co-Developer</div>
                 <div class="credit-name">xern</div>
@@ -620,7 +665,12 @@
   <div class="modal" onclick="event.stopPropagation()" style="width:360px">
     <div class="modal-title" id="enc-title" style="font-size:18px;margin-bottom:6px">Enter your encryption key</div>
     <div class="modal-sub" id="enc-desc" style="font-size:14px;margin-bottom:0">Enter the key you set to unlock your saved accounts.</div>
-    <input type="password" class="sr-input" id="enc-input" placeholder="e.g. SecureKey1234@A#" style="width:100%;margin:14px 0 2px" onkeydown="if(event.key==='Enter')submitEnc()" autocomplete="off" spellcheck="false"/>
+    <div style="display:flex;gap:8px;align-items:center;margin:14px 0 2px">
+      <input type="password" class="sr-input" id="enc-input" placeholder="e.g. SecureKey1234@A#" style="flex:1;width:auto" onkeydown="if(event.key==='Enter')submitEnc()" autocomplete="off" spellcheck="false"/>
+      <button class="btn btn-ghost" style="font-size:12px;height:40px;padding:0 12px" onclick="toggleKeyVisibility('enc-input','enc-vis-icon')" title="Show/hide" aria-label="Show or hide key">
+        <span class="material-icons-round" style="font-size:14px" id="enc-vis-icon">visibility</span>
+      </button>
+    </div>
     <div id="enc-err" style="display:none;color:var(--red);font-size:12px;margin-top:6px"></div>
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn btn-primary" id="enc-action" onclick="submitEnc()">Unlock</button>
@@ -669,7 +719,7 @@
     <div id="login-panel-cookie" style="display:none">
       <div class="modal-sub" style="margin-bottom:8px">Paste your <code style="font-size:11px;background:var(--s3);padding:1px 5px;border-radius:4px">.ROBLOSECURITY</code> cookie below.</div>
       <div class="field" style="margin-bottom:4px">
-        <input type="password" id="cookie-input" placeholder="_|WARNING:-DO-NOT-SHARE-THIS--Roblox..." onkeydown="if(event.key==='Enter')addByCookie()"/>
+        <input type="password" id="cookie-input" placeholder="_|WARNING:-DO-NOT-SHARE-THIS--Roblox..." aria-label=".ROBLOSECURITY cookie" onkeydown="if(event.key==='Enter')addByCookie()"/>
       </div>
       <div style="font-size:11px;color:var(--t3)">F12 → Application → Cookies → roblox.com → .ROBLOSECURITY</div>
     </div>
@@ -696,7 +746,7 @@
     </div>
     <div class="pm-body">
       <div class="pm-field-label">Group name</div>
-      <input type="text" id="in-pkg-name" class="pm-input" placeholder="e.g. Farm Squad or Trading Alts"/>
+      <input type="text" id="in-pkg-name" class="pm-input" placeholder="e.g. Farm Squad or Trading Alts" aria-label="Group name"/>
       <div class="pm-section">
         <span class="pm-field-label" style="margin:0">Accounts</span>
         <span class="pm-count" id="pkg-count">0 selected</span>
@@ -715,15 +765,16 @@
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-title" id="edit-title">Edit account</div>
     <div class="field">
-      <label>Nickname</label>
+      <label for="in-nickname">Nickname</label>
       <input type="text" id="in-nickname" placeholder="e.g. MainAlt or FarmBot"/>
     </div>
     <div class="field">
-      <label>Game ID or Private Server Link</label>
+      <label for="in-target">Game ID or Private Server Link</label>
       <input type="text" id="in-target" placeholder="e.g. 6872265039 or https://www.roblox.com/share?..."/>
       <div class="field-hint">
         <strong style="color:var(--t1)">Game ID:</strong> paste just the numbers from the URL.<br/>
         <strong style="color:var(--t1)">Private server:</strong> paste the full server link.<br/>
+        <strong style="color:var(--t1)">Specific server:</strong> paste <code style="font-size:11px;background:var(--s3);padding:1px 5px;border-radius:4px">placeId:jobId</code> to join that exact running server.<br/>
         <strong style="color:var(--t1)">Blank:</strong> opens Roblox normally.
       </div>
     </div>
@@ -780,6 +831,7 @@
   </div>
 </div>
 
+<script src="tauri-bridge.js"></script>
 <script src="renderer.js"></script>
 
 
