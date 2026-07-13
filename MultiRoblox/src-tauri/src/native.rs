@@ -46,6 +46,28 @@ fn bundled_native_exe_path(app: &AppHandle) -> Option<PathBuf> {
     app.path().resource_dir().ok().map(|d| strip_verbatim_prefix(&d).join("resources").join("RobloxNative.exe"))
 }
 
+// Baked into the binary at compile time so the built exe works standalone --
+// copying just mr_tauri.exe/MultiRoblox.exe elsewhere (without its sibling
+// resources/ folder) used to leave ensure_native_helper() with nothing to
+// resolve, silently breaking the mutex holder (and everything else that
+// shells out to the native helper). Extracted to the app data dir once (or
+// re-extracted if size drifts, e.g. after an app update) instead of relying
+// on Tauri's resource_dir(), which is only populated next to the exe.
+const EMBEDDED_NATIVE_EXE: &[u8] = include_bytes!("../resources/RobloxNative.exe");
+
+fn ensure_embedded_native_exe() -> Option<PathBuf> {
+    let out = app_data_dir().join("RobloxNative.exe");
+    let needs_write = match std::fs::metadata(&out) {
+        Ok(meta) => meta.len() != EMBEDDED_NATIVE_EXE.len() as u64,
+        Err(_) => true,
+    };
+    if needs_write {
+        std::fs::create_dir_all(out.parent()?).ok()?;
+        std::fs::write(&out, EMBEDDED_NATIVE_EXE).ok()?;
+    }
+    Some(out)
+}
+
 fn find_csc() -> Option<PathBuf> {
     let win = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".to_string());
     for c in [
@@ -77,6 +99,9 @@ pub async fn ensure_native_helper(app: &AppHandle, state: &AppState) -> Option<P
 }
 
 async fn resolve_native_helper(app: &AppHandle) -> Option<PathBuf> {
+    if let Some(p) = ensure_embedded_native_exe() {
+        return Some(p);
+    }
     if let Some(b) = bundled_native_exe_path(app) {
         if b.exists() {
             return Some(b);
