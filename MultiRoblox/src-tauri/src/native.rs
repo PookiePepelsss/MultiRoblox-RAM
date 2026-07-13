@@ -354,6 +354,34 @@ async fn tasklist(filter_image: &str) -> Option<String> {
     }
 }
 
+// Preferred over tasklist(): asks the native helper for RobloxPlayerBeta
+// PIDs via .NET's own Process.GetProcessesByName (same enumeration AntiAfk
+// already relies on) instead of shelling out to tasklist.exe/cmd.exe and
+// regex-parsing CSV output. None = couldn't get a reading (helper
+// unavailable, spawn/timeout failure) -- same "don't treat as zero" contract
+// as tasklist() above. Falls back to tasklist() if the helper can't resolve
+// (e.g. very first launch before ensure_native_helper has ever run).
+async fn native_pids(app: &AppHandle, state: &AppState) -> Option<std::collections::HashSet<u32>> {
+    if !cfg!(windows) {
+        return Some(std::collections::HashSet::new());
+    }
+    let Some(exe) = ensure_native_helper(app, state).await else {
+        let out = tasklist("RobloxPlayerBeta.exe").await?;
+        let re = regex::Regex::new(r#""RobloxPlayerBeta\.exe","(\d+)""#).unwrap();
+        return Some(re.captures_iter(&out).filter_map(|c| c[1].parse::<u32>().ok()).collect());
+    };
+    let mut cmd = Command::new(&exe);
+    cmd.arg("pids").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    hide_window(&mut cmd);
+    match tokio::time::timeout(Duration::from_secs(10), cmd.output()).await {
+        Ok(Ok(out)) if out.status.success() => {
+            let s = String::from_utf8_lossy(&out.stdout);
+            Some(s.lines().filter_map(|l| l.trim().parse::<u32>().ok()).collect())
+        }
+        _ => None,
+    }
+}
+
 pub async fn set_roblox_volume(app: &AppHandle, state: &AppState, percent: f64) -> Value {
     if !cfg!(windows) {
         return serde_json::json!({ "ok": false, "count": 0, "error": "Windows only" });
@@ -377,10 +405,8 @@ pub async fn set_roblox_volume(app: &AppHandle, state: &AppState, percent: f64) 
     }
 }
 
-pub async fn count_roblox_processes() -> u32 {
-    let out = tasklist("RobloxPlayerBeta.exe").await.unwrap_or_default();
-    let re = regex::Regex::new(r"(?i)RobloxPlayerBeta\.exe").unwrap();
-    re.find_iter(&out).count() as u32
+pub async fn count_roblox_processes(app: &AppHandle, state: &AppState) -> u32 {
+    native_pids(app, state).await.map(|s| s.len() as u32).unwrap_or(0)
 }
 
 // EmptyWorkingSet only forces the process to give back currently-idle
@@ -408,11 +434,10 @@ fn trim_process_memory(_pid: u32) -> bool {
     false
 }
 
-pub async fn trim_roblox_memory(state: &AppState) -> Value {
-    let Some(out) = tasklist("RobloxPlayerBeta.exe").await else {
-        return serde_json::json!({ "ok": false, "trimmed": 0, "total": 0, "error": "tasklist failed" });
+pub async fn trim_roblox_memory(app: &AppHandle, state: &AppState) -> Value {
+    let Some(alive_pids) = native_pids(app, state).await else {
+        return serde_json::json!({ "ok": false, "trimmed": 0, "total": 0, "error": "could not enumerate Roblox processes" });
     };
-    let re = regex::Regex::new(r#""RobloxPlayerBeta\.exe","(\d+)""#).unwrap();
 
     // Skip PIDs still inside their launch grace window (ready_at, same window
     // watch_tick uses) -- trimming a client while it's still loading assets
@@ -426,15 +451,13 @@ pub async fn trim_roblox_memory(state: &AppState) -> Value {
 
     let mut total = 0u32;
     let mut trimmed = 0u32;
-    for cap in re.captures_iter(&out) {
-        if let Ok(pid) = cap[1].parse::<u32>() {
-            if launching_pids.contains(&pid) {
-                continue;
-            }
-            total += 1;
-            if trim_process_memory(pid) {
-                trimmed += 1;
-            }
+    for pid in alive_pids {
+        if launching_pids.contains(&pid) {
+            continue;
+        }
+        total += 1;
+        if trim_process_memory(pid) {
+            trimmed += 1;
         }
     }
     serde_json::json!({ "ok": true, "trimmed": trimmed, "total": total })
@@ -600,12 +623,16 @@ pub fn get_fflag_path() -> Option<PathBuf> {
 }
 
 // ---- watch loop ----
-// One shared poll covering every watched account instead of one tasklist
-// spawn per account per tick (see main.js's _watchTick comment for the
-// reasoning). MISS_THRESHOLD=6 (~30s) tolerates slow tasklist calls under
-// real multi-instance CPU/IO contention.
-const MISS_THRESHOLD: u32 = 6;
-const POLL_INTERVAL: Duration = Duration::from_secs(5);
+// One shared poll covering every watched account instead of one spawn per
+// account per tick (see main.js's _watchTick comment for the reasoning).
+// PIDs now come from the native helper's in-process Process.GetProcessesByName
+// (see native_pids) instead of shelling out to tasklist.exe/cmd.exe, so a
+// tick is fast and reliable enough to poll much more often than before --
+// MISS_THRESHOLD=3 * POLL_INTERVAL=2s gives ~6s worst-case detection latency
+// (was ~30s) while still tolerating a couple of transient misses under real
+// multi-instance CPU/IO contention.
+const MISS_THRESHOLD: u32 = 3;
+const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const LAUNCH_DELAY_MS: i64 = 15_000;
 
 fn now_ms() -> i64 {
@@ -657,20 +684,12 @@ async fn watch_tick(app: &AppHandle) {
     if WATCH_TICK_IN_FLIGHT.swap(true, Ordering::SeqCst) {
         return;
     }
-    let out = tasklist("RobloxPlayerBeta.exe").await;
+    let pids = native_pids(app, &state).await;
     WATCH_TICK_IN_FLIGHT.store(false, Ordering::SeqCst);
-    // tasklist failed to run at all (not "ran and found nothing") -- can't
-    // tell who's alive this tick. Bail without touching miss counts so a
-    // still-running account never gets penalized for a command failure.
-    let Some(out) = out else { return; };
-
-    let re = regex::Regex::new(r#""RobloxPlayerBeta\.exe","(\d+)""#).unwrap();
-    let mut alive_pids: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    for cap in re.captures_iter(&out) {
-        if let Ok(pid) = cap[1].parse::<u32>() {
-            alive_pids.insert(pid);
-        }
-    }
+    // Couldn't get a reading this tick (helper unavailable, spawn/timeout
+    // failure) -- can't tell who's alive. Bail without touching miss counts
+    // so a still-running account never gets penalized for it.
+    let Some(alive_pids) = pids else { return; };
 
     let now = now_ms();
     let mut closed: Vec<String> = Vec::new();
