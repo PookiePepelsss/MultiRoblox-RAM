@@ -349,9 +349,8 @@ pub async fn roblox_kill_one(app: AppHandle, state: State<'_, AppState>, id: Str
 }
 
 #[tauri::command]
-pub async fn roblox_running_count(state: State<'_, AppState>) -> Result<u32, ()> {
-    let _ = &state;
-    Ok(crate::native::count_roblox_processes().await)
+pub async fn roblox_running_count(app: AppHandle, state: State<'_, AppState>) -> Result<u32, ()> {
+    Ok(crate::native::count_roblox_processes(&app, &state).await)
 }
 
 // Ground truth for which accounts the backend still considers launched.
@@ -364,8 +363,8 @@ pub async fn roblox_watched_ids(state: State<'_, AppState>) -> Result<Vec<String
 }
 
 #[tauri::command]
-pub async fn roblox_trim_memory(state: State<'_, AppState>) -> Result<Value, ()> {
-    Ok(crate::native::trim_roblox_memory(&state).await)
+pub async fn roblox_trim_memory(app: AppHandle, state: State<'_, AppState>) -> Result<Value, ()> {
+    Ok(crate::native::trim_roblox_memory(&app, &state).await)
 }
 
 #[tauri::command]

@@ -245,8 +245,6 @@ function applyTheme(name) {
   THEMES.forEach(t => { if (t !== 'dark' && t !== 'light') document.body.classList.remove('theme-' + t); });
   if (name === 'light') document.body.classList.add('light');
   else if (name !== 'dark') document.body.classList.add('theme-' + name);
-  const icon = document.getElementById('theme-icon');
-  if (icon) icon.textContent = (name === 'light') ? 'dark_mode' : 'light_mode';
   document.querySelectorAll('.theme-card').forEach(c => c.classList.toggle('sel', c.dataset.theme === name));
 }
 function currentTheme() { try { return localStorage.getItem('ui-theme') || 'dark'; } catch { return 'dark'; } }
@@ -255,9 +253,8 @@ function setTheme(name) {
   applyTheme(name);
   try { localStorage.setItem('ui-theme', name); } catch {}
 }
-// Titlebar button: quick dark <-> light switch (leaves the special themes).
-function toggleTheme() {
-  setTheme(currentTheme() === 'light' ? 'dark' : 'light');
+function openDiscord() {
+  api.openExternal('https://discord.gg/kZ8MZZ8dTF');
 }
 (function() {
   let t;
@@ -530,7 +527,7 @@ function showCardMenu(id, x, y) {
   menu.className = 'ctx-menu';
   menu.innerHTML = `
     <div class="ctx-header">${esc(a ? (a.nickname || a.username || 'Unknown') : id)}</div>
-    ${isLive ? `<button class="ctx-item ctx-danger" onclick="ctxKill('${id}')"><span class="material-icons-round">stop_circle</span>Kill instance</button>` : ''}
+    ${isLive ? `<button class="ctx-item ctx-danger" onclick="ctxKill('${id}')"><span class="material-icons-round">power_settings_new</span>Kill instance</button>` : ''}
     <button class="ctx-item" onclick="ctxLaunch('${id}')"><span class="material-icons-round">rocket_launch</span>${isLive ? 'Relaunch' : 'Launch'}</button>
     <button class="ctx-item" onclick="ctxEdit('${id}')"><span class="material-icons-round">edit</span>Edit account</button>
     <div class="ctx-sep"></div>
@@ -588,7 +585,6 @@ function render() {
   grid.innerHTML = list.map((a, i) => `
     <div class="card${_launchedIds.has(a.id) ? ' is-live' : ''}${_cookieStatus[a.id] === 'dead' ? ' cookie-dead' : ''}" data-id="${a.id}" style="animation-delay:${i * 18}ms">
       <div class="card-dot${_launchedIds.has(a.id) ? ' launched' : ''}" title="${_launchedIds.has(a.id) ? 'Launched' : 'Not launched'}"></div>
-      ${_launchedIds.has(a.id) ? `<button class="card-kill" onclick="event.stopPropagation();killOne('${a.id}')" title="Kill this instance" aria-label="Kill this instance"><span class="material-icons-round">close</span></button>` : ''}
       <span class="material-icons-round drag-handle">drag_indicator</span>
       <div class="card-av" id="av-${a.id}">${esc((a.username || '?')[0].toUpperCase())}</div>
       <div class="card-id">
@@ -1941,7 +1937,7 @@ async function mixApply() {
   toast('Settings applied', 'ok');
 }
 
-async function mixTrimMemory(btnId = 'mix-trim-btn') {
+async function mixTrimMemory(btnId = 'set-trim-btn') {
   const btn = document.getElementById(btnId);
   if (!btn || btn.disabled) return;
   btn.disabled = true;

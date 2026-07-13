@@ -178,10 +178,6 @@ button:focus-visible,.nav-item:focus-visible,.tab-btn:focus-visible{outline:none
    static - this keeps idle CPU near zero even with many accounts on screen. */
 .card-dot.launched{background:var(--green)}
 .card-dot.launched::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--green);opacity:.5;transform:scale(1);animation:dot-ring 1.8s ease-out infinite;will-change:transform,opacity}
-.card-kill{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:50%;border:none;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:opacity var(--dur) var(--smooth),transform var(--dur) var(--smooth);z-index:2;padding:0}
-.card-kill .material-icons-round{font-size:13px}
-.card-kill:hover{transform:scale(1.12)}
-.card:hover .card-kill{opacity:1}
 @keyframes dot-ring{0%{transform:scale(1);opacity:.5}70%,100%{transform:scale(2.6);opacity:0}}
 @media (prefers-reduced-motion:reduce){.card-dot.launched::after{animation:none;display:none}}
 .card-av{width:56px;height:56px;border-radius:10px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;margin-bottom:14px;overflow:hidden;flex-shrink:0;box-shadow:0 0 0 2px var(--bg),0 0 0 3px rgba(150,152,162,.5);transition:box-shadow var(--dur) var(--smooth)}
@@ -190,8 +186,15 @@ button:focus-visible,.nav-item:focus-visible,.tab-btn:focus-visible{outline:none
 .card-name-row{display:flex;align-items:center;gap:6px;min-width:0;margin-bottom:4px}
 .card-name{font-size:17px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0;min-width:0;letter-spacing:-.02em}
 .card-uid{font-size:12px;color:var(--t3);font-weight:500;margin-bottom:14px}
-.card-game{font-size:11.5px;font-weight:500;color:var(--t2);background:var(--s2);border-radius:6px;padding:4px 9px;margin-bottom:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none;align-self:flex-start;max-width:100%}
-.card-game.visible{display:block}
+/* Always kept in flow (visibility, not display) so every card reserves the
+   same height whether or not it has a game/server target -- otherwise cards
+   without one shrink and mismatch height against cards that have one, since
+   grid row stretch only equalizes within a row, not across rows. */
+/* height fixed explicitly -- an empty box (no gameTarget) has no content to
+   anchor a line box to, so line-height alone doesn't reserve space; nothing
+   short of an explicit height keeps it identical to a box that has text. */
+.card-game{font-size:11.5px;line-height:14px;height:22px;font-weight:500;color:var(--t2);background:var(--s2);border-radius:6px;padding:4px 9px;margin-bottom:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;align-self:flex-start;max-width:100%;visibility:hidden}
+.card-game.visible{visibility:visible}
 .card-expired{display:none;align-items:center;gap:3px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--red);background:var(--rd);border-radius:5px;padding:2px 6px;flex-shrink:0;white-space:nowrap}
 .card-expired .material-icons-round{font-size:12px}
 .card.cookie-dead .card-expired{display:inline-flex}

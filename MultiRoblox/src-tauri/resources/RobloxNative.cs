@@ -14,6 +14,13 @@
 //                                      running Roblox; prints HANDLES_DONE.
 //   RobloxNative.exe volume <0-100> -> set OS volume on every Roblox audio
 //                                      session; prints SET:<count>.
+//   RobloxNative.exe pids           -> print each running RobloxPlayerBeta
+//                                      PID on its own line. Uses .NET's own
+//                                      Process.GetProcessesByName instead of
+//                                      shelling out to tasklist.exe/cmd.exe
+//                                      -- the same reliable enumeration the
+//                                      anti-AFK loop already depends on, no
+//                                      CSV parsing or extra process hop.
 //
 // Build (done once, by the app or build.bat) with the .NET Framework compiler:
 //   csc /nologo /optimize+ /platform:x64 /target:exe /out:RobloxNative.exe RobloxNative.cs
@@ -36,8 +43,9 @@ internal static class RobloxNative
                 case "closehandles": return RunCloseHandles();
                 case "volume":       return RunVolume(args);
                 case "antiafk":      return RunAntiAfk(args);
+                case "pids":         return RunPids();
                 default:
-                    Console.Error.WriteLine("Unknown command. Use: mutex | closehandles | volume <0-100> | antiafk <seconds>");
+                    Console.Error.WriteLine("Unknown command. Use: mutex | closehandles | volume <0-100> | antiafk <seconds> | pids");
                     return 2;
             }
         }
@@ -150,6 +158,19 @@ internal static class RobloxNative
         Console.Out.WriteLine("ANTIAFK_ON:" + deadlineSec);
         Console.Out.Flush();
         AntiAfk.RunLoop(deadlineSec, vk);
+        return 0;
+    }
+
+    // One-shot PID dump for the Rust watch loop -- Process.GetProcessesByName
+    // is the same reliable, in-process enumeration AntiAfk already uses, so
+    // the watch loop no longer has to shell out to tasklist.exe/cmd.exe and
+    // regex-parse CSV (which can silently miss/misread under load).
+    private static int RunPids()
+    {
+        foreach (var p in Process.GetProcessesByName("RobloxPlayerBeta"))
+        {
+            try { Console.Out.WriteLine(p.Id); } catch { }
+        }
         return 0;
     }
 }
