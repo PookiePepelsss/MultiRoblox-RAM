@@ -170,10 +170,18 @@ async fn try_get_cookie(browser: &Browser) -> Option<String> {
 }
 
 async fn browser_login(_app: &AppHandle, state: &AppState, chrome_path: &Path) -> LoginResult {
+    // chromiumoxide defaults to a FIXED shared profile dir (temp_dir()/
+    // chromiumoxide-runner) when user_data_dir isn't set explicitly -- every
+    // login reused whatever Roblox session cookie the previous login left
+    // behind there, so "Add Account" kept auto-logging into the same account.
+    // A fresh, unique dir per attempt is the fix; removed again once done.
+    let profile_dir = std::env::temp_dir().join(format!("mr-login-{}", uuid::Uuid::new_v4()));
+
     let config = match BrowserConfig::builder()
         .chrome_executable(chrome_path)
         .with_head()
         .window_size(530, 700)
+        .user_data_dir(&profile_dir)
         .args(vec!["--disable-blink-features=AutomationControlled"])
         .build()
     {
@@ -225,6 +233,7 @@ async fn browser_login(_app: &AppHandle, state: &AppState, chrome_path: &Path) -
     let _ = browser.close().await;
     let _ = browser.wait().await;
     handler_task.abort();
+    let _ = std::fs::remove_dir_all(&profile_dir); // best-effort, don't let cleanup failure mask the login result
     result
 }
 
