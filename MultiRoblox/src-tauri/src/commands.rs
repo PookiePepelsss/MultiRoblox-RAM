@@ -31,6 +31,8 @@ pub fn settings_save(state: State<AppState>, data: Map<String, Value>) -> bool {
         data.remove(k);
     }
     let mut s = load_settings();
+    s.remove("webhook");
+    s.remove("screenshotsEnabled");
     let had_enc_type = data.contains_key("encryptionType");
     let multi_instance = data.get("multiInstance").cloned();
     let antiafk = data.get("antiAfk").cloned();
@@ -98,10 +100,22 @@ pub fn enc_unlock(state: State<AppState>, pass: String) -> Value {
 pub fn enc_set_key(state: State<AppState>, pass: Option<String>) -> Value {
     let np = pass.unwrap_or_default().trim().to_string();
     let raw = storage::load_accounts_raw();
-    let accts_dec: Vec<Value> = raw.iter().cloned().map(|a| storage::decrypt_account(&state, a)).collect();
+    let accts_dec: Vec<Value> = raw
+        .iter()
+        .cloned()
+        .map(|a| storage::decrypt_account(&state, a))
+        .collect();
     for (orig, dec) in raw.iter().zip(accts_dec.iter()) {
-        let had_cookie = orig.get("cookie").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false);
-        let now_empty = dec.get("cookie").and_then(|v| v.as_str()).map(|s| s.is_empty()).unwrap_or(true);
+        let had_cookie = orig
+            .get("cookie")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        let now_empty = dec
+            .get("cookie")
+            .and_then(|v| v.as_str())
+            .map(|s| s.is_empty())
+            .unwrap_or(true);
         if had_cookie && now_empty {
             return serde_json::json!({ "ok": false, "error": "decrypt failed" });
         }
@@ -137,14 +151,20 @@ pub fn enc_set_key(state: State<AppState>, pass: Option<String>) -> Value {
 
 #[tauri::command]
 pub fn multiinstance_status(state: State<AppState>) -> Value {
-    let enabled = load_settings().get("multiInstance").and_then(|v| v.as_bool()).unwrap_or(false);
+    let enabled = load_settings()
+        .get("multiInstance")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let active = state.mutex_child.lock().unwrap().is_some();
     serde_json::json!({ "enabled": enabled, "active": active })
 }
 
 #[tauri::command]
 pub fn antiafk_status(state: State<AppState>) -> Value {
-    let enabled = load_settings().get("antiAfk").and_then(|v| v.as_bool()).unwrap_or(false);
+    let enabled = load_settings()
+        .get("antiAfk")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let active = state.antiafk_child.lock().unwrap().is_some();
     serde_json::json!({ "enabled": enabled, "active": active })
 }
@@ -170,15 +190,24 @@ pub fn accounts_add(state: State<AppState>, account: Map<String, Value>) -> Resu
 #[tauri::command]
 pub fn accounts_remove(state: State<AppState>, id: String) -> Result<bool, String> {
     let accounts = storage::load_accounts(&state);
-    let filtered: Vec<Value> = accounts.into_iter().filter(|a| a.get("id").and_then(|v| v.as_str()) != Some(id.as_str())).collect();
+    let filtered: Vec<Value> = accounts
+        .into_iter()
+        .filter(|a| a.get("id").and_then(|v| v.as_str()) != Some(id.as_str()))
+        .collect();
     storage::save_accounts(&state, filtered)?;
     Ok(true)
 }
 
 #[tauri::command]
-pub fn accounts_update(state: State<AppState>, id: String, data: Map<String, Value>) -> Result<Option<Value>, String> {
+pub fn accounts_update(
+    state: State<AppState>,
+    id: String,
+    data: Map<String, Value>,
+) -> Result<Option<Value>, String> {
     let mut accounts = storage::load_accounts(&state);
-    let idx = accounts.iter().position(|a| a.get("id").and_then(|v| v.as_str()) == Some(id.as_str()));
+    let idx = accounts
+        .iter()
+        .position(|a| a.get("id").and_then(|v| v.as_str()) == Some(id.as_str()));
     match idx {
         Some(i) => {
             if let Value::Object(existing) = &mut accounts[i] {
@@ -199,14 +228,20 @@ pub fn accounts_reorder(state: State<AppState>, ids: Vec<String>) -> Result<bool
     let accounts = storage::load_accounts(&state);
     let mut reordered: Vec<Value> = Vec::new();
     for id in &ids {
-        if let Some(a) = accounts.iter().find(|a| a.get("id").and_then(|v| v.as_str()) == Some(id.as_str())) {
+        if let Some(a) = accounts
+            .iter()
+            .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(id.as_str()))
+        {
             reordered.push(a.clone());
         }
     }
-    let rest: Vec<Value> = accounts.into_iter().filter(|a| {
-        let aid = a.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        !ids.iter().any(|id| id == aid)
-    }).collect();
+    let rest: Vec<Value> = accounts
+        .into_iter()
+        .filter(|a| {
+            let aid = a.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            !ids.iter().any(|id| id == aid)
+        })
+        .collect();
     reordered.extend(rest);
     storage::save_accounts(&state, reordered)?;
     Ok(true)
@@ -240,48 +275,76 @@ pub fn genhistory_clear() -> bool {
 #[tauri::command]
 pub fn fflag_read() -> Value {
     match crate::native::get_fflag_path() {
-        Some(p) if p.exists() => std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_else(|| Value::Object(Map::new())),
+        Some(p) if p.exists() => std::fs::read_to_string(&p)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(|| Value::Object(Map::new())),
         _ => Value::Object(Map::new()),
     }
 }
 
 #[tauri::command]
 pub fn fflag_write(flags: Value) -> bool {
-    let Some(p) = crate::native::get_fflag_path() else { return false };
+    let Some(p) = crate::native::get_fflag_path() else {
+        return false;
+    };
     if let Some(parent) = p.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    std::fs::write(&p, serde_json::to_string_pretty(&flags).unwrap_or_else(|_| "{}".into())).is_ok()
+    std::fs::write(
+        &p,
+        serde_json::to_string_pretty(&flags).unwrap_or_else(|_| "{}".into()),
+    )
+    .is_ok()
 }
 
 fn global_settings_path() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE").unwrap_or_default();
-    std::path::PathBuf::from(home).join("AppData").join("Local").join("Roblox").join("GlobalBasicSettings_13.xml")
+    std::path::PathBuf::from(home)
+        .join("AppData")
+        .join("Local")
+        .join("Roblox")
+        .join("GlobalBasicSettings_13.xml")
 }
 
 #[tauri::command]
 pub fn fps_read() -> i64 {
     let p = global_settings_path();
-    let Ok(xml) = std::fs::read_to_string(&p) else { return 60 };
+    let Ok(xml) = std::fs::read_to_string(&p) else {
+        return 60;
+    };
     let re = regex::Regex::new(r#"(?i)<int\s+name="FramerateCap"\s*>(\d+)</int>"#).unwrap();
-    re.captures(&xml).and_then(|c| c[1].parse::<i64>().ok()).unwrap_or(60)
+    re.captures(&xml)
+        .and_then(|c| c[1].parse::<i64>().ok())
+        .unwrap_or(60)
 }
 
 // Roblox's DFIntTaskSchedulerTargetFps Fast Flag must be kept in sync with
 // the XML FramerateCap or the internal scheduler falls back toward its own
 // default at the extremes (30/360) -- see native::get_fflag_path callers.
 fn set_frame_rate_fflag(value: i64) {
-    let Some(p) = crate::native::get_fflag_path() else { return };
+    let Some(p) = crate::native::get_fflag_path() else {
+        return;
+    };
     if let Some(parent) = p.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let mut flags: Map<String, Value> = if p.exists() {
-        std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        std::fs::read_to_string(&p)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
     } else {
         Map::new()
     };
-    flags.insert("DFIntTaskSchedulerTargetFps".into(), Value::Number((if value == 0 { 9999 } else { value }).into()));
-    let _ = std::fs::write(&p, serde_json::to_string_pretty(&flags).unwrap_or_else(|_| "{}".into()));
+    flags.insert(
+        "DFIntTaskSchedulerTargetFps".into(),
+        Value::Number((if value == 0 { 9999 } else { value }).into()),
+    );
+    let _ = std::fs::write(
+        &p,
+        serde_json::to_string_pretty(&flags).unwrap_or_else(|_| "{}".into()),
+    );
 }
 
 #[tauri::command]
@@ -293,10 +356,15 @@ pub fn fps_write(cap: f64) -> Value {
     let value = cap.round().max(0.0) as i64;
     let re = regex::Regex::new(r#"(?i)<int\s+name="FramerateCap"\s*>\d+</int>"#).unwrap();
     let new_xml = if re.is_match(&xml) {
-        re.replace(&xml, format!(r#"<int name="FramerateCap">{}</int>"#, value)).to_string()
+        re.replace(&xml, format!(r#"<int name="FramerateCap">{}</int>"#, value))
+            .to_string()
     } else {
         let re2 = regex::Regex::new(r"</Item>").unwrap();
-        re2.replace(&xml, format!("\t\t<int name=\"FramerateCap\">{}</int>\n</Item>", value)).to_string()
+        re2.replace(
+            &xml,
+            format!("\t\t<int name=\"FramerateCap\">{}</int>\n</Item>", value),
+        )
+        .to_string()
     };
     if std::fs::write(&p, new_xml).is_err() {
         return serde_json::json!({ "ok": false, "error": "Failed to write GlobalBasicSettings_13.xml" });
@@ -312,13 +380,22 @@ pub async fn roblox_get_version(state: State<'_, AppState>) -> Result<Option<Str
 }
 
 #[tauri::command]
-pub async fn roblox_validate_cookie(state: State<'_, AppState>, cookie: String) -> Result<Value, ()> {
+pub async fn roblox_validate_cookie(
+    state: State<'_, AppState>,
+    cookie: String,
+) -> Result<Value, ()> {
     let info = crate::roblox_api::fetch_user_info(&state, &cookie).await;
-    Ok(serde_json::json!({ "ok": info.ok, "username": info.username, "userId": info.user_id, "reason": info.reason }))
+    Ok(
+        serde_json::json!({ "ok": info.ok, "username": info.username, "userId": info.user_id, "reason": info.reason }),
+    )
 }
 
 #[tauri::command]
-pub async fn roblox_set_volume(app: AppHandle, state: State<'_, AppState>, percent: f64) -> Result<Value, ()> {
+pub async fn roblox_set_volume(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    percent: f64,
+) -> Result<Value, ()> {
     Ok(crate::native::set_roblox_volume(&app, &state, percent).await)
 }
 
@@ -330,21 +407,63 @@ pub async fn roblox_kill_all(app: AppHandle, state: State<'_, AppState>) -> Resu
         .lock()
         .unwrap()
         .keys()
-        .map(|id| accounts.iter().find(|a| a.get("id").and_then(|v| v.as_str()) == Some(id.as_str())).and_then(|a| a.get("username")).and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| id.clone()))
+        .map(|id| {
+            accounts
+                .iter()
+                .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(id.as_str()))
+                .and_then(|a| a.get("username"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| id.clone())
+        })
         .collect();
     let count = state.watched_accounts.lock().unwrap().len();
-    crate::native::emit_log(&app, "warn", "kill", &format!("Killed all Roblox instances ({} running: {})", count, if running_names.is_empty() { "none".into() } else { running_names.join(", ") }), Some(serde_json::json!({ "count": count, "accounts": running_names })));
+    crate::native::emit_log(
+        &app,
+        "warn",
+        "kill",
+        &format!(
+            "Killed all Roblox instances ({} running: {})",
+            count,
+            if running_names.is_empty() {
+                "none".into()
+            } else {
+                running_names.join(", ")
+            }
+        ),
+        Some(serde_json::json!({ "count": count, "accounts": running_names })),
+    );
     Ok(crate::native::kill_all_roblox(&app, &state).await)
 }
 
 #[tauri::command]
-pub async fn roblox_kill_one(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Value, ()> {
+pub async fn roblox_kill_one(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Value, ()> {
     let accounts = storage::load_accounts(&state);
-    let acct = accounts.iter().find(|a| a.get("id").and_then(|v| v.as_str()) == Some(id.as_str())).cloned().unwrap_or(Value::Null);
-    let username = acct.get("username").and_then(|v| v.as_str()).unwrap_or(&id).to_string();
+    let acct = accounts
+        .iter()
+        .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(id.as_str()))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let username = acct
+        .get("username")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&id)
+        .to_string();
     let user_id = acct.get("userId").and_then(|v| v.as_str());
     let pid = state.account_pids.lock().unwrap().get(&id).copied();
-    crate::native::emit_log(&app, "warn", "kill", &format!("Killed Roblox instance for {}", username), Some(serde_json::json!({ "accountId": id, "username": username, "userId": user_id, "pid": pid })));
+    crate::native::emit_log(
+        &app,
+        "warn",
+        "kill",
+        &format!("Killed Roblox instance for {}", username),
+        Some(
+            serde_json::json!({ "accountId": id, "username": username, "userId": user_id, "pid": pid }),
+        ),
+    );
     Ok(crate::native::kill_account_roblox(&app, &state, &id).await)
 }
 
@@ -359,7 +478,13 @@ pub async fn roblox_running_count(app: AppHandle, state: State<'_, AppState>) ->
 // event dropped, etc).
 #[tauri::command]
 pub async fn roblox_watched_ids(state: State<'_, AppState>) -> Result<Vec<String>, ()> {
-    Ok(state.watched_accounts.lock().unwrap().keys().cloned().collect())
+    Ok(state
+        .watched_accounts
+        .lock()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect())
 }
 
 #[tauri::command]
@@ -368,7 +493,20 @@ pub async fn roblox_trim_memory(app: AppHandle, state: State<'_, AppState>) -> R
 }
 
 #[tauri::command]
-pub async fn roblox_get_game_name(state: State<'_, AppState>, place_id_or_target: String, cookie: String) -> Result<Option<String>, ()> {
+pub async fn roblox_trim_account_memory(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Value, ()> {
+    Ok(crate::native::trim_account_memory(&app, &state, &id).await)
+}
+
+#[tauri::command]
+pub async fn roblox_get_game_name(
+    state: State<'_, AppState>,
+    place_id_or_target: String,
+    cookie: String,
+) -> Result<Option<String>, ()> {
     Ok(crate::roblox_api::get_game_name(&state, &place_id_or_target, &cookie).await)
 }
 
@@ -378,12 +516,22 @@ pub async fn roblox_get_json(state: State<'_, AppState>, url: String) -> Result<
 }
 
 #[tauri::command]
-pub async fn altgen_generate(state: State<'_, AppState>, api_key: String, quantity: i64) -> Result<Value, String> {
+pub async fn altgen_generate(
+    state: State<'_, AppState>,
+    api_key: String,
+    quantity: i64,
+) -> Result<Value, String> {
     crate::roblox_api::altgen_generate(&state, &api_key, quantity).await
 }
 
 #[tauri::command]
-pub async fn roblox_launch(app: AppHandle, state: State<'_, AppState>, id: String, cookie: String, target: Option<String>) -> Result<Value, ()> {
+pub async fn roblox_launch(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    cookie: String,
+    target: Option<String>,
+) -> Result<Value, ()> {
     let _guard = state.launch_lock.lock().await;
     Ok(crate::native::do_launch(&app, &state, &id, &cookie, target.as_deref().unwrap_or("")).await)
 }
@@ -392,7 +540,9 @@ pub async fn roblox_launch(app: AppHandle, state: State<'_, AppState>, id: Strin
 #[tauri::command]
 pub async fn roblox_open_login(app: AppHandle, state: State<'_, AppState>) -> Result<Value, ()> {
     let r = crate::login::open_login(&app, &state).await;
-    Ok(serde_json::json!({ "success": r.success, "cookie": r.cookie, "username": r.username, "userId": r.user_id, "error": r.error }))
+    Ok(
+        serde_json::json!({ "success": r.success, "cookie": r.cookie, "username": r.username, "userId": r.user_id, "error": r.error }),
+    )
 }
 
 #[tauri::command]
@@ -401,7 +551,11 @@ pub fn login_cancel(state: State<AppState>) {
 }
 
 #[tauri::command]
-pub async fn roblox_open_account_browser(app: AppHandle, state: State<'_, AppState>, cookie: String) -> Result<Value, ()> {
+pub async fn roblox_open_account_browser(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    cookie: String,
+) -> Result<Value, ()> {
     match crate::login::open_account_in_browser(&app, &state, &cookie).await {
         Ok(()) => Ok(serde_json::json!({ "ok": true })),
         Err(e) => Ok(serde_json::json!({ "ok": false, "error": e })),
@@ -412,4 +566,9 @@ pub async fn roblox_open_account_browser(app: AppHandle, state: State<'_, AppSta
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {
     tauri_plugin_opener::open_url(&url, None::<&str>).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn check_for_update(state: State<'_, AppState>) -> Result<Value, ()> {
+    Ok(crate::update::check_for_update(&state).await)
 }

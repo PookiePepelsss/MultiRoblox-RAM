@@ -16,9 +16,21 @@ const VERIFY_TOKEN: &str = "multiroblox-verify-v1";
 
 pub fn passphrase_mode() -> bool {
     let s = load_settings();
-    let has_verifier = s.get("keyVerifier").and_then(|v| v.as_str()).map(|v| !v.is_empty()).unwrap_or(false);
-    let has_key_enc = s.get("customKeyEnc").and_then(|v| v.as_str()).map(|v| !v.is_empty()).unwrap_or(false);
-    let has_key = s.get("customKey").and_then(|v| v.as_str()).map(|v| !v.trim().is_empty()).unwrap_or(false);
+    let has_verifier = s
+        .get("keyVerifier")
+        .and_then(|v| v.as_str())
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    let has_key_enc = s
+        .get("customKeyEnc")
+        .and_then(|v| v.as_str())
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    let has_key = s
+        .get("customKey")
+        .and_then(|v| v.as_str())
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
     has_verifier || has_key_enc || has_key
 }
 
@@ -125,9 +137,13 @@ pub fn prewarm_key(app: &tauri::AppHandle) {
         let state = app.state::<AppState>();
         let already = state.cached_key.lock().unwrap().is_some();
         let session_pass = state.session_pass.lock().unwrap().clone();
-        let Some(pass) = (if already { None } else { session_pass }) else { return };
+        let Some(pass) = (if already { None } else { session_pass }) else {
+            return;
+        };
         let salt = current_salt();
-        let key = tokio::task::spawn_blocking(move || crypto::derive_scrypt_key(&pass, &salt)).await.ok();
+        let key = tokio::task::spawn_blocking(move || crypto::derive_scrypt_key(&pass, &salt))
+            .await
+            .ok();
         if let Some(key) = key {
             let mut cached = state.cached_key.lock().unwrap();
             if cached.is_none() {
@@ -138,7 +154,11 @@ pub fn prewarm_key(app: &tauri::AppHandle) {
 }
 
 pub fn is_encrypted(v: &str) -> bool {
-    v.starts_with("safe2:") || v.starts_with("safe:") || v.starts_with("gs:") || v.starts_with("gcm:") || v.starts_with("cbc:")
+    v.starts_with("safe2:")
+        || v.starts_with("safe:")
+        || v.starts_with("gs:")
+        || v.starts_with("gcm:")
+        || v.starts_with("cbc:")
 }
 
 pub fn encrypt_field(state: &AppState, plaintext: &str) -> Result<String, String> {

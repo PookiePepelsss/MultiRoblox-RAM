@@ -21,11 +21,15 @@
 //                                      -- the same reliable enumeration the
 //                                      anti-AFK loop already depends on, no
 //                                      CSV parsing or extra process hop.
+//   RobloxNative.exe capture <pid> <path> -> save the selected Roblox window
+//                                      to a local PNG file.
 //
 // Build (done once, by the app or build.bat) with the .NET Framework compiler:
 //   csc /nologo /optimize+ /platform:x64 /target:exe /out:RobloxNative.exe RobloxNative.cs
 
 using System;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -44,8 +48,9 @@ internal static class RobloxNative
                 case "volume":       return RunVolume(args);
                 case "antiafk":      return RunAntiAfk(args);
                 case "pids":         return RunPids();
+                case "capture":      return RunCapture(args);
                 default:
-                    Console.Error.WriteLine("Unknown command. Use: mutex | closehandles | volume <0-100> | antiafk <seconds> | pids");
+                    Console.Error.WriteLine("Unknown command. Use: mutex | closehandles | volume <0-100> | antiafk <seconds> | pids | capture <pid> <path>");
                     return 2;
             }
         }
@@ -171,6 +176,46 @@ internal static class RobloxNative
         {
             try { Console.Out.WriteLine(p.Id); } catch { }
         }
+        return 0;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    private static int RunCapture(string[] args)
+    {
+        if (args.Length < 3) { Console.Error.WriteLine("Capture requires a PID and output path"); return 2; }
+        int pid;
+        if (!int.TryParse(args[1], out pid) || pid <= 0) { Console.Error.WriteLine("Invalid PID"); return 2; }
+
+        var process = Process.GetProcessById(pid);
+        var hwnd = process.MainWindowHandle;
+        if (hwnd == IntPtr.Zero) { Console.Error.WriteLine("Roblox window not found"); return 1; }
+        if (IsIconic(hwnd)) { Console.Error.WriteLine("Restore the Roblox window before capturing it"); return 1; }
+        AntiAfk.FocusWindow(hwnd);
+        Thread.Sleep(150);
+
+        RECT rect;
+        if (!GetWindowRect(hwnd, out rect)) { Console.Error.WriteLine("Could not read Roblox window bounds"); return 1; }
+        int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
+        if (width <= 0 || height <= 0) { Console.Error.WriteLine("Roblox window has invalid bounds"); return 1; }
+
+        string path = args[2];
+        string dir = System.IO.Path.GetDirectoryName(path);
+        if (!String.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
+        using (var bitmap = new Bitmap(width, height))
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(width, height));
+            bitmap.Save(path, ImageFormat.Png);
+        }
+        Console.Out.WriteLine("CAPTURED:" + path);
         return 0;
     }
 }
@@ -468,6 +513,11 @@ internal static class AntiAfk
         if (fgThread != 0 && fgThread != thisThread) attached = AttachThreadInput(thisThread, fgThread, true);
         try { SetForegroundWindow(hWnd); BringWindowToTop(hWnd); }
         finally { if (attached) AttachThreadInput(thisThread, fgThread, false); }
+    }
+
+    public static void FocusWindow(IntPtr hWnd)
+    {
+        ForceForeground(hWnd);
     }
 
     // Focus one window and send a single benign key tap. Does NOT restore the
