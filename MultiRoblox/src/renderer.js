@@ -182,6 +182,7 @@ async function continueInit() {
   applySettings();
   refreshMultiStatus();
   detectRobloxVersion();
+  checkForUpdate();
   startStatusPoll();
   if (settings.autoTrim) startAutoTrimLoop();
   logEntry('info', 'system', 'MultiRoblox started', { version: 'v1', accounts: accounts.length, platform: navigator.platform });
@@ -301,6 +302,21 @@ async function detectRobloxVersion() {
     const el = document.getElementById('stat-rblx-ver');
     if (el) el.textContent = 'Not detected';
   }
+}
+
+let _updateUrl = '';
+async function checkForUpdate() {
+  let res;
+  try { res = await api.checkForUpdate(); } catch { return; }
+  if (!res || !res.ok) return;
+  const verEl = document.getElementById('stat-app-ver');
+  if (verEl) verEl.textContent = 'Version ' + res.current;
+  if (!res.updateAvailable) return;
+  _updateUrl = res.url;
+  const badge = document.getElementById('update-badge');
+  if (badge) badge.style.display = 'inline-flex';
+  toast('Update available: v' + res.latest, 'ok');
+  logEntry('info', 'system', `Update available: v${res.latest} (running v${res.current})`, { current: res.current, latest: res.latest });
 }
 
 function applySettings() {
@@ -469,7 +485,7 @@ function updateCddDisplay(name, value) {
 document.addEventListener('click', e => { if (!e.target.closest('.cdd')) closeAllCdd(); });
 
 function settingsTab(tab) {
-  ['general','themes','sounds'].forEach(t => {
+  ['general','performance','privacy','themes','sounds'].forEach(t => {
     const panel = document.getElementById('stab-panel-' + t);
     const btn = document.getElementById('stab-' + t);
     if (panel) panel.style.display = t === tab ? '' : 'none';
@@ -528,6 +544,7 @@ function showCardMenu(id, x, y) {
   menu.innerHTML = `
     <div class="ctx-header">${esc(a ? (a.nickname || a.username || 'Unknown') : id)}</div>
     ${isLive ? `<button class="ctx-item ctx-danger" onclick="ctxKill('${id}')"><span class="material-icons-round">power_settings_new</span>Kill instance</button>` : ''}
+    ${isLive ? `<button class="ctx-item" onclick="ctxTrim('${id}')"><span class="material-icons-round">memory</span>Trim memory</button>` : ''}
     <button class="ctx-item" onclick="ctxLaunch('${id}')"><span class="material-icons-round">rocket_launch</span>${isLive ? 'Relaunch' : 'Launch'}</button>
     <button class="ctx-item" onclick="ctxEdit('${id}')"><span class="material-icons-round">edit</span>Edit account</button>
     <div class="ctx-sep"></div>
@@ -546,6 +563,18 @@ function showCardMenu(id, x, y) {
 }
 function closeCardMenu() { const m = document.getElementById('card-ctx-menu'); if (m) m.remove(); _ctxMenuId = null; }
 async function ctxKill(id) { closeCardMenu(); await killOne(id); }
+async function ctxTrim(id) {
+  closeCardMenu();
+  const a = accounts.find(x => x.id === id);
+  let res;
+  try { res = await api.trimAccountMemory(id); } catch { res = null; }
+  if (res?.ok) {
+    logEntry('info', 'system', `Trimmed memory for ${a?.username || id}`, { accountId: id, username: a?.username, userId: a?.userId });
+    toast(`Trimmed memory for ${a?.nickname || a?.username || 'instance'}`, 'ok');
+  } else {
+    toast(res?.error || 'Could not trim this instance', 'err');
+  }
+}
 function ctxLaunch(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a) { launchAcc = a; openModal('m-launch'); } }
 function ctxEdit(id) { closeCardMenu(); editAccount(id); }
 function ctxCopyId(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a?.userId) navigator.clipboard.writeText(a.userId).then(() => toast('User ID copied', 'ok')); else toast('No user ID', 'err'); }
@@ -887,8 +916,7 @@ function onDragEnd() {
 
 function loadAvatar(id, uid) {
   if (_avatarCache[uid]) {
-    const el = document.getElementById('av-' + id);
-    if (el) el.innerHTML = '<img src="' + _avatarCache[uid] + '" alt=""/>';
+    paintAccountAvatar(id, uid, _avatarCache[uid]);
     return;
   }
   api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + uid + '&size=48x48&format=Png')
@@ -896,10 +924,16 @@ function loadAvatar(id, uid) {
       const url = d?.data?.[0]?.imageUrl;
       if (url) {
         _avatarCache[uid] = url;
-        const el = document.getElementById('av-' + id);
-        if (el) el.innerHTML = '<img src="' + esc(url) + '" alt=""/>';
+        paintAccountAvatar(id, uid, url);
       }
     }).catch(() => {});
+}
+
+function paintAccountAvatar(id, uid, url) {
+  ['av-' + id, 'pkg-picker-av-' + id].forEach(elId => {
+    const el = document.getElementById(elId);
+    if (el && !el.querySelector('img')) el.innerHTML = '<img src="' + esc(url) + '" alt=""/>';
+  });
 }
 
 // Batched avatar load: one request for every uncached account instead of one per
@@ -908,8 +942,7 @@ function loadAvatar(id, uid) {
 async function loadAvatarsBatch(list) {
   const paint = a => {
     if (a.userId && _avatarCache[a.userId]) {
-      const el = document.getElementById('av-' + a.id);
-      if (el && !el.querySelector('img')) el.innerHTML = '<img src="' + _avatarCache[a.userId] + '" alt=""/>';
+      paintAccountAvatar(a.id, a.userId, _avatarCache[a.userId]);
     }
   };
   const need = [], seen = new Set();
@@ -1071,7 +1104,7 @@ async function addByCookie() {
   }
   const btn = document.getElementById('btn-cookie-add');
   btn.disabled = true;
-  btn.innerHTML = '<div class="spin"></div>Verifying…';
+  btn.innerHTML = '<div class="spin"></div>Verifying';
   setStatus('login-status', 'load', '<div class="spin"></div>Verifying cookie…');
   const res = await api.validateCookie(cookie);
   btn.disabled = false;
@@ -1186,7 +1219,7 @@ async function doLaunch() {
   if (!launchAcc) return;
   const btn = document.getElementById('btn-launch');
   if (btn.disabled) return;
-  btn.disabled = true; btn.innerHTML = '<div class="spin"></div>Launching\u2026';
+  btn.disabled = true; btn.innerHTML = '<div class="spin"></div>Launching';
   setStatus('launch-status', 'load', '<div class="spin"></div>Getting auth ticket\u2026');
   logEntry('info', 'launch', `Launching Roblox for ${launchAcc.username || launchAcc.id}...`, { accountId: launchAcc.id, username: launchAcc.username, userId: launchAcc.userId, target: launchAcc.gameTarget || 'Roblox home' });
   const res = await api.launchRoblox(launchAcc.id, launchAcc.cookie, launchAcc.gameTarget || null);
@@ -1283,7 +1316,7 @@ function renderPackagePicker(selectedIds) {
   wrap.innerHTML = accounts.map(a => `
     <label class="pm-row">
       <input type="checkbox" value="${a.id}" ${selectedIds.includes(a.id) ? 'checked' : ''}/>
-      <span class="pm-av">${esc((a.username || '?')[0].toUpperCase())}</span>
+      <span class="pm-av" id="pkg-picker-av-${a.id}">${esc((a.username || '?')[0].toUpperCase())}</span>
       <span class="pm-info">
         <span class="pm-name">${esc(a.nickname || a.username || 'Unknown')}</span>
         <span class="pm-meta">${a.userId ? 'ID ' + a.userId : 'No ID'}</span>
@@ -1291,6 +1324,7 @@ function renderPackagePicker(selectedIds) {
       <span class="pm-check"><span class="material-icons-round">check</span></span>
     </label>`).join('');
   updatePkgCount();
+  loadAvatarsBatch(accounts);
 }
 
 function updatePkgCount() {
@@ -1340,7 +1374,7 @@ async function launchPackage(id) {
   const card = document.querySelector('.pkg-card[data-id="' + id + '"]');
   const btn = card ? card.querySelector('.pkg-launch-btn') : null;
   const progress = document.getElementById('pkg-progress-' + id);
-  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spin"></div>Launching\u2026'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spin"></div>Launching'; }
   if (progress) {
     progress.innerHTML = members.map(m => `
       <span class="pkg-chip load" id="pkg-chip-${id}-${m.id}">
@@ -1387,7 +1421,7 @@ async function saveKeySettings() {
   const btn = document.getElementById('btn-save-key');
   if (btn.disabled) return;
   clearTimeout(_saveKeyTimer);
-  btn.disabled = true; btn.textContent = 'Saving\u2026';
+  btn.disabled = true; btn.textContent = 'Saving';
   _saveKeyTimer = setTimeout(async () => {
     try {
       await api.saveSettings({ encryptionType: selectedEnc });
@@ -1791,18 +1825,29 @@ async function pollWatchedIds() {
   let ids;
   try { ids = await api.getWatchedIds(); } catch { return; }
   const watched = new Set(ids);
+  // Cards that stop matching the active Running/Idle filter get pulled from
+  // the DOM directly rather than going through a full render() -- render()
+  // rebuilds the whole grid (replaying every card's entrance animation via
+  // its inline animation-delay), which would flicker on every 3s poll tick
+  // if anything changed while filtered. New cards that start matching still
+  // wait for the next natural render() (switching pages/filters etc).
+  const dropFromFilter = (_acctFilter === 'running' || _acctFilter === 'idle')
+    ? id => (_acctFilter === 'running' ? !watched.has(id) : watched.has(id))
+    : null;
   document.querySelectorAll('.card[data-id]').forEach(card => {
     const id = card.dataset.id;
     const shouldBeLive = watched.has(id);
     const isLive = card.classList.contains('is-live');
-    if (shouldBeLive === isLive) return;
-    card.classList.toggle('is-live', shouldBeLive);
-    const dot = card.querySelector('.card-dot');
-    if (dot) {
-      dot.classList.toggle('launched', shouldBeLive);
-      dot.title = shouldBeLive ? 'Launched' : 'Not launched';
+    if (shouldBeLive !== isLive) {
+      card.classList.toggle('is-live', shouldBeLive);
+      const dot = card.querySelector('.card-dot');
+      if (dot) {
+        dot.classList.toggle('launched', shouldBeLive);
+        dot.title = shouldBeLive ? 'Launched' : 'Not launched';
+      }
+      if (shouldBeLive) _launchedIds.add(id); else _launchedIds.delete(id);
+      if (dropFromFilter && dropFromFilter(id)) card.remove();
     }
-    if (shouldBeLive) _launchedIds.add(id); else _launchedIds.delete(id);
   });
 }
 function pollStatus() {
@@ -1903,7 +1948,7 @@ function mixVolCommit() {
 async function mixKillAll() {
   const btns = Array.from(document.querySelectorAll('.kill-roblox-btn'));
   if (!btns.length || btns[0].disabled) return;
-  btns.forEach(b => { b.disabled = true; b.dataset.orig = b.innerHTML; b.innerHTML = '<div class="spin"></div>Stopping\u2026'; });
+  btns.forEach(b => { b.disabled = true; b.dataset.orig = b.innerHTML; b.innerHTML = '<div class="spin"></div>Stopping'; });
   const res = await api.killAllRoblox();
   // Reset all dots / launched state.
   _launchedIds.clear();
@@ -1926,7 +1971,6 @@ async function mixApply() {
   if (btn.disabled) return;
   btn.disabled = true;
   const orig = btn.innerHTML;
-  btn.innerHTML = '<div class="spin"></div>Applying\u2026';
 
   mixGfxCommit();
   mixFpsCommit();
@@ -1942,7 +1986,6 @@ async function mixTrimMemory(btnId = 'set-trim-btn') {
   if (!btn || btn.disabled) return;
   btn.disabled = true;
   const orig = btn.innerHTML;
-  btn.innerHTML = '<div class="spin"></div>Trimming…';
 
   let res;
   try { res = await api.trimRobloxMemory(); } catch { res = null; }
@@ -1979,7 +2022,7 @@ async function genCombo() {
 
   const btn = document.getElementById('gen-btn');
   const out = document.getElementById('gen-output');
-  if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
+  if (btn) { btn.textContent = 'Generating'; btn.disabled = true; }
 
   try {
     const d = provider === 'bloxgen' ? await genBloxgen(apiKey) : await genAltgen(apiKey);
@@ -2444,7 +2487,7 @@ function genCopy() {
   };
 
   // ── State ─────────────────────────────────────────────────────────────────
-  let _currentProfile = 'clicky';
+  let _currentProfile = 'creamy';
   let _volume = 0.35;
 
   try {
@@ -2560,10 +2603,10 @@ function genCopy() {
     const idx = _customSounds.findIndex(x => x.id === cid);
     if (idx === -1) return;
     _customSounds.splice(idx, 1);
-    // If deleted sound was active, switch to clicky
+    // If deleted sound was active, restore the default profile.
     if (_currentProfile === '__custom__' + cid) {
-      _currentProfile = 'clicky';
-      try { localStorage.setItem('sound-profile', 'clicky'); } catch {}
+      _currentProfile = 'creamy';
+      try { localStorage.setItem('sound-profile', 'creamy'); } catch {}
     }
     _saveCustomSoundMeta();
     soundRenderPage();

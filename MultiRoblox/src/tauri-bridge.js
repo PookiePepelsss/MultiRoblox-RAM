@@ -32,10 +32,12 @@
     getRunningCount: () => invoke('roblox_running_count'),
     getWatchedIds: () => invoke('roblox_watched_ids'),
     trimRobloxMemory: () => invoke('roblox_trim_memory'),
+    trimAccountMemory: (id) => invoke('roblox_trim_account_memory', { id }),
     onAllRobloxClosed: (cb) => listen('roblox:allClosed', () => cb()),
 
     launchRoblox: (id, cookie, target) => invoke('roblox_launch', { id, cookie, target }),
     openExternal: (url) => invoke('open_external', { url }),
+    checkForUpdate: () => invoke('check_for_update'),
 
     loadSettings: () => invoke('settings_load'),
     saveSettings: (data) => invoke('settings_save', { data }),

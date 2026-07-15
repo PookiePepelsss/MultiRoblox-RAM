@@ -15,16 +15,46 @@ use tauri::{AppHandle, Emitter};
 fn system_chrome_paths() -> Vec<PathBuf> {
     let home = std::env::var("USERPROFILE").unwrap_or_default();
     let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
-    let pf86 = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into());
-    let local = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| format!(r"{}\AppData\Local", home));
+    let pf86 =
+        std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into());
+    let local =
+        std::env::var("LOCALAPPDATA").unwrap_or_else(|_| format!(r"{}\AppData\Local", home));
     vec![
-        Path::new(&pf).join("Google").join("Chrome").join("Application").join("chrome.exe"),
-        Path::new(&pf86).join("Google").join("Chrome").join("Application").join("chrome.exe"),
-        Path::new(&local).join("Google").join("Chrome").join("Application").join("chrome.exe"),
-        Path::new(&pf86).join("Microsoft").join("Edge").join("Application").join("msedge.exe"),
-        Path::new(&pf).join("Microsoft").join("Edge").join("Application").join("msedge.exe"),
-        Path::new(&pf).join("BraveSoftware").join("Brave-Browser").join("Application").join("brave.exe"),
-        Path::new(&local).join("BraveSoftware").join("Brave-Browser").join("Application").join("brave.exe"),
+        Path::new(&pf)
+            .join("Google")
+            .join("Chrome")
+            .join("Application")
+            .join("chrome.exe"),
+        Path::new(&pf86)
+            .join("Google")
+            .join("Chrome")
+            .join("Application")
+            .join("chrome.exe"),
+        Path::new(&local)
+            .join("Google")
+            .join("Chrome")
+            .join("Application")
+            .join("chrome.exe"),
+        Path::new(&pf86)
+            .join("Microsoft")
+            .join("Edge")
+            .join("Application")
+            .join("msedge.exe"),
+        Path::new(&pf)
+            .join("Microsoft")
+            .join("Edge")
+            .join("Application")
+            .join("msedge.exe"),
+        Path::new(&pf)
+            .join("BraveSoftware")
+            .join("Brave-Browser")
+            .join("Application")
+            .join("brave.exe"),
+        Path::new(&local)
+            .join("BraveSoftware")
+            .join("Brave-Browser")
+            .join("Application")
+            .join("brave.exe"),
     ]
 }
 
@@ -64,7 +94,10 @@ fn find_cached_chrome() -> Option<PathBuf> {
 }
 
 async fn download_chrome(app: &AppHandle, state: &AppState) -> Option<PathBuf> {
-    let _ = app.emit("chrome:download-progress", serde_json::json!({ "status": "downloading", "percent": 0 }));
+    let _ = app.emit(
+        "chrome:download-progress",
+        serde_json::json!({ "status": "downloading", "percent": 0 }),
+    );
 
     let versions_json: Value = state
         .http
@@ -75,7 +108,12 @@ async fn download_chrome(app: &AppHandle, state: &AppState) -> Option<PathBuf> {
         .json()
         .await
         .ok()?;
-    let version = versions_json.get("channels")?.get("Stable")?.get("version")?.as_str()?.to_string();
+    let version = versions_json
+        .get("channels")?
+        .get("Stable")?
+        .get("version")?
+        .as_str()?
+        .to_string();
 
     let platform = "win64"; // this app is Windows-only
     let url = format!(
@@ -97,7 +135,10 @@ async fn download_chrome(app: &AppHandle, state: &AppState) -> Option<PathBuf> {
         downloaded += chunk.len() as u64;
         if total > 0 {
             let percent = ((downloaded as f64 / total as f64) * 100.0).round() as i64;
-            let _ = app.emit("chrome:download-progress", serde_json::json!({ "status": "downloading", "percent": percent }));
+            let _ = app.emit(
+                "chrome:download-progress",
+                serde_json::json!({ "status": "downloading", "percent": percent }),
+            );
         }
     }
     drop(file);
@@ -115,7 +156,10 @@ async fn download_chrome(app: &AppHandle, state: &AppState) -> Option<PathBuf> {
     let _ = extracted;
     let _ = std::fs::remove_file(&zip_path);
 
-    let _ = app.emit("chrome:download-progress", serde_json::json!({ "status": "done" }));
+    let _ = app.emit(
+        "chrome:download-progress",
+        serde_json::json!({ "status": "done" }),
+    );
     find_cached_chrome()
 }
 
@@ -141,7 +185,15 @@ pub struct LoginResult {
 
 pub async fn open_login(app: &AppHandle, state: &AppState) -> LoginResult {
     let Some(chrome_path) = ensure_chrome(app, state).await else {
-        return LoginResult { success: false, cookie: None, username: None, user_id: None, error: Some("Failed to download Chrome. Check your internet connection and try again.".into()) };
+        return LoginResult {
+            success: false,
+            cookie: None,
+            username: None,
+            user_id: None,
+            error: Some(
+                "Failed to download Chrome. Check your internet connection and try again.".into(),
+            ),
+        };
     };
     browser_login(app, state, &chrome_path).await
 }
@@ -166,7 +218,13 @@ async fn try_get_cookie(browser: &Browser) -> Option<String> {
     }
     let target = target.unwrap_or_else(|| pages.last().unwrap());
     let resp = target.execute(GetCookiesParams::default()).await.ok()?;
-    resp.result.cookies.iter().find(|c| c.name == ".ROBLOSECURITY" && c.domain.contains("roblox.com") && c.value.len() > 100).map(|c| c.value.clone())
+    resp.result
+        .cookies
+        .iter()
+        .find(|c| {
+            c.name == ".ROBLOSECURITY" && c.domain.contains("roblox.com") && c.value.len() > 100
+        })
+        .map(|c| c.value.clone())
 }
 
 async fn browser_login(_app: &AppHandle, state: &AppState, chrome_path: &Path) -> LoginResult {
@@ -186,12 +244,28 @@ async fn browser_login(_app: &AppHandle, state: &AppState, chrome_path: &Path) -
         .build()
     {
         Ok(c) => c,
-        Err(e) => return LoginResult { success: false, cookie: None, username: None, user_id: None, error: Some(format!("Failed to launch Chrome: {}", e)) },
+        Err(e) => {
+            return LoginResult {
+                success: false,
+                cookie: None,
+                username: None,
+                user_id: None,
+                error: Some(format!("Failed to launch Chrome: {}", e)),
+            }
+        }
     };
 
     let (mut browser, mut handler) = match Browser::launch(config).await {
         Ok(b) => b,
-        Err(e) => return LoginResult { success: false, cookie: None, username: None, user_id: None, error: Some(format!("Failed to launch Chrome: {}", e)) },
+        Err(e) => {
+            return LoginResult {
+                success: false,
+                cookie: None,
+                username: None,
+                user_id: None,
+                error: Some(format!("Failed to launch Chrome: {}", e)),
+            }
+        }
     };
 
     let handler_task = tokio::spawn(async move { while handler.next().await.is_some() {} });
@@ -243,14 +317,44 @@ pub fn cancel_login(state: &AppState) {
     }
 }
 
+// browser_login()'s per-attempt profile dir is normally removed once that
+// login finishes, but a crash or force-kill mid-login skips that cleanup and
+// leaves an orphaned mr-login-* folder in %TEMP%. Run once at startup and
+// sweep any that are more than a few hours old -- old enough that they can't
+// belong to a login still in progress, so deleting them is always safe.
+pub fn sweep_stale_login_profiles() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    let cutoff = std::time::SystemTime::now() - Duration::from_secs(6 * 60 * 60);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.starts_with("mr-login-") {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            if meta.modified().map(|t| t < cutoff).unwrap_or(false) {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+}
+
 // "Open in browser" from a saved account's context menu: launches a real
 // Chrome window (same detection/download as the login flow, but its own
 // fresh temp profile so it doesn't touch the user's main browser profile),
 // seeds the .ROBLOSECURITY cookie via CDP before any navigation happens so
 // the page loads already authenticated, then leaves the window open for the
 // user -- unlike browser_login() above, this never calls browser.close().
-pub async fn open_account_in_browser(app: &AppHandle, state: &AppState, cookie: &str) -> Result<(), String> {
-    let chrome_path = ensure_chrome(app, state).await.ok_or_else(|| "Failed to find or download Chrome".to_string())?;
+pub async fn open_account_in_browser(
+    app: &AppHandle,
+    state: &AppState,
+    cookie: &str,
+) -> Result<(), String> {
+    let chrome_path = ensure_chrome(app, state)
+        .await
+        .ok_or_else(|| "Failed to find or download Chrome".to_string())?;
 
     let config = BrowserConfig::builder()
         .chrome_executable(&chrome_path)
@@ -259,10 +363,15 @@ pub async fn open_account_in_browser(app: &AppHandle, state: &AppState, cookie: 
         .build()
         .map_err(|e| format!("Failed to launch Chrome: {}", e))?;
 
-    let (browser, mut handler) = Browser::launch(config).await.map_err(|e| format!("Failed to launch Chrome: {}", e))?;
+    let (browser, mut handler) = Browser::launch(config)
+        .await
+        .map_err(|e| format!("Failed to launch Chrome: {}", e))?;
     tokio::spawn(async move { while handler.next().await.is_some() {} });
 
-    let page = browser.new_page("about:blank").await.map_err(|e| e.to_string())?;
+    let page = browser
+        .new_page("about:blank")
+        .await
+        .map_err(|e| e.to_string())?;
     let cookie_params = SetCookieParams::builder()
         .name(".ROBLOSECURITY")
         .value(cookie)
@@ -272,8 +381,12 @@ pub async fn open_account_in_browser(app: &AppHandle, state: &AppState, cookie: 
         .secure(true)
         .build()
         .map_err(|e| e.to_string())?;
-    page.execute(cookie_params).await.map_err(|e| e.to_string())?;
-    page.goto("https://www.roblox.com/home").await.map_err(|e| e.to_string())?;
+    page.execute(cookie_params)
+        .await
+        .map_err(|e| e.to_string())?;
+    page.goto("https://www.roblox.com/home")
+        .await
+        .map_err(|e| e.to_string())?;
 
     std::mem::forget(browser); // detached: stays open for the user, matches child.forget() elsewhere
     Ok(())

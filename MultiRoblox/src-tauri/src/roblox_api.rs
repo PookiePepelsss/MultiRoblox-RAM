@@ -32,7 +32,10 @@ pub async fn fetch_user_info(state: &AppState, cookie: &str) -> UserInfo {
             match serde_json::from_str::<Value>(&body) {
                 Ok(d) if d.get("id").is_some() => UserInfo {
                     ok: true,
-                    username: d.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    username: d
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     user_id: d.get("id").map(|v| match v {
                         Value::Number(n) => n.to_string(),
                         Value::String(s) => s.clone(),
@@ -40,20 +43,39 @@ pub async fn fetch_user_info(state: &AppState, cookie: &str) -> UserInfo {
                     }),
                     reason: None,
                 },
-                _ => UserInfo { ok: false, username: None, user_id: None, reason: Some(body.chars().take(200).collect()) },
+                _ => UserInfo {
+                    ok: false,
+                    username: None,
+                    user_id: None,
+                    reason: Some(body.chars().take(200).collect()),
+                },
             }
         }
-        Err(e) => UserInfo { ok: false, username: None, user_id: None, reason: Some(e.to_string()) },
+        Err(e) => UserInfo {
+            ok: false,
+            username: None,
+            user_id: None,
+            reason: Some(e.to_string()),
+        },
     }
 }
 
 pub async fn get_roblox_version(state: &AppState) -> Option<String> {
-    let res = state.http.get("https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer").header("User-Agent", UA).send().await.ok()?;
+    let res = state
+        .http
+        .get("https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer")
+        .header("User-Agent", UA)
+        .send()
+        .await
+        .ok()?;
     if res.status() != 200 {
         return None;
     }
     let json: Value = res.json().await.ok()?;
-    json.get("clientVersionUpload").or_else(|| json.get("version")).and_then(|v| v.as_str()).map(|s| s.to_string())
+    json.get("clientVersionUpload")
+        .or_else(|| json.get("version"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 async fn csrf_from_endpoint(state: &AppState, cookie: &str, endpoint: &str) -> Option<String> {
@@ -70,7 +92,10 @@ async fn csrf_from_endpoint(state: &AppState, cookie: &str, endpoint: &str) -> O
         .send()
         .await
         .ok()?;
-    res.headers().get("x-csrf-token").and_then(|v| v.to_str().ok()).map(|s| s.to_string())
+    res.headers()
+        .get("x-csrf-token")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
 }
 
 pub async fn get_csrf_token(state: &AppState, cookie: &str) -> Option<String> {
@@ -84,7 +109,11 @@ pub async fn get_csrf_token(state: &AppState, cookie: &str) -> Option<String> {
     }
     for endpoint in ["/v2/logout", "/v1/logout"] {
         if let Some(token) = csrf_from_endpoint(state, cookie, endpoint).await {
-            state.csrf_cache.lock().unwrap().insert(cookie.to_string(), (token.clone(), now_ms()));
+            state
+                .csrf_cache
+                .lock()
+                .unwrap()
+                .insert(cookie.to_string(), (token.clone(), now_ms()));
             return Some(token);
         }
     }
@@ -105,12 +134,27 @@ pub struct TicketResult {
 // non-429/403 status (including a stray 405) gets the same backoff-and-retry
 // treatment across all 3 attempts instead of giving up on the first one
 // while still telling the user "try again in a moment."
-pub async fn get_auth_ticket(state: &AppState, cookie: &str, csrf_token: Option<String>) -> TicketResult {
+pub async fn get_auth_ticket(
+    state: &AppState,
+    cookie: &str,
+    csrf_token: Option<String>,
+) -> TicketResult {
     let now = now_ms();
-    let cached = { state.ticket_cache.lock().unwrap().get(cookie).map(|(t, ts)| (t.clone(), *ts)) };
+    let cached = {
+        state
+            .ticket_cache
+            .lock()
+            .unwrap()
+            .get(cookie)
+            .map(|(t, ts)| (t.clone(), *ts))
+    };
     if let Some((ticket, ts)) = cached {
         if now - ts < 25_000 {
-            return TicketResult { ok: true, ticket: Some(ticket), error: None };
+            return TicketResult {
+                ok: true,
+                ticket: Some(ticket),
+                error: None,
+            };
         }
         if now - ts < 8_000 {
             let wait = 8_000 - (now - ts);
@@ -146,17 +190,42 @@ pub async fn get_auth_ticket(state: &AppState, cookie: &str, csrf_token: Option<
         };
         let status = res.status().as_u16();
         last_status = status;
-        if let Some(ticket) = res.headers().get("rbx-authentication-ticket").and_then(|v| v.to_str().ok()).map(|s| s.to_string()) {
-            state.ticket_cache.lock().unwrap().insert(cookie.to_string(), (ticket.clone(), now_ms()));
-            return TicketResult { ok: true, ticket: Some(ticket), error: None };
+        if let Some(ticket) = res
+            .headers()
+            .get("rbx-authentication-ticket")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+        {
+            state
+                .ticket_cache
+                .lock()
+                .unwrap()
+                .insert(cookie.to_string(), (ticket.clone(), now_ms()));
+            return TicketResult {
+                ok: true,
+                ticket: Some(ticket),
+                error: None,
+            };
         }
         if status == 429 {
             invalidate_csrf(state, cookie);
-            let retry_after = res.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(8);
+            let retry_after = res
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(8);
             tokio::time::sleep(Duration::from_secs(retry_after)).await;
             token = get_csrf_token(state, cookie).await;
             if token.is_none() {
-                return TicketResult { ok: false, ticket: None, error: Some("Rate limited and could not refresh token. Wait a moment and try again.".into()) };
+                return TicketResult {
+                    ok: false,
+                    ticket: None,
+                    error: Some(
+                        "Rate limited and could not refresh token. Wait a moment and try again."
+                            .into(),
+                    ),
+                };
             }
             continue;
         }
@@ -164,7 +233,11 @@ pub async fn get_auth_ticket(state: &AppState, cookie: &str, csrf_token: Option<
             invalidate_csrf(state, cookie);
             token = get_csrf_token(state, cookie).await;
             if token.is_none() {
-                return TicketResult { ok: false, ticket: None, error: Some("Authentication failed (403). Cookie may be expired.".into()) };
+                return TicketResult {
+                    ok: false,
+                    ticket: None,
+                    error: Some("Authentication failed (403). Cookie may be expired.".into()),
+                };
             }
             continue;
         }
@@ -172,9 +245,22 @@ pub async fn get_auth_ticket(state: &AppState, cookie: &str, csrf_token: Option<
         // on the first hit; only surface an error once all 3 attempts are spent.
     }
     if last_status != 0 {
-        return TicketResult { ok: false, ticket: None, error: Some(format!("Auth ticket request failed (HTTP {}) after 3 attempts. Try again in a moment.", last_status)) };
+        return TicketResult {
+            ok: false,
+            ticket: None,
+            error: Some(format!(
+                "Auth ticket request failed (HTTP {}) after 3 attempts. Try again in a moment.",
+                last_status
+            )),
+        };
     }
-    TicketResult { ok: false, ticket: None, error: Some("Still rate limited after 3 attempts. Please wait 30 seconds and try again.".into()) }
+    TicketResult {
+        ok: false,
+        ticket: None,
+        error: Some(
+            "Still rate limited after 3 attempts. Please wait 30 seconds and try again.".into(),
+        ),
+    }
 }
 
 pub fn invalidate_ticket(state: &AppState, cookie: &str) {
@@ -186,9 +272,16 @@ fn extract_place_id(place_id_or_target: &str) -> Option<String> {
     if t.chars().all(|c| c.is_ascii_digit()) && !t.is_empty() {
         return Some(t.to_string());
     }
-    let raw = if t.starts_with("http") { t.to_string() } else { format!("https://{}", t) };
+    let raw = if t.starts_with("http") {
+        t.to_string()
+    } else {
+        format!("https://{}", t)
+    };
     if let Ok(url) = url::Url::parse(&raw) {
-        let segs: Vec<&str> = url.path_segments().map(|s| s.filter(|x| !x.is_empty()).collect()).unwrap_or_default();
+        let segs: Vec<&str> = url
+            .path_segments()
+            .map(|s| s.filter(|x| !x.is_empty()).collect())
+            .unwrap_or_default();
         if segs.first() == Some(&"games") {
             if let Some(id) = segs.get(1) {
                 if id.chars().all(|c| c.is_ascii_digit()) {
@@ -206,27 +299,81 @@ fn extract_place_id(place_id_or_target: &str) -> Option<String> {
 }
 
 async fn get_json(state: &AppState, url: &str, cookie: &str) -> Option<Value> {
-    let res = state.http.get(url).header("Cookie", format!(".ROBLOSECURITY={}", cookie)).header("Accept", "application/json").header("User-Agent", UA).timeout(Duration::from_secs(5)).send().await.ok()?;
+    let res = state
+        .http
+        .get(url)
+        .header("Cookie", format!(".ROBLOSECURITY={}", cookie))
+        .header("Accept", "application/json")
+        .header("User-Agent", UA)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
     res.json::<Value>().await.ok()
 }
 
-pub async fn get_game_name(state: &AppState, place_id_or_target: &str, cookie: &str) -> Option<String> {
+pub async fn get_game_name(
+    state: &AppState,
+    place_id_or_target: &str,
+    cookie: &str,
+) -> Option<String> {
     let place_id = extract_place_id(place_id_or_target)?;
-    let url = format!("https://games.roblox.com/v1/games/multiget-place-details?placeIds={}", place_id);
+    let url = format!(
+        "https://games.roblox.com/v1/games/multiget-place-details?placeIds={}",
+        place_id
+    );
     if let Some(d) = get_json(state, &url, cookie).await {
-        if let Some(name) = d.as_array().and_then(|a| a.first()).and_then(|v| v.get("name")).and_then(|v| v.as_str()) {
+        if let Some(name) = d
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|v| v.get("name"))
+            .and_then(|v| v.as_str())
+        {
             return Some(name.to_string());
         }
     }
-    let uni = get_json(state, &format!("https://apis.roblox.com/universes/v1/places/{}/universe", place_id), cookie).await?;
+    let uni = get_json(
+        state,
+        &format!(
+            "https://apis.roblox.com/universes/v1/places/{}/universe",
+            place_id
+        ),
+        cookie,
+    )
+    .await?;
     let universe_id = uni.get("universeId")?;
-    let games = get_json(state, &format!("https://games.roblox.com/v1/games?universeIds={}", universe_id), cookie).await?;
-    games.get("data")?.as_array()?.first()?.get("name")?.as_str().map(|s| s.to_string())
+    let games = get_json(
+        state,
+        &format!(
+            "https://games.roblox.com/v1/games?universeIds={}",
+            universe_id
+        ),
+        cookie,
+    )
+    .await?;
+    games
+        .get("data")?
+        .as_array()?
+        .first()?
+        .get("name")?
+        .as_str()
+        .map(|s| s.to_string())
 }
 
 pub async fn follow_redirect(state: &AppState, url: &str) -> String {
-    match state.http_no_redirect.get(url).header("User-Agent", UA).send().await {
-        Ok(res) => res.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or(url).to_string(),
+    match state
+        .http_no_redirect
+        .get(url)
+        .header("User-Agent", UA)
+        .send()
+        .await
+    {
+        Ok(res) => res
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(url)
+            .to_string(),
         Err(_) => url.to_string(),
     }
 }
@@ -238,7 +385,12 @@ pub struct ShareLinkResult {
     pub error: Option<String>,
 }
 
-pub async fn resolve_share_link(state: &AppState, share_code: &str, cookie: &str, csrf_token: Option<&str>) -> ShareLinkResult {
+pub async fn resolve_share_link(
+    state: &AppState,
+    share_code: &str,
+    cookie: &str,
+    csrf_token: Option<&str>,
+) -> ShareLinkResult {
     let payloads = [
         serde_json::json!({ "linkId": share_code, "linkType": "Server" }).to_string(),
         serde_json::json!({ "code": share_code, "type": "Server" }).to_string(),
@@ -246,36 +398,74 @@ pub async fn resolve_share_link(state: &AppState, share_code: &str, cookie: &str
     let mut current_csrf = csrf_token.map(|s| s.to_string()).unwrap_or_default();
 
     for payload in payloads {
-        let (status, headers, body) = post_raw(state, "https://apis.roblox.com/sharelinks/v1/resolve-link", cookie, &current_csrf, &payload).await;
+        let (status, headers, body) = post_raw(
+            state,
+            "https://apis.roblox.com/sharelinks/v1/resolve-link",
+            cookie,
+            &current_csrf,
+            &payload,
+        )
+        .await;
         if status == 200 {
             if let Some((pid, lc)) = extract_place_link(&body) {
-                return ShareLinkResult { ok: true, place_id: Some(pid), link_code: Some(lc), error: None };
+                return ShareLinkResult {
+                    ok: true,
+                    place_id: Some(pid),
+                    link_code: Some(lc),
+                    error: None,
+                };
             }
         }
         if status == 403 {
             if let Some(fresh) = headers.get("x-csrf-token").and_then(|v| v.to_str().ok()) {
-                let (status2, _h2, body2) = post_raw(state, "https://apis.roblox.com/sharelinks/v1/resolve-link", cookie, fresh, &payload).await;
+                let (status2, _h2, body2) = post_raw(
+                    state,
+                    "https://apis.roblox.com/sharelinks/v1/resolve-link",
+                    cookie,
+                    fresh,
+                    &payload,
+                )
+                .await;
                 if status2 == 200 {
                     if let Some((pid, lc)) = extract_place_link(&body2) {
-                        return ShareLinkResult { ok: true, place_id: Some(pid), link_code: Some(lc), error: None };
+                        return ShareLinkResult {
+                            ok: true,
+                            place_id: Some(pid),
+                            link_code: Some(lc),
+                            error: None,
+                        };
                     }
                 }
                 current_csrf = fresh.to_string();
             }
         }
     }
-    ShareLinkResult { ok: false, place_id: None, link_code: None, error: Some("Could not resolve share link. It may be expired or invalid.".into()) }
+    ShareLinkResult {
+        ok: false,
+        place_id: None,
+        link_code: None,
+        error: Some("Could not resolve share link. It may be expired or invalid.".into()),
+    }
 }
 
 fn extract_place_link(body: &str) -> Option<(String, String)> {
     let re_pid = regex::Regex::new(r#""placeId"\s*:\s*(\d+)"#).unwrap();
-    let re_lc = regex::Regex::new(r#""(?:linkCode|privateServerLinkCode|accessCode|linkcode)"\s*:\s*"([A-Za-z0-9_\-]+)""#).unwrap();
+    let re_lc = regex::Regex::new(
+        r#""(?:linkCode|privateServerLinkCode|accessCode|linkcode)"\s*:\s*"([A-Za-z0-9_\-]+)""#,
+    )
+    .unwrap();
     let pid = re_pid.captures(body)?.get(1)?.as_str().to_string();
     let lc = re_lc.captures(body)?.get(1)?.as_str().to_string();
     Some((pid, lc))
 }
 
-async fn post_raw(state: &AppState, url: &str, cookie: &str, csrf: &str, body: &str) -> (u16, reqwest::header::HeaderMap, String) {
+async fn post_raw(
+    state: &AppState,
+    url: &str,
+    cookie: &str,
+    csrf: &str,
+    body: &str,
+) -> (u16, reqwest::header::HeaderMap, String) {
     let res = state
         .http
         .post(url)
@@ -298,7 +488,13 @@ async fn post_raw(state: &AppState, url: &str, cookie: &str, csrf: &str, body: &
     }
 }
 
-pub async fn get_access_code(state: &AppState, place_id: &str, link_code: &str, cookie: &str, csrf_token: &str) -> Option<String> {
+pub async fn get_access_code(
+    state: &AppState,
+    place_id: &str,
+    link_code: &str,
+    cookie: &str,
+    csrf_token: &str,
+) -> Option<String> {
     let body = serde_json::json!({ "shareCode": link_code, "shareType": "Server" }).to_string();
     let res = state
         .http
@@ -317,8 +513,14 @@ pub async fn get_access_code(state: &AppState, place_id: &str, link_code: &str, 
         if let Ok(d) = r.json::<Value>().await {
             let code = d
                 .get("privateServerInviteData")
-                .or_else(|| d.get("resolvedShareData").and_then(|v| v.get("privateServerInviteData")))
-                .or_else(|| d.get("experienceInviteData").and_then(|v| v.get("privateServerInviteData")))
+                .or_else(|| {
+                    d.get("resolvedShareData")
+                        .and_then(|v| v.get("privateServerInviteData"))
+                })
+                .or_else(|| {
+                    d.get("experienceInviteData")
+                        .and_then(|v| v.get("privateServerInviteData"))
+                })
                 .and_then(|v| v.get("accessCode"))
                 .and_then(|v| v.as_str());
             if let Some(code) = code {
@@ -328,7 +530,10 @@ pub async fn get_access_code(state: &AppState, place_id: &str, link_code: &str, 
     }
 
     // Fallback: redirect scrape.
-    let url = format!("https://www.roblox.com/games/{}?privateServerLinkCode={}", place_id, link_code);
+    let url = format!(
+        "https://www.roblox.com/games/{}?privateServerLinkCode={}",
+        place_id, link_code
+    );
     let res = state
         .http_no_redirect
         .get(&url)
@@ -339,9 +544,14 @@ pub async fn get_access_code(state: &AppState, place_id: &str, link_code: &str, 
         .send()
         .await
         .ok()?;
-    let loc = res.headers().get("location").and_then(|v| v.to_str().ok())?;
+    let loc = res
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())?;
     let re = regex::Regex::new(r"[?&]accessCode=([^&]+)").unwrap();
-    re.captures(loc).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
+    re.captures(loc)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
 }
 
 // Renderer-side fetch() to *.roblox.com fails under Tauri: those endpoints send
@@ -356,7 +566,14 @@ pub async fn get_json_public(state: &AppState, url: &str) -> Result<Value, Strin
     if !(host == "roblox.com" || host.ends_with(".roblox.com")) {
         return Err("host not allowed".into());
     }
-    let res = state.http.get(url).header("Accept", "application/json").header("User-Agent", UA).send().await.map_err(|e| e.to_string())?;
+    let res = state
+        .http
+        .get(url)
+        .header("Accept", "application/json")
+        .header("User-Agent", UA)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     let status = res.status().as_u16();
     let ok = res.status().is_success();
     let data: Value = res.json().await.unwrap_or(Value::Null);
@@ -368,7 +585,11 @@ pub async fn get_json_public(state: &AppState, url: &str) -> Result<Value, Strin
 // Methods but no Access-Control-Allow-Origin, so a direct renderer fetch()
 // gets blocked. Routed through Rust like the roblox_get_json proxy above.
 // API contract: https://altgen.me/docs/generate-accounts
-pub async fn altgen_generate(state: &AppState, api_key: &str, quantity: i64) -> Result<Value, String> {
+pub async fn altgen_generate(
+    state: &AppState,
+    api_key: &str,
+    quantity: i64,
+) -> Result<Value, String> {
     let body = serde_json::json!({ "type": "ROBLOX_NORMAL", "quantity": quantity.clamp(1, 100) });
     let res = state
         .http

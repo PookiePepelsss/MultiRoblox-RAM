@@ -46,7 +46,10 @@ fn encrypt_account(state: &AppState, mut a: Value) -> Result<Value, String> {
 }
 
 pub fn load_accounts(state: &AppState) -> Vec<Value> {
-    read_json_array(&accounts_path()).into_iter().map(|a| decrypt_account(state, a)).collect()
+    read_json_array(&accounts_path())
+        .into_iter()
+        .map(|a| decrypt_account(state, a))
+        .collect()
 }
 
 pub fn save_accounts(state: &AppState, accounts: Vec<Value>) -> Result<(), String> {
@@ -66,14 +69,31 @@ pub fn migrate_account_encryption_to_keychain(state: &AppState) {
         return; // passphrase user: never touch (avoids wrong-key writes)
     }
     let raw = load_accounts_raw();
-    let needs = raw.iter().any(|a| a.get("cookie").and_then(|v| v.as_str()).map(|c| c.starts_with("gcm:") || c.starts_with("cbc:")).unwrap_or(false));
+    let needs = raw.iter().any(|a| {
+        a.get("cookie")
+            .and_then(|v| v.as_str())
+            .map(|c| c.starts_with("gcm:") || c.starts_with("cbc:"))
+            .unwrap_or(false)
+    });
     if !needs {
         return;
     }
-    let plain: Vec<Value> = raw.iter().cloned().map(|a| decrypt_account(state, a)).collect();
+    let plain: Vec<Value> = raw
+        .iter()
+        .cloned()
+        .map(|a| decrypt_account(state, a))
+        .collect();
     for (orig, dec) in raw.iter().zip(plain.iter()) {
-        let had = orig.get("cookie").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false);
-        let empty = dec.get("cookie").and_then(|v| v.as_str()).map(|s| s.is_empty()).unwrap_or(true);
+        let had = orig
+            .get("cookie")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        let empty = dec
+            .get("cookie")
+            .and_then(|v| v.as_str())
+            .map(|s| s.is_empty())
+            .unwrap_or(true);
         if had && empty {
             eprintln!("[migrate] decrypt failed; leaving accounts untouched");
             return;
@@ -114,7 +134,10 @@ fn encrypt_gen_entry(state: &AppState, mut e: Value) -> Result<Value, String> {
 }
 
 pub fn read_genhistory(state: &AppState) -> Vec<Value> {
-    read_json_array(&genhistory_path()).into_iter().map(|e| decrypt_gen_entry(state, e)).collect()
+    read_json_array(&genhistory_path())
+        .into_iter()
+        .map(|e| decrypt_gen_entry(state, e))
+        .collect()
 }
 pub fn write_genhistory(state: &AppState, list: Vec<Value>) -> Result<(), String> {
     let capped: Vec<Value> = list.into_iter().take(500).collect();

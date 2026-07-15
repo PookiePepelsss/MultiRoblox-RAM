@@ -7,7 +7,7 @@ use aes::Aes256;
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use cbc::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
+use cbc::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
 use pbkdf2::pbkdf2_hmac;
 use rand::RngCore;
 use sha2::Sha512;
@@ -21,7 +21,8 @@ const SCRYPT_R: u32 = 8;
 const SCRYPT_P: u32 = 1;
 
 pub fn derive_scrypt_key(pass: &str, salt: &str) -> [u8; KEY_LEN] {
-    let params = scrypt::Params::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P, KEY_LEN).expect("valid scrypt params");
+    let params = scrypt::Params::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P, KEY_LEN)
+        .expect("valid scrypt params");
     let mut out = [0u8; KEY_LEN];
     scrypt::scrypt(pass.as_bytes(), salt.as_bytes(), &params, &mut out).expect("scrypt derive");
     out
@@ -29,7 +30,12 @@ pub fn derive_scrypt_key(pass: &str, salt: &str) -> [u8; KEY_LEN] {
 
 pub fn derive_legacy_key(pass: &str) -> [u8; KEY_LEN] {
     let mut out = [0u8; KEY_LEN];
-    pbkdf2_hmac::<Sha512>(pass.as_bytes(), LEGACY_SALT.as_bytes(), ITERATIONS, &mut out);
+    pbkdf2_hmac::<Sha512>(
+        pass.as_bytes(),
+        LEGACY_SALT.as_bytes(),
+        ITERATIONS,
+        &mut out,
+    );
     out
 }
 
@@ -42,9 +48,17 @@ pub fn encrypt_gcm(plaintext: &str, key: &[u8; KEY_LEN], tag: &str) -> String {
     let mut iv = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut iv);
     let nonce = Nonce::from_slice(&iv);
-    let ct = cipher.encrypt(nonce, plaintext.as_bytes()).expect("aes-gcm encrypt");
+    let ct = cipher
+        .encrypt(nonce, plaintext.as_bytes())
+        .expect("aes-gcm encrypt");
     let (data, authtag) = ct.split_at(ct.len() - 16);
-    format!("{}:{}:{}:{}", tag, B64.encode(iv), B64.encode(authtag), B64.encode(data))
+    format!(
+        "{}:{}:{}:{}",
+        tag,
+        B64.encode(iv),
+        B64.encode(authtag),
+        B64.encode(data)
+    )
 }
 
 pub fn decrypt_gcm(ct: &str, key: &[u8; KEY_LEN], tag: &str) -> Option<String> {
@@ -91,14 +105,28 @@ pub fn decrypt_cbc(ct: &str, key: &[u8; KEY_LEN]) -> Option<String> {
 // DPAPI ties the blob to the logged-in Windows user by itself).
 #[cfg(windows)]
 pub mod dpapi {
-    use windows::Win32::Foundation::{HLOCAL, LocalFree};
-    use windows::Win32::Security::Cryptography::{CRYPT_INTEGER_BLOB, CryptProtectData, CryptUnprotectData};
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::{
+        CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB,
+    };
 
     pub fn protect(data: &[u8]) -> Option<Vec<u8>> {
         unsafe {
-            let input = CRYPT_INTEGER_BLOB { cbData: data.len() as u32, pbData: data.as_ptr() as *mut u8 };
+            let input = CRYPT_INTEGER_BLOB {
+                cbData: data.len() as u32,
+                pbData: data.as_ptr() as *mut u8,
+            };
             let mut output = CRYPT_INTEGER_BLOB::default();
-            CryptProtectData(&input, windows::core::PCWSTR::null(), None, None, None, 1 /* CRYPTPROTECT_UI_FORBIDDEN */, &mut output).ok()?;
+            CryptProtectData(
+                &input,
+                windows::core::PCWSTR::null(),
+                None,
+                None,
+                None,
+                1, /* CRYPTPROTECT_UI_FORBIDDEN */
+                &mut output,
+            )
+            .ok()?;
             let out = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
             let _ = LocalFree(HLOCAL(output.pbData as *mut _));
             Some(out)
@@ -107,7 +135,10 @@ pub mod dpapi {
 
     pub fn unprotect(data: &[u8]) -> Option<Vec<u8>> {
         unsafe {
-            let input = CRYPT_INTEGER_BLOB { cbData: data.len() as u32, pbData: data.as_ptr() as *mut u8 };
+            let input = CRYPT_INTEGER_BLOB {
+                cbData: data.len() as u32,
+                pbData: data.as_ptr() as *mut u8,
+            };
             let mut output = CRYPT_INTEGER_BLOB::default();
             CryptUnprotectData(&input, None, None, None, None, 1, &mut output).ok()?;
             let out = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
@@ -119,8 +150,12 @@ pub mod dpapi {
 
 #[cfg(not(windows))]
 pub mod dpapi {
-    pub fn protect(_data: &[u8]) -> Option<Vec<u8>> { None }
-    pub fn unprotect(_data: &[u8]) -> Option<Vec<u8>> { None }
+    pub fn protect(_data: &[u8]) -> Option<Vec<u8>> {
+        None
+    }
+    pub fn unprotect(_data: &[u8]) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 pub fn encrypt_safe2(plaintext: &str) -> Option<String> {
@@ -142,7 +177,10 @@ pub fn decrypt_safe2(ct: &str) -> Option<String> {
 // "v10" + 12-byte nonce + ciphertext+tag, base64-encoded. This reader exists
 // ONLY to keep decrypting accounts saved by the old Electron build; new
 // writes use encrypt_safe2 (plain DPAPI, no key file) instead.
-pub fn decrypt_electron_safe_storage(ct_b64: &str, local_state_path: &std::path::Path) -> Option<String> {
+pub fn decrypt_electron_safe_storage(
+    ct_b64: &str,
+    local_state_path: &std::path::Path,
+) -> Option<String> {
     let raw = base64_maybe(ct_b64)?;
     let local_state = std::fs::read_to_string(local_state_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&local_state).ok()?;
@@ -153,7 +191,9 @@ pub fn decrypt_electron_safe_storage(ct_b64: &str, local_state_path: &std::path:
     if aes_key.len() != 32 {
         return None;
     }
-    let body = raw.strip_prefix(b"v10").or_else(|| raw.strip_prefix(b"v11"))?;
+    let body = raw
+        .strip_prefix(b"v10")
+        .or_else(|| raw.strip_prefix(b"v11"))?;
     if body.len() < 12 + 16 {
         return None;
     }

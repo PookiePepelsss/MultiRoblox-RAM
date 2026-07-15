@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.rbxcdn.com https://*.roblox.com; connect-src 'self' https://*.roblox.com https://core.bloxgen.net; object-src 'none'; base-uri 'self'; frame-src 'none'"/>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.rbxcdn.com https://*.roblox.com; connect-src 'self' https://*.roblox.com; object-src 'none'; base-uri 'self'; frame-src 'none'"/>
 <title>MultiRoblox</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet"/>
@@ -301,6 +301,8 @@
         </div>
         <div class="tab-bar" style="flex-shrink:0">
           <button class="tab-btn active" id="stab-general" onclick="settingsTab('general')">General</button>
+          <button class="tab-btn" id="stab-performance" onclick="settingsTab('performance')">Performance</button>
+          <button class="tab-btn" id="stab-privacy" onclick="settingsTab('privacy')">Data &amp; Privacy</button>
           <button class="tab-btn" id="stab-themes" onclick="settingsTab('themes')">Themes</button>
           <button class="tab-btn" id="stab-sounds" onclick="settingsTab('sounds')">Sounds</button>
         </div>
@@ -309,11 +311,60 @@
           <!-- Info row -->
           <div class="sc">
             <div class="sc-head">About</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">MultiRoblox</div><div class="sr-desc">Version 1.0.0</div></div></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">MultiRoblox</div><div class="sr-desc" id="stat-app-ver">Version -</div></div><a href="#" id="update-badge" class="badge g" style="display:none;text-decoration:none" onclick="event.preventDefault();api.openExternal(_updateUrl)">Update available</a></div>
             <div class="sr"><div class="sr-left"><div class="sr-label">Accounts saved</div></div><span class="badge" id="stat-count">0</span></div>
             <div class="sr"><div class="sr-left"><div class="sr-label">Roblox version</div></div><span class="badge" id="stat-rblx-ver">-</span></div>
           </div>
 
+          <!-- Multi-instance -->
+          <div class="sc">
+            <div class="sc-head">Multi-Instance</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Multiple Roblox instances</div><div class="sr-desc">Holds the singleton mutex so multiple clients run at once.</div></div><span class="badge g">Always On</span></div>
+          </div>
+
+          <!-- Anti-AFK -->
+          <div class="sc">
+            <div class="sc-head">Anti-AFK</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Keep instances active</div><div class="sr-desc">Taps a benign key into every running instance before Roblox's ~20-minute idle kick.</div></div><label class="toggle"><input type="checkbox" id="set-antiafk" onchange="toggleAntiAfk('set')"/><span class="toggle-trk"></span></label></div>
+            <div class="sr" style="flex-direction:column;align-items:stretch;gap:10px">
+              <div class="sr-left">
+                <div class="sr-label">Tap interval</div>
+                <div class="sr-desc">How long an instance can sit idle before it gets tapped. Stays under the ~20-minute kick.</div>
+              </div>
+              <div class="mix-row">
+                <span class="material-icons-round" style="font-size:17px;color:var(--t3);flex-shrink:0">bolt</span>
+                <input type="range" class="fps-slider" id="set-antiafk-interval" min="5" max="19" step="1" value="19"
+                       oninput="antiAfkIntervalInput(this.value)" onchange="antiAfkIntervalCommit()"/>
+                <span class="fps-val-label" id="set-antiafk-interval-val" style="min-width:50px">19 min</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sw" id="stab-panel-performance" style="display:none">
+
+          <!-- Memory -->
+          <div class="sc">
+            <div class="sc-head">Memory</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Trim RAM</div><div class="sr-desc">Frees idle memory from every running instance. Safe - doesn't touch or slow the game.</div></div><button class="btn btn-ghost" onclick="mixTrimMemory('set-trim-btn')" id="set-trim-btn"><span class="material-icons-round" style="font-size:15px">memory</span>Trim now</button></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Auto trim</div><div class="sr-desc">Trims every running instance automatically on an interval.</div></div><label class="toggle"><input type="checkbox" id="set-autotrim" onchange="toggleAutoTrim()"/><span class="toggle-trk"></span></label></div>
+            <div class="sr" style="flex-direction:column;align-items:stretch;gap:10px">
+              <div class="sr-left">
+                <div class="sr-label">Trim interval</div>
+                <div class="sr-desc">How often auto trim runs while instances are open.</div>
+              </div>
+              <div class="mix-row">
+                <span class="material-icons-round" style="font-size:17px;color:var(--t3);flex-shrink:0">memory</span>
+                <input type="range" class="fps-slider" id="set-autotrim-interval" min="1" max="30" step="1" value="5"
+                       oninput="autoTrimIntervalInput(this.value)" onchange="autoTrimIntervalCommit()"/>
+                <span class="fps-val-label" id="set-autotrim-interval-val" style="min-width:50px">5 min</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="sw" id="stab-panel-privacy" style="display:none">
           <!-- Encryption -->
           <div class="sc">
             <div class="sc-head">Encryption</div>
@@ -349,50 +400,6 @@
             </div>
           </div>
 
-          <!-- Multi-instance -->
-          <div class="sc">
-            <div class="sc-head">Multi-Instance</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Multiple Roblox instances</div><div class="sr-desc">Holds the singleton mutex so multiple clients run at once.</div></div><span class="badge g">Always On</span></div>
-          </div>
-
-          <!-- Memory -->
-          <div class="sc">
-            <div class="sc-head">Memory</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Trim RAM</div><div class="sr-desc">Frees idle memory from every running instance. Safe - doesn't touch or slow the game.</div></div><button class="btn btn-ghost" onclick="mixTrimMemory('set-trim-btn')" id="set-trim-btn"><span class="material-icons-round" style="font-size:15px">memory</span>Trim now</button></div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Auto trim</div><div class="sr-desc">Trims every running instance automatically on an interval.</div></div><label class="toggle"><input type="checkbox" id="set-autotrim" onchange="toggleAutoTrim()"/><span class="toggle-trk"></span></label></div>
-            <div class="sr" style="flex-direction:column;align-items:stretch;gap:10px">
-              <div class="sr-left">
-                <div class="sr-label">Trim interval</div>
-                <div class="sr-desc">How often auto trim runs while instances are open.</div>
-              </div>
-              <div class="mix-row">
-                <span class="material-icons-round" style="font-size:17px;color:var(--t3);flex-shrink:0">memory</span>
-                <input type="range" class="fps-slider" id="set-autotrim-interval" min="1" max="30" step="1" value="5"
-                       oninput="autoTrimIntervalInput(this.value)" onchange="autoTrimIntervalCommit()"/>
-                <span class="fps-val-label" id="set-autotrim-interval-val" style="min-width:50px">5 min</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Anti-AFK -->
-          <div class="sc">
-            <div class="sc-head">Anti-AFK</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Keep instances active</div><div class="sr-desc">Taps a benign key into every running instance before Roblox's ~20-minute idle kick.</div></div><label class="toggle"><input type="checkbox" id="set-antiafk" onchange="toggleAntiAfk('set')"/><span class="toggle-trk"></span></label></div>
-            <div class="sr" style="flex-direction:column;align-items:stretch;gap:10px">
-              <div class="sr-left">
-                <div class="sr-label">Tap interval</div>
-                <div class="sr-desc">How long an instance can sit idle before it gets tapped. Stays under the ~20-minute kick.</div>
-              </div>
-              <div class="mix-row">
-                <span class="material-icons-round" style="font-size:17px;color:var(--t3);flex-shrink:0">bolt</span>
-                <input type="range" class="fps-slider" id="set-antiafk-interval" min="5" max="19" step="1" value="19"
-                       oninput="antiAfkIntervalInput(this.value)" onchange="antiAfkIntervalCommit()"/>
-                <span class="fps-val-label" id="set-antiafk-interval-val" style="min-width:50px">19 min</span>
-              </div>
-            </div>
-          </div>
-
-
           <!-- Data -->
           <div class="sc">
             <div class="sc-head">Data &amp; Privacy</div>
@@ -401,6 +408,7 @@
           </div>
 
         </div>
+
         <!-- Themes tab panel -->
         <div class="sw" id="stab-panel-themes" style="display:none">
           <div class="themes-grid" id="themes-grid-inner">
@@ -597,6 +605,7 @@
           <input type="file" id="sound-file-input" accept=".mp3,.wav,audio/*" style="display:none" onchange="soundFileLoaded(this)">
         </div>
       </div>
+
       <!-- logs page -->
       <div class="page" id="page-logs">
         <div class="ph">

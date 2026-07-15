@@ -13,8 +13,18 @@ pub fn app_data_dir() -> PathBuf {
     dir
 }
 
-pub fn settings_path() -> PathBuf { app_data_dir().join("settings.json") }
-pub fn accounts_path() -> PathBuf { app_data_dir().join("accounts.json") }
-pub fn packages_path() -> PathBuf { app_data_dir().join("packages.json") }
-pub fn genhistory_path() -> PathBuf { app_data_dir().join("genhistory.json") }
-pub fn local_state_path() -> PathBuf { app_data_dir().join("Local State") }
+pub fn settings_path() -> PathBuf {
+    app_data_dir().join("settings.json")
+}
+pub fn accounts_path() -> PathBuf {
+    app_data_dir().join("accounts.json")
+}
+pub fn packages_path() -> PathBuf {
+    app_data_dir().join("packages.json")
+}
+pub fn genhistory_path() -> PathBuf {
+    app_data_dir().join("genhistory.json")
+}
+pub fn local_state_path() -> PathBuf {
+    app_data_dir().join("Local State")
+}

@@ -8,6 +8,7 @@ mod roblox_api;
 mod settings;
 mod state;
 mod storage;
+mod update;
 
 use state::AppState;
 use tauri::Manager;
@@ -27,6 +28,11 @@ pub fn run() {
             }
             encryption::prewarm_key(&handle);
 
+            // Best-effort cleanup of orphaned login-profile temp dirs from a
+            // crash or force-kill mid-login (see sweep_stale_login_profiles).
+            // Blocking I/O, kept off the async runtime's worker threads.
+            std::thread::spawn(login::sweep_stale_login_profiles);
+
             // Paint the UI immediately (window is created with visible:false and
             // shown by the frontend's show_main_window call once DOM is ready);
             // resolve the native helper and grab the mutex in the background so
@@ -40,7 +46,10 @@ pub fn run() {
                     native::start_mutex_holder(&handle2, &state).await;
                 });
             }
-            let auto_afk = settings::load_settings().get("antiAfk").and_then(|v| v.as_bool()).unwrap_or(false);
+            let auto_afk = settings::load_settings()
+                .get("antiAfk")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if auto_afk {
                 let handle3 = handle.clone();
                 tauri::async_runtime::spawn(async move {
@@ -82,6 +91,7 @@ pub fn run() {
             commands::roblox_running_count,
             commands::roblox_watched_ids,
             commands::roblox_trim_memory,
+            commands::roblox_trim_account_memory,
             commands::roblox_get_game_name,
             commands::roblox_get_json,
             commands::altgen_generate,
@@ -90,6 +100,7 @@ pub fn run() {
             commands::roblox_open_account_browser,
             commands::login_cancel,
             commands::open_external,
+            commands::check_for_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

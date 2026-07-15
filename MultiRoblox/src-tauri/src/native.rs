@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-fn hide_window(cmd: &mut Command) {
+pub(crate) fn hide_window(cmd: &mut Command) {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -40,10 +40,18 @@ fn strip_verbatim_prefix(p: &Path) -> PathBuf {
 }
 
 fn native_src_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().resource_dir().ok().map(|d| strip_verbatim_prefix(&d).join("resources").join("RobloxNative.cs"))
+    app.path().resource_dir().ok().map(|d| {
+        strip_verbatim_prefix(&d)
+            .join("resources")
+            .join("RobloxNative.cs")
+    })
 }
 fn bundled_native_exe_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().resource_dir().ok().map(|d| strip_verbatim_prefix(&d).join("resources").join("RobloxNative.exe"))
+    app.path().resource_dir().ok().map(|d| {
+        strip_verbatim_prefix(&d)
+            .join("resources")
+            .join("RobloxNative.exe")
+    })
 }
 
 // Baked into the binary at compile time so the built exe works standalone --
@@ -71,8 +79,16 @@ fn ensure_embedded_native_exe() -> Option<PathBuf> {
 fn find_csc() -> Option<PathBuf> {
     let win = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".to_string());
     for c in [
-        Path::new(&win).join("Microsoft.NET").join("Framework64").join("v4.0.30319").join("csc.exe"),
-        Path::new(&win).join("Microsoft.NET").join("Framework").join("v4.0.30319").join("csc.exe"),
+        Path::new(&win)
+            .join("Microsoft.NET")
+            .join("Framework64")
+            .join("v4.0.30319")
+            .join("csc.exe"),
+        Path::new(&win)
+            .join("Microsoft.NET")
+            .join("Framework")
+            .join("v4.0.30319")
+            .join("csc.exe"),
     ] {
         if c.exists() {
             return Some(c);
@@ -126,6 +142,7 @@ async fn resolve_native_helper(app: &AppHandle) -> Option<PathBuf> {
         "/optimize+",
         "/platform:x64",
         "/target:exe",
+        "/r:System.Drawing.dll",
         &format!("/out:{}", out_exe.display()),
         &src.to_string_lossy(),
     ]);
@@ -148,7 +165,10 @@ trait OutputTimeout {
     async fn output_timeout(self, dur: Duration) -> Option<std::io::Result<std::process::Output>>;
 }
 impl OutputTimeout for Command {
-    async fn output_timeout(mut self, dur: Duration) -> Option<std::io::Result<std::process::Output>> {
+    async fn output_timeout(
+        mut self,
+        dur: Duration,
+    ) -> Option<std::io::Result<std::process::Output>> {
         tokio::time::timeout(dur, self.output()).await.ok()
     }
 }
@@ -170,7 +190,10 @@ pub async fn start_mutex_holder(app: &AppHandle, state: &AppState) {
         return;
     };
     let mut cmd = Command::new(&exe);
-    cmd.arg("mutex").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.arg("mutex")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     hide_window(&mut cmd);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -262,12 +285,18 @@ pub async fn start_antiafk(app: &AppHandle, state: &AppState) {
         return;
     };
     let s = crate::settings::load_settings();
-    let mut deadline = s.get("antiAfkInterval").and_then(|v| v.as_i64()).unwrap_or(0);
+    let mut deadline = s
+        .get("antiAfkInterval")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     if deadline < 60 {
         deadline = 19 * 60; // 19 min, under the ~20-min idle kick
     }
     let mut cmd = Command::new(&exe);
-    cmd.args(["antiafk", &deadline.to_string()]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(["antiafk", &deadline.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     hide_window(&mut cmd);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -276,7 +305,13 @@ pub async fn start_antiafk(app: &AppHandle, state: &AppState) {
             return;
         }
     };
-    emit_log(app, "ok", "afk", &format!("Anti-AFK started (interval: {} min)", deadline / 60), Some(serde_json::json!({ "intervalSec": deadline })));
+    emit_log(
+        app,
+        "ok",
+        "afk",
+        &format!("Anti-AFK started (interval: {} min)", deadline / 60),
+        Some(serde_json::json!({ "intervalSec": deadline })),
+    );
 
     if let Some(stdout) = child.stdout.take() {
         let app2 = app.clone();
@@ -291,7 +326,13 @@ pub async fn start_antiafk(app: &AppHandle, state: &AppState) {
                 if let Some(caps) = mw.captures(t) {
                     let n = &caps[1];
                     let plural = if n == "1" { "" } else { "s" };
-                    emit_log(&app2, "info", "afk", &format!("Anti-AFK: tapped {} Roblox window{}", n, plural), Some(serde_json::json!({ "windows": n.parse::<i64>().unwrap_or(0) })));
+                    emit_log(
+                        &app2,
+                        "info",
+                        "afk",
+                        &format!("Anti-AFK: tapped {} Roblox window{}", n, plural),
+                        Some(serde_json::json!({ "windows": n.parse::<i64>().unwrap_or(0) })),
+                    );
                 } else {
                     emit_log(&app2, "info", "afk", &format!("Anti-AFK: {}", t), None);
                 }
@@ -306,7 +347,13 @@ pub async fn start_antiafk(app: &AppHandle, state: &AppState) {
                 let t = line.trim();
                 if !t.is_empty() {
                     eprintln!("[antiafk] {}", t);
-                    emit_log(&app2, "warn", "afk", &format!("Anti-AFK warning: {}", t), None);
+                    emit_log(
+                        &app2,
+                        "warn",
+                        "afk",
+                        &format!("Anti-AFK warning: {}", t),
+                        None,
+                    );
                 }
             }
         });
@@ -346,7 +393,13 @@ async fn tasklist(filter_image: &str) -> Option<String> {
         return Some(String::new());
     }
     let mut cmd = Command::new("cmd");
-    cmd.args(["/c", &format!(r#"tasklist /FI "IMAGENAME eq {}" /FO CSV /NH"#, filter_image)]);
+    cmd.args([
+        "/c",
+        &format!(
+            r#"tasklist /FI "IMAGENAME eq {}" /FO CSV /NH"#,
+            filter_image
+        ),
+    ]);
     hide_window(&mut cmd);
     match cmd.output().await {
         Ok(out) => Some(String::from_utf8_lossy(&out.stdout).to_string()),
@@ -368,15 +421,26 @@ async fn native_pids(app: &AppHandle, state: &AppState) -> Option<std::collectio
     let Some(exe) = ensure_native_helper(app, state).await else {
         let out = tasklist("RobloxPlayerBeta.exe").await?;
         let re = regex::Regex::new(r#""RobloxPlayerBeta\.exe","(\d+)""#).unwrap();
-        return Some(re.captures_iter(&out).filter_map(|c| c[1].parse::<u32>().ok()).collect());
+        return Some(
+            re.captures_iter(&out)
+                .filter_map(|c| c[1].parse::<u32>().ok())
+                .collect(),
+        );
     };
     let mut cmd = Command::new(&exe);
-    cmd.arg("pids").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.arg("pids")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
     hide_window(&mut cmd);
     match tokio::time::timeout(Duration::from_secs(10), cmd.output()).await {
         Ok(Ok(out)) if out.status.success() => {
             let s = String::from_utf8_lossy(&out.stdout);
-            Some(s.lines().filter_map(|l| l.trim().parse::<u32>().ok()).collect())
+            Some(
+                s.lines()
+                    .filter_map(|l| l.trim().parse::<u32>().ok())
+                    .collect(),
+            )
         }
         _ => None,
     }
@@ -391,13 +455,19 @@ pub async fn set_roblox_volume(app: &AppHandle, state: &AppState, percent: f64) 
         return serde_json::json!({ "ok": false, "count": 0, "error": "native helper unavailable" });
     };
     let mut cmd = Command::new(&exe);
-    cmd.args(["volume", &pct.to_string()]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(["volume", &pct.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     hide_window(&mut cmd);
     match tokio::time::timeout(Duration::from_secs(12), cmd.output()).await {
         Ok(Ok(out)) => {
             let s = String::from_utf8_lossy(&out.stdout);
             let re = regex::Regex::new(r"SET:(\d+)").unwrap();
-            let count = re.captures(&s).and_then(|c| c[1].parse::<i64>().ok()).unwrap_or(0);
+            let count = re
+                .captures(&s)
+                .and_then(|c| c[1].parse::<i64>().ok())
+                .unwrap_or(0);
             serde_json::json!({ "ok": true, "count": count })
         }
         Ok(Err(e)) => serde_json::json!({ "ok": false, "count": 0, "error": e.to_string() }),
@@ -406,7 +476,10 @@ pub async fn set_roblox_volume(app: &AppHandle, state: &AppState, percent: f64) 
 }
 
 pub async fn count_roblox_processes(app: &AppHandle, state: &AppState) -> u32 {
-    native_pids(app, state).await.map(|s| s.len() as u32).unwrap_or(0)
+    native_pids(app, state)
+        .await
+        .map(|s| s.len() as u32)
+        .unwrap_or(0)
 }
 
 // EmptyWorkingSet only forces the process to give back currently-idle
@@ -419,9 +492,12 @@ pub async fn count_roblox_processes(app: &AppHandle, state: &AppState) -> u32 {
 fn trim_process_memory(pid: u32) -> bool {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::ProcessStatus::EmptyWorkingSet;
-    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA};
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA,
+    };
     unsafe {
-        let Ok(handle) = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, false, pid) else {
+        let Ok(handle) = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, false, pid)
+        else {
             return false;
         };
         let ok = EmptyWorkingSet(handle).is_ok();
@@ -446,7 +522,11 @@ pub async fn trim_roblox_memory(app: &AppHandle, state: &AppState) -> Value {
     let launching_pids: std::collections::HashSet<u32> = {
         let watched = state.watched_accounts.lock().unwrap();
         let pids = state.account_pids.lock().unwrap();
-        watched.iter().filter(|(_, ready_at)| now < **ready_at).filter_map(|(id, _)| pids.get(id).copied()).collect()
+        watched
+            .iter()
+            .filter(|(_, ready_at)| now < **ready_at)
+            .filter_map(|(id, _)| pids.get(id).copied())
+            .collect()
     };
 
     let mut total = 0u32;
@@ -463,7 +543,35 @@ pub async fn trim_roblox_memory(app: &AppHandle, state: &AppState) -> Value {
     serde_json::json!({ "ok": true, "trimmed": trimmed, "total": total })
 }
 
-static ROBLOX_PROC_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| regex::Regex::new(r"(?i)RobloxPlayerBeta\.exe|RobloxCrashHandler\.exe").unwrap());
+pub async fn trim_account_memory(app: &AppHandle, state: &AppState, account_id: &str) -> Value {
+    let Some(pid) = state.account_pids.lock().unwrap().get(account_id).copied() else {
+        return serde_json::json!({ "ok": false, "error": "No tracked Roblox instance for this account" });
+    };
+    if state
+        .watched_accounts
+        .lock()
+        .unwrap()
+        .get(account_id)
+        .is_some_and(|ready_at| now_ms() < *ready_at)
+    {
+        return serde_json::json!({ "ok": false, "error": "Instance is still launching" });
+    }
+    let Some(alive_pids) = native_pids(app, state).await else {
+        return serde_json::json!({ "ok": false, "error": "Could not enumerate Roblox processes" });
+    };
+    if !alive_pids.contains(&pid) {
+        return serde_json::json!({ "ok": false, "error": "This Roblox instance is no longer running" });
+    }
+    if trim_process_memory(pid) {
+        serde_json::json!({ "ok": true })
+    } else {
+        serde_json::json!({ "ok": false, "error": "Could not trim this Roblox instance" })
+    }
+}
+
+static ROBLOX_PROC_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+    regex::Regex::new(r"(?i)RobloxPlayerBeta\.exe|RobloxCrashHandler\.exe").unwrap()
+});
 
 async fn wait_for_roblox_fully_closed(max_wait: Duration) {
     let started = std::time::Instant::now();
@@ -486,7 +594,13 @@ async fn wait_for_roblox_fully_closed(max_wait: Duration) {
 }
 
 pub async fn kill_all_roblox(app: &AppHandle, state: &AppState) -> Value {
-    let watched_ids: Vec<String> = state.watched_accounts.lock().unwrap().keys().cloned().collect();
+    let watched_ids: Vec<String> = state
+        .watched_accounts
+        .lock()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
     state.watched_accounts.lock().unwrap().clear();
     state.miss_counts.lock().unwrap().clear();
     stop_watch_poll_if_idle(state);
@@ -504,7 +618,10 @@ pub async fn kill_all_roblox(app: &AppHandle, state: &AppState) -> Value {
     }
 
     let mut cmd = Command::new("cmd");
-    cmd.args(["/c", "taskkill /F /IM RobloxPlayerBeta.exe /T & taskkill /F /IM RobloxCrashHandler.exe /T"]);
+    cmd.args([
+        "/c",
+        "taskkill /F /IM RobloxPlayerBeta.exe /T & taskkill /F /IM RobloxCrashHandler.exe /T",
+    ]);
     hide_window(&mut cmd);
     state.account_pids.lock().unwrap().clear();
     let had_running = !watched_ids.is_empty();
@@ -549,11 +666,19 @@ pub async fn kill_account_roblox(app: &AppHandle, state: &AppState, account_id: 
     serde_json::json!({ "ok": true })
 }
 
-fn close_singleton_handles_only<'a>(app: &'a AppHandle, state: &'a AppState) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+fn close_singleton_handles_only<'a>(
+    app: &'a AppHandle,
+    state: &'a AppState,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
     Box::pin(async move {
-        let Some(exe) = ensure_native_helper(app, state).await else { return };
+        let Some(exe) = ensure_native_helper(app, state).await else {
+            return;
+        };
         let mut cmd = Command::new(&exe);
-        cmd.arg("closehandles").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.arg("closehandles")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         hide_window(&mut cmd);
         let Ok(mut child) = cmd.spawn() else { return };
         if let Some(stdout) = child.stdout.take() {
@@ -588,7 +713,11 @@ async fn close_singleton_and_hold_mutex(app: &AppHandle, state: &AppState) {
 
 fn get_latest_roblox_version_dir() -> Option<(PathBuf, PathBuf)> {
     let home = dirs_home()?;
-    let versions_base = home.join("AppData").join("Local").join("Roblox").join("Versions");
+    let versions_base = home
+        .join("AppData")
+        .join("Local")
+        .join("Roblox")
+        .join("Versions");
     if !versions_base.exists() {
         return None;
     }
@@ -610,7 +739,10 @@ fn get_latest_roblox_version_dir() -> Option<(PathBuf, PathBuf)> {
         }
     }
     candidates.sort_by(|a, b| b.2.cmp(&a.2));
-    candidates.into_iter().next().map(|(dir, exe, _)| (dir, exe))
+    candidates
+        .into_iter()
+        .next()
+        .map(|(dir, exe, _)| (dir, exe))
 }
 
 fn dirs_home() -> Option<PathBuf> {
@@ -648,7 +780,12 @@ fn stop_watch_poll_if_idle(state: &AppState) {
 }
 
 fn start_watch_poll(app: &AppHandle, state_handle: tauri::AppHandle) {
-    let already = app.state::<AppState>().watch_handle.lock().unwrap().is_some();
+    let already = app
+        .state::<AppState>()
+        .watch_handle
+        .lock()
+        .unwrap()
+        .is_some();
     if already {
         return;
     }
@@ -663,8 +800,14 @@ fn start_watch_poll(app: &AppHandle, state_handle: tauri::AppHandle) {
 
 pub fn watch_roblox(app: &AppHandle, account_id: &str) {
     let st = app.state::<AppState>();
-    st.watched_accounts.lock().unwrap().insert(account_id.to_string(), now_ms() + LAUNCH_DELAY_MS);
-    st.miss_counts.lock().unwrap().insert(account_id.to_string(), 0);
+    st.watched_accounts
+        .lock()
+        .unwrap()
+        .insert(account_id.to_string(), now_ms() + LAUNCH_DELAY_MS);
+    st.miss_counts
+        .lock()
+        .unwrap()
+        .insert(account_id.to_string(), 0);
     start_watch_poll(app, app.clone());
 }
 
@@ -689,19 +832,34 @@ async fn watch_tick(app: &AppHandle) {
     // Couldn't get a reading this tick (helper unavailable, spawn/timeout
     // failure) -- can't tell who's alive. Bail without touching miss counts
     // so a still-running account never gets penalized for it.
-    let Some(alive_pids) = pids else { return; };
+    let Some(alive_pids) = pids else {
+        return;
+    };
 
     let now = now_ms();
     let mut closed: Vec<String> = Vec::new();
     let claimed: std::collections::HashSet<u32> = {
         let watched = state.watched_accounts.lock().unwrap();
         let pids = state.account_pids.lock().unwrap();
-        watched.keys().filter_map(|id| pids.get(id).copied()).collect()
+        watched
+            .keys()
+            .filter_map(|id| pids.get(id).copied())
+            .collect()
     };
-    let mut orphans: Vec<u32> = alive_pids.iter().filter(|p| !claimed.contains(p)).copied().collect();
+    let mut orphans: Vec<u32> = alive_pids
+        .iter()
+        .filter(|p| !claimed.contains(p))
+        .copied()
+        .collect();
 
     let any_running = !alive_pids.is_empty();
-    let watched_snapshot: Vec<(String, i64)> = state.watched_accounts.lock().unwrap().iter().map(|(k, v)| (k.clone(), *v)).collect();
+    let watched_snapshot: Vec<(String, i64)> = state
+        .watched_accounts
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (k.clone(), *v))
+        .collect();
     for (account_id, ready_at) in watched_snapshot {
         if now < ready_at {
             continue;
@@ -719,7 +877,11 @@ async fn watch_tick(app: &AppHandle) {
         if let Some(_p) = pid {
             if !running && !orphans.is_empty() {
                 let adopted = orphans.remove(0);
-                state.account_pids.lock().unwrap().insert(account_id.clone(), adopted);
+                state
+                    .account_pids
+                    .lock()
+                    .unwrap()
+                    .insert(account_id.clone(), adopted);
                 running = true;
             }
         }
@@ -742,7 +904,11 @@ async fn watch_tick(app: &AppHandle) {
         state.watched_accounts.lock().unwrap().remove(account_id);
         state.miss_counts.lock().unwrap().remove(account_id);
         let accounts = crate::storage::load_accounts(&state);
-        let acct = accounts.iter().find(|a| a.get("id").and_then(|v| v.as_str()) == Some(account_id.as_str())).cloned().unwrap_or(Value::Null);
+        let acct = accounts
+            .iter()
+            .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(account_id.as_str()))
+            .cloned()
+            .unwrap_or(Value::Null);
         let username = acct.get("username").and_then(|v| v.as_str());
         let user_id = acct.get("userId").and_then(|v| v.as_str());
         let pid = state.account_pids.lock().unwrap().get(account_id).copied();
@@ -750,8 +916,14 @@ async fn watch_tick(app: &AppHandle) {
             app,
             "warn",
             "crash",
-            &format!("Roblox closed unexpectedly for {} (missed {} consecutive checks)", username.unwrap_or(account_id), MISS_THRESHOLD),
-            Some(serde_json::json!({ "accountId": account_id, "username": username, "userId": user_id, "pid": pid })),
+            &format!(
+                "Roblox closed unexpectedly for {} (missed {} consecutive checks)",
+                username.unwrap_or(account_id),
+                MISS_THRESHOLD
+            ),
+            Some(
+                serde_json::json!({ "accountId": account_id, "username": username, "userId": user_id, "pid": pid }),
+            ),
         );
         state.account_pids.lock().unwrap().remove(account_id);
         let _ = app.emit("roblox:closed", account_id);
@@ -764,27 +936,56 @@ async fn watch_tick(app: &AppHandle) {
 // ---- launch ----
 const LAUNCH_STAGGER_MS: i64 = 4_000;
 
-pub async fn do_launch(app: &AppHandle, state: &AppState, account_id: &str, cookie: &str, target: &str) -> Value {
+pub async fn do_launch(
+    app: &AppHandle,
+    state: &AppState,
+    account_id: &str,
+    cookie: &str,
+    target: &str,
+) -> Value {
     close_singleton_and_hold_mutex(app, state).await;
 
     let since_last = now_ms() - *state.last_launch_ts.lock().unwrap();
     if *state.last_launch_ts.lock().unwrap() > 0 && since_last < LAUNCH_STAGGER_MS {
-        tokio::time::sleep(Duration::from_millis((LAUNCH_STAGGER_MS - since_last) as u64)).await;
+        tokio::time::sleep(Duration::from_millis(
+            (LAUNCH_STAGGER_MS - since_last) as u64,
+        ))
+        .await;
     }
 
     let csrf_token = crate::roblox_api::get_csrf_token(state, cookie).await;
     let Some(csrf_token) = csrf_token else {
         let accounts = crate::storage::load_accounts(state);
         let username = find_username(&accounts, account_id);
-        emit_log(app, "err", "launch", &format!("Launch failed for {}: could not get CSRF token (cookie may be expired)", username.clone().unwrap_or_else(|| account_id.to_string())), Some(serde_json::json!({ "accountId": account_id, "username": username })));
+        emit_log(
+            app,
+            "err",
+            "launch",
+            &format!(
+                "Launch failed for {}: could not get CSRF token (cookie may be expired)",
+                username.clone().unwrap_or_else(|| account_id.to_string())
+            ),
+            Some(serde_json::json!({ "accountId": account_id, "username": username })),
+        );
         return serde_json::json!({ "success": false, "error": "Failed to get CSRF token. Is the account cookie still valid?" });
     };
 
-    let ticket_result = crate::roblox_api::get_auth_ticket(state, cookie, Some(csrf_token.clone())).await;
+    let ticket_result =
+        crate::roblox_api::get_auth_ticket(state, cookie, Some(csrf_token.clone())).await;
     if !ticket_result.ok {
         let accounts = crate::storage::load_accounts(state);
         let username = find_username(&accounts, account_id);
-        emit_log(app, "err", "launch", &format!("Launch failed for {}: auth ticket error - {}", username.clone().unwrap_or_else(|| account_id.to_string()), ticket_result.error.clone().unwrap_or_default()), Some(serde_json::json!({ "accountId": account_id, "username": username })));
+        emit_log(
+            app,
+            "err",
+            "launch",
+            &format!(
+                "Launch failed for {}: auth ticket error - {}",
+                username.clone().unwrap_or_else(|| account_id.to_string()),
+                ticket_result.error.clone().unwrap_or_default()
+            ),
+            Some(serde_json::json!({ "accountId": account_id, "username": username })),
+        );
         return serde_json::json!({ "success": false, "error": format!("Failed to get auth ticket: {}", ticket_result.error.unwrap_or_default()) });
     }
     let ticket = ticket_result.ticket.unwrap_or_default();
@@ -808,7 +1009,11 @@ pub async fn do_launch(app: &AppHandle, state: &AppState, account_id: &str, cook
         } else if t.chars().all(|c| c.is_ascii_digit()) {
             launcher_url = format!("https://assetgame.roblox.com/game/placelauncher.ashx?request=RequestGame&placeId={}&isPlayTogetherGame=false", t);
         } else {
-            let mut raw_url = if t.starts_with("http") { t.to_string() } else { format!("https://{}", t) };
+            let mut raw_url = if t.starts_with("http") {
+                t.to_string()
+            } else {
+                format!("https://{}", t)
+            };
             if let Ok(parsed0) = url::Url::parse(&raw_url) {
                 let host = parsed0.host_str().unwrap_or("");
                 if host == "ro.blox.com" || host.ends_with(".ro.blox.com") {
@@ -817,30 +1022,50 @@ pub async fn do_launch(app: &AppHandle, state: &AppState, account_id: &str, cook
             }
             let parsed = url::Url::parse(&raw_url).ok();
             match parsed {
-                None => return serde_json::json!({ "success": false, "error": "Unrecognised input. Enter a place ID, game URL, or private server link." }),
+                None => {
+                    return serde_json::json!({ "success": false, "error": "Unrecognised input. Enter a place ID, game URL, or private server link." })
+                }
                 Some(parsed_url) => {
-                    let query: std::collections::HashMap<String, String> = parsed_url.query_pairs().into_owned().collect();
+                    let query: std::collections::HashMap<String, String> =
+                        parsed_url.query_pairs().into_owned().collect();
                     let private_code = query.get("privateServerLinkCode").cloned();
                     let share_code = query.get("code").cloned();
                     let share_type = query.get("type").cloned();
                     // jobId/gameInstanceId: join one specific running server instance,
                     // e.g. from a roblox://experiences/start?placeId=X&gameInstanceId=Y
                     // deep link, or a URL with a plain ?jobId= query param.
-                    let job_id = query.get("jobId").or_else(|| query.get("gameInstanceId")).cloned();
+                    let job_id = query
+                        .get("jobId")
+                        .or_else(|| query.get("gameInstanceId"))
+                        .cloned();
                     let place_id_re = regex::Regex::new(r"/games/(\d+)").unwrap();
                     let place_id_re2 = regex::Regex::new(r"/(\d+)").unwrap();
                     let path = parsed_url.path();
-                    let place_id = place_id_re.captures(path).or_else(|| place_id_re2.captures(path)).map(|c| c[1].to_string()).or_else(|| query.get("placeId").cloned());
+                    let place_id = place_id_re
+                        .captures(path)
+                        .or_else(|| place_id_re2.captures(path))
+                        .map(|c| c[1].to_string())
+                        .or_else(|| query.get("placeId").cloned());
 
                     if let (Some(job_id), Some(place_id)) = (&job_id, &place_id) {
                         launcher_url = format!(
                             "https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestGameJob&placeId={}&gameId={}&isPlayTogetherGame=false",
                             place_id, job_id
                         );
-                    } else if let (Some(private_code), Some(place_id)) = (&private_code, &place_id) {
-                        let access_code = crate::roblox_api::get_access_code(state, place_id, private_code, cookie, &csrf_token).await;
+                    } else if let (Some(private_code), Some(place_id)) = (&private_code, &place_id)
+                    {
+                        let access_code = crate::roblox_api::get_access_code(
+                            state,
+                            place_id,
+                            private_code,
+                            cookie,
+                            &csrf_token,
+                        )
+                        .await;
                         match access_code {
-                            None => return serde_json::json!({ "success": false, "error": "Could not resolve private server access code. The link may be expired or you may not have permission." }),
+                            None => {
+                                return serde_json::json!({ "success": false, "error": "Could not resolve private server access code. The link may be expired or you may not have permission." })
+                            }
                             Some(access_code) => {
                                 launcher_url = format!(
                                     "https://assetgame.roblox.com/game/PlaceLauncher.ashx?request=RequestPrivateGame&placeId={}&accessCode={}&linkCode={}",
@@ -852,7 +1077,13 @@ pub async fn do_launch(app: &AppHandle, state: &AppState, account_id: &str, cook
                         let Some(code) = share_code else {
                             return serde_json::json!({ "success": false, "error": "Invalid share link -- no code found." });
                         };
-                        let resolved = crate::roblox_api::resolve_share_link(state, &code, cookie, Some(&csrf_token)).await;
+                        let resolved = crate::roblox_api::resolve_share_link(
+                            state,
+                            &code,
+                            cookie,
+                            Some(&csrf_token),
+                        )
+                        .await;
                         if !resolved.ok {
                             return serde_json::json!({ "success": false, "error": resolved.error.unwrap_or_else(|| "Could not resolve share link. It may be expired or invalid.".into()) });
                         }
@@ -888,7 +1119,10 @@ pub async fn do_launch(app: &AppHandle, state: &AppState, account_id: &str, cook
     if let Some(exe) = &roblox_exe {
         if exe.exists() {
             let mut cmd = Command::new(exe);
-            cmd.arg(&roblox_uri).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+            cmd.arg(&roblox_uri)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
             hide_window(&mut cmd);
             if let Ok(child) = cmd.spawn() {
                 spawned_pid = child.id();
@@ -898,7 +1132,11 @@ pub async fn do_launch(app: &AppHandle, state: &AppState, account_id: &str, cook
     }
     match spawned_pid {
         Some(pid) => {
-            state.account_pids.lock().unwrap().insert(account_id.to_string(), pid);
+            state
+                .account_pids
+                .lock()
+                .unwrap()
+                .insert(account_id.to_string(), pid);
         }
         None => {
             let _ = tauri_plugin_opener::open_url(&roblox_uri, None::<&str>);
@@ -909,10 +1147,19 @@ pub async fn do_launch(app: &AppHandle, state: &AppState, account_id: &str, cook
     crate::roblox_api::invalidate_ticket(state, cookie);
 
     let mut accounts = crate::storage::load_accounts(state);
-    let (username, user_id) = if let Some(idx) = accounts.iter().position(|a| a.get("id").and_then(|v| v.as_str()) == Some(account_id)) {
+    let (username, user_id) = if let Some(idx) = accounts
+        .iter()
+        .position(|a| a.get("id").and_then(|v| v.as_str()) == Some(account_id))
+    {
         accounts[idx]["lastUsed"] = Value::String(chrono::Utc::now().to_rfc3339());
-        let username = accounts[idx].get("username").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let user_id = accounts[idx].get("userId").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let username = accounts[idx]
+            .get("username")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let user_id = accounts[idx]
+            .get("userId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let _ = crate::storage::save_accounts(state, accounts.clone());
         (username, user_id)
     } else {
@@ -924,13 +1171,21 @@ pub async fn do_launch(app: &AppHandle, state: &AppState, account_id: &str, cook
         app,
         "ok",
         "launch",
-        &format!("Launched Roblox for {}", username.clone().unwrap_or_else(|| account_id.to_string())),
-        Some(serde_json::json!({ "accountId": account_id, "username": username, "userId": user_id, "target": if t.is_empty() { "Roblox home" } else { t }, "pid": pid })),
+        &format!(
+            "Launched Roblox for {}",
+            username.clone().unwrap_or_else(|| account_id.to_string())
+        ),
+        Some(
+            serde_json::json!({ "accountId": account_id, "username": username, "userId": user_id, "target": if t.is_empty() { "Roblox home" } else { t }, "pid": pid }),
+        ),
     );
 
     watch_roblox(app, account_id);
 
-    if let Some(vol) = crate::settings::load_settings().get("masterVolume").and_then(|v| v.as_f64()) {
+    if let Some(vol) = crate::settings::load_settings()
+        .get("masterVolume")
+        .and_then(|v| v.as_f64())
+    {
         if vol != 100.0 {
             let app2 = app.clone();
             tokio::spawn(async move {
@@ -945,5 +1200,10 @@ pub async fn do_launch(app: &AppHandle, state: &AppState, account_id: &str, cook
 }
 
 fn find_username(accounts: &[Value], account_id: &str) -> Option<String> {
-    accounts.iter().find(|a| a.get("id").and_then(|v| v.as_str()) == Some(account_id)).and_then(|a| a.get("username")).and_then(|v| v.as_str()).map(|s| s.to_string())
+    accounts
+        .iter()
+        .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(account_id))
+        .and_then(|a| a.get("username"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
