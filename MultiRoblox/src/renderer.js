@@ -185,6 +185,7 @@ async function continueInit() {
   checkForUpdate();
   startStatusPoll();
   if (settings.autoTrim) startAutoTrimLoop();
+  startTrackingLoop();
   logEntry('info', 'system', 'MultiRoblox started', { version: 'v1', accounts: accounts.length, platform: navigator.platform });
   try { const k = localStorage.getItem('bloxgen_apikey'); if (k) { const el = document.getElementById('gen-apikey'); if (el) el.value = k; } } catch {}
   try { const afkStat = await api.antiAfkStatus(); if (afkStat && afkStat.enabled) logEntry('info', 'afk', `Anti-AFK is enabled on startup (active: ${afkStat.active})`, { enabled: afkStat.enabled, active: afkStat.active }); } catch {}
@@ -350,6 +351,8 @@ function applySettings() {
     const trimIvVal = document.getElementById('set-autotrim-interval-val');
     if (trimIvVal) trimIvVal.textContent = mins + ' min';
   }
+  const relaunch = document.getElementById('set-autorelaunch');
+  if (relaunch) relaunch.checked = !!settings.autoRelaunch;
 }
 
 let _acctQuery = '', _acctFilter = (() => { try { const f = localStorage.getItem('mr-acct-filter'); return (f && f !== 'running' && f !== 'idle') ? f : 'all'; } catch { return 'all'; } })(), _acctView = (() => { try { return localStorage.getItem('mr-acct-view') === 'list' ? 'list' : 'grid'; } catch { return 'grid'; } })();
@@ -437,6 +440,13 @@ function startAutoTrimLoop() {
 function stopAutoTrimLoop() {
   if (_autoTrimTimer) { clearInterval(_autoTrimTimer); _autoTrimTimer = null; }
 }
+function toggleAutoRelaunch() {
+  const el = document.getElementById('set-autorelaunch');
+  const on = el.checked;
+  settings.autoRelaunch = on;
+  api.saveSettings({ autoRelaunch: on });
+  toast(on ? 'Relaunch on disconnect on' : 'Relaunch on disconnect off', on ? 'ok' : 'err');
+}
 function toggleAutoTrim() {
   const el = document.getElementById('set-autotrim');
   const on = el.checked;
@@ -484,6 +494,13 @@ function updateCddDisplay(name, value) {
 }
 document.addEventListener('click', e => { if (!e.target.closest('.cdd')) closeAllCdd(); });
 
+// Called after any navigation/tab switch so slider fills are always correct
+// regardless of whether the page that just rendered remembered to call
+// updateSliderFill itself (several didn't -- see updateSliderFill's comment).
+function refreshAllSliderFills() {
+  document.querySelectorAll('.fps-slider').forEach(updateSliderFill);
+}
+
 function settingsTab(tab) {
   ['general','performance','privacy','themes','sounds'].forEach(t => {
     const panel = document.getElementById('stab-panel-' + t);
@@ -492,6 +509,7 @@ function settingsTab(tab) {
     if (btn) btn.classList.toggle('active', t === tab);
   });
   if (tab === 'sounds') typeof soundRenderPage === 'function' && soundRenderPage();
+  refreshAllSliderFills();
 }
 
 function goTo(p) {
@@ -508,7 +526,9 @@ function goTo(p) {
   if (p === 'charts' && !chartsLoaded) loadCharts();
   if (p === 'packages') renderPackages();
   if (p === 'mixer') mixInit();
+  if (p === 'tracking') renderTrackingPage();
   // generator page
+  refreshAllSliderFills();
 }
 
 function markLaunched(id) {
@@ -930,7 +950,7 @@ function loadAvatar(id, uid) {
 }
 
 function paintAccountAvatar(id, uid, url) {
-  ['av-' + id, 'pkg-picker-av-' + id].forEach(elId => {
+  ['av-' + id, 'pkg-picker-av-' + id, 'tracking-av-' + id].forEach(elId => {
     const el = document.getElementById(elId);
     if (el && !el.querySelector('img')) el.innerHTML = '<img src="' + esc(url) + '" alt=""/>';
   });
@@ -1895,6 +1915,15 @@ function updateSliderFill(el) {
   el.style.background = 'linear-gradient(90deg, var(--ac) ' + pct + '%, var(--s4) ' + pct + '%)';
 }
 
+// Fill-tracking is only correct if every place that sets a slider's value
+// also calls updateSliderFill -- several didn't (e.g. the sound volume
+// slider), leaving no fill until the user happened to drag it. A delegated
+// listener plus a sweep on every page switch makes this self-healing instead
+// of depending on each call site remembering to do it.
+document.addEventListener('input', e => {
+  if (e.target.matches && e.target.matches('.fps-slider')) updateSliderFill(e.target);
+});
+
 // Graphics
 function mixGfxInput(v) {
   document.getElementById('mix-gfx-val').textContent = v;
@@ -2224,6 +2253,260 @@ function genCopy() {
     toast('Copied to clipboard', 'ok');
   });
 }
+
+// ── Tracking (timed screenshots -> Discord webhook) ─────────────────────────
+function getTrackingWebhookUrl() { return settings.trackingWebhookUrl || ''; }
+function getTrackingIntervalSec() {
+  const s = Number(settings.trackingIntervalSec);
+  return Number.isFinite(s) ? Math.min(3600, Math.max(30, Math.round(s))) : 300;
+}
+function getTrackingTimedIds() { return new Set(Array.isArray(settings.trackingTimedIds) ? settings.trackingTimedIds : []); }
+// Multiple outlined spots per account -- each gets captured and sent as its
+// own attachment in the same webhook message. Empty/missing = full window.
+function getTrackingRegions(id) {
+  const r = (settings.trackingRegions || {})[id];
+  return Array.isArray(r) ? r : [];
+}
+function formatTrackingInterval(sec) {
+  if (sec < 60) return sec + 's';
+  return Math.round(sec / 60) + ' min';
+}
+
+function renderTrackingPage() {
+  const urlInput = document.getElementById('tracking-webhook-url');
+  if (urlInput) urlInput.value = getTrackingWebhookUrl();
+  const interval = document.getElementById('tracking-interval');
+  const intervalSec = getTrackingIntervalSec();
+  if (interval) interval.value = intervalSec;
+  const intervalVal = document.getElementById('tracking-interval-val');
+  if (intervalVal) intervalVal.textContent = formatTrackingInterval(intervalSec);
+
+  const container = document.getElementById('tracking-accounts');
+  if (!container) return;
+  const timedIds = getTrackingTimedIds();
+  if (!accounts.length) {
+    container.innerHTML = '<div class="tracking-empty">No accounts yet. Add an account first.</div>';
+    return;
+  }
+  container.innerHTML = accounts.map(a => {
+    const regions = getTrackingRegions(a.id);
+    const metaText = regions.length ? (regions.length + ' spot' + (regions.length !== 1 ? 's' : '')) : 'Full window';
+    return `
+    <div class="tracking-account">
+      <span class="pm-av" id="tracking-av-${a.id}">${esc((a.username || '?')[0].toUpperCase())}</span>
+      <div class="tracking-account-info">
+        <div class="tracking-account-name">${esc(a.nickname || a.username || 'Unknown')}</div>
+        <div class="tracking-account-meta">${metaText}</div>
+      </div>
+      <div class="tracking-account-actions">
+        <label class="toggle sm" title="Include in timed capture"><input type="checkbox" data-track-timed="${a.id}" onchange="toggleTimedTrackingAccount('${a.id}')" ${timedIds.has(a.id) ? 'checked' : ''}/><span class="toggle-trk"></span></label>
+        <button class="btn btn-ghost" onclick="openRegionPicker('${a.id}')" title="Outline capture spots"><span class="material-icons-round" style="font-size:15px">crop</span></button>
+        <button class="btn btn-ghost" data-track-capture="${a.id}" onclick="captureTrackingNow('${a.id}')" ${_launchedIds.has(a.id) ? '' : 'disabled'} title="Capture now"><span class="material-icons-round" style="font-size:15px">photo_camera</span></button>
+      </div>
+    </div>`;
+  }).join('');
+  loadAvatarsBatch(accounts);
+}
+
+function trackingIntervalInput(v) {
+  document.getElementById('tracking-interval-val').textContent = formatTrackingInterval(Number(v));
+  updateSliderFill(document.getElementById('tracking-interval'));
+}
+function saveTrackingInterval() {
+  const sec = Math.min(3600, Math.max(30, parseInt(document.getElementById('tracking-interval').value, 10) || 300));
+  settings.trackingIntervalSec = sec;
+  api.saveSettings({ trackingIntervalSec: sec });
+  startTrackingLoop();
+  toast('Tracking interval: ' + formatTrackingInterval(sec), 'ok');
+}
+
+function saveTrackingWebhookUrl() {
+  const input = document.getElementById('tracking-webhook-url');
+  if (!input) return;
+  settings.trackingWebhookUrl = input.value.trim();
+  api.saveSettings({ trackingWebhookUrl: settings.trackingWebhookUrl });
+  toast('Webhook saved', 'ok');
+}
+
+function toggleTimedTrackingAccount(id) {
+  const enabled = getTrackingTimedIds();
+  const toggle = document.querySelector(`[data-track-timed="${id}"]`);
+  if (toggle && toggle.checked) enabled.add(id); else enabled.delete(id);
+  settings.trackingTimedIds = [...enabled];
+  api.saveSettings({ trackingTimedIds: settings.trackingTimedIds });
+  startTrackingLoop();
+}
+
+let _trackingTimer = null;
+let _trackingRunning = false;
+function startTrackingLoop() {
+  if (_trackingTimer) clearInterval(_trackingTimer);
+  _trackingTimer = null;
+  if (!getTrackingTimedIds().size || !getTrackingWebhookUrl()) return;
+  _trackingTimer = setInterval(captureTimedTracking, getTrackingIntervalSec() * 1000);
+}
+
+async function captureTimedTracking() {
+  if (_trackingRunning) return;
+  const webhookUrl = getTrackingWebhookUrl();
+  if (!webhookUrl) return;
+  _trackingRunning = true;
+  try {
+    for (const id of getTrackingTimedIds()) {
+      if (!_launchedIds.has(id)) continue;
+      const a = accounts.find(x => x.id === id);
+      if (!a) continue;
+      try { await api.trackingCaptureAndSend(id, a.nickname || a.username || id, webhookUrl, getTrackingRegions(id)); } catch {}
+    }
+  } finally {
+    _trackingRunning = false;
+  }
+}
+
+async function captureTrackingNow(id) {
+  const webhookUrl = getTrackingWebhookUrl();
+  if (!webhookUrl) { toast('Set a webhook URL first', 'err'); return; }
+  const a = accounts.find(x => x.id === id);
+  if (!a) return;
+  const button = document.querySelector(`[data-track-capture="${id}"]`);
+  if (button) button.disabled = true;
+  try {
+    const res = await api.trackingCaptureAndSend(id, a.nickname || a.username || id, webhookUrl, getTrackingRegions(id));
+    if (res && res.ok) toast('Sent to webhook', 'ok');
+    else toast((res && res.error) || 'Capture failed', 'err');
+  } catch (e) {
+    toast((e && e.message) || 'Capture failed', 'err');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+// ── Region picker: drag rectangles over a live preview to outline multiple
+// capture spots, saved as fractions (0-1 of the captured window) so they
+// stay correct if the window is resized. Each drag adds a new spot; clicking
+// an existing one removes it.
+let _regionPickerAccountId = null;
+let _regionPickerDrag = null;
+let _regionPickerRects = [];
+
+async function openRegionPicker(id) {
+  const a = accounts.find(x => x.id === id);
+  if (!a) return;
+  if (!_launchedIds.has(id)) { toast('Launch this account first to outline a spot', 'err'); return; }
+  _regionPickerAccountId = id;
+  _regionPickerRects = getTrackingRegions(id).slice();
+  openModal('m-region-picker');
+  const img = document.getElementById('region-picker-img');
+  img.removeAttribute('src');
+  renderRegionBoxes();
+  let res;
+  try { res = await api.trackingCapturePreview(id); } catch { res = null; }
+  if (!res || !res.ok) {
+    toast((res && res.error) || 'Could not capture a preview', 'err');
+    closeRegionPicker();
+    return;
+  }
+  img.onload = renderRegionBoxes;
+  img.src = res.dataUrl;
+}
+
+function closeRegionPicker() {
+  closeModal('m-region-picker');
+  _regionPickerAccountId = null;
+  _regionPickerDrag = null;
+}
+
+function resetRegionPicker() {
+  _regionPickerRects = [];
+  renderRegionBoxes();
+}
+
+function renderRegionBoxes() {
+  const img = document.getElementById('region-picker-img');
+  const wrap = document.getElementById('region-picker-wrap');
+  wrap.querySelectorAll('.region-picker-box').forEach(el => el.remove());
+  if (!img.clientWidth || !img.clientHeight) return;
+  _regionPickerRects.forEach((rect, i) => {
+    const box = document.createElement('div');
+    box.className = 'region-picker-box';
+    box.dataset.idx = i;
+    box.title = 'Click to remove';
+    box.style.left = (rect.x * img.clientWidth) + 'px';
+    box.style.top = (rect.y * img.clientHeight) + 'px';
+    box.style.width = (rect.w * img.clientWidth) + 'px';
+    box.style.height = (rect.h * img.clientHeight) + 'px';
+    box.style.pointerEvents = 'auto';
+    box.onclick = e => {
+      e.stopPropagation();
+      _regionPickerRects.splice(i, 1);
+      renderRegionBoxes();
+    };
+    wrap.appendChild(box);
+  });
+}
+
+function saveRegionPicker() {
+  if (!_regionPickerAccountId) return;
+  const regions = Object.assign({}, settings.trackingRegions || {});
+  if (_regionPickerRects.length) regions[_regionPickerAccountId] = _regionPickerRects;
+  else delete regions[_regionPickerAccountId];
+  settings.trackingRegions = regions;
+  api.saveSettings({ trackingRegions: regions });
+  closeRegionPicker();
+  renderTrackingPage();
+  toast('Capture spots saved', 'ok');
+}
+
+(function initRegionPickerDrag() {
+  const wrap = document.getElementById('region-picker-wrap');
+  if (!wrap) return;
+  let draftBox = null;
+  wrap.addEventListener('mousedown', e => {
+    if (e.target.classList.contains('region-picker-box')) return; // handled by its own onclick
+    const img = document.getElementById('region-picker-img');
+    if (!img.clientWidth) return;
+    const rect = img.getBoundingClientRect();
+    const startX = Math.min(Math.max(e.clientX - rect.left, 0), rect.width);
+    const startY = Math.min(Math.max(e.clientY - rect.top, 0), rect.height);
+    _regionPickerDrag = { startX, startY, imgRect: rect };
+    draftBox = document.createElement('div');
+    draftBox.className = 'region-picker-box region-picker-box-draft';
+    draftBox.style.left = startX + 'px';
+    draftBox.style.top = startY + 'px';
+    draftBox.style.width = '0px';
+    draftBox.style.height = '0px';
+    wrap.appendChild(draftBox);
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!_regionPickerDrag || !draftBox) return;
+    const { startX, startY, imgRect } = _regionPickerDrag;
+    const x = Math.min(Math.max(e.clientX - imgRect.left, 0), imgRect.width);
+    const y = Math.min(Math.max(e.clientY - imgRect.top, 0), imgRect.height);
+    draftBox.style.left = Math.min(x, startX) + 'px';
+    draftBox.style.top = Math.min(y, startY) + 'px';
+    draftBox.style.width = Math.abs(x - startX) + 'px';
+    draftBox.style.height = Math.abs(y - startY) + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!_regionPickerDrag) return;
+    const img = document.getElementById('region-picker-img');
+    const left = draftBox ? parseFloat(draftBox.style.left) : 0;
+    const top = draftBox ? parseFloat(draftBox.style.top) : 0;
+    const w = draftBox ? parseFloat(draftBox.style.width) : 0;
+    const h = draftBox ? parseFloat(draftBox.style.height) : 0;
+    if (draftBox) { draftBox.remove(); draftBox = null; }
+    _regionPickerDrag = null;
+    if (w < 8 || h < 8 || !img.clientWidth || !img.clientHeight) return;
+    _regionPickerRects.push({
+      x: left / img.clientWidth,
+      y: top / img.clientHeight,
+      w: w / img.clientWidth,
+      h: h / img.clientHeight,
+    });
+    renderRegionBoxes();
+  });
+})();
 
 // ── Sound Effects ──────────────────────────────────────────────────────────
 (function() {

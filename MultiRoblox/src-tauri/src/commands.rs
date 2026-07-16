@@ -562,6 +562,35 @@ pub async fn roblox_open_account_browser(
     }
 }
 
+// ---- tracking (screenshots -> Discord webhook) ----
+#[tauri::command]
+pub async fn tracking_capture_preview(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Value, ()> {
+    match crate::tracking::capture_preview_b64(&app, &state, &id).await {
+        Ok(b64) => Ok(serde_json::json!({ "ok": true, "dataUrl": format!("data:image/png;base64,{}", b64) })),
+        Err(e) => Ok(serde_json::json!({ "ok": false, "error": e })),
+    }
+}
+
+fn parse_region(region: &Value) -> Option<(f64, f64, f64, f64)> {
+    Some((region.get("x")?.as_f64()?, region.get("y")?.as_f64()?, region.get("w")?.as_f64()?, region.get("h")?.as_f64()?))
+}
+
+#[tauri::command]
+pub async fn tracking_capture_and_send(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    username: String,
+    webhook_url: String,
+    regions: Option<Vec<Value>>,
+) -> Result<Value, ()> {
+    let crops: Vec<(f64, f64, f64, f64)> = regions.unwrap_or_default().iter().filter_map(parse_region).collect();
+    match crate::tracking::capture_and_send(&app, &state, &id, &username, &webhook_url, crops).await {
+        Ok(()) => Ok(serde_json::json!({ "ok": true })),
+        Err(e) => Ok(serde_json::json!({ "ok": false, "error": e })),
+    }
+}
+
 // ---- misc ----
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {

@@ -39,6 +39,9 @@
     openExternal: (url) => invoke('open_external', { url }),
     checkForUpdate: () => invoke('check_for_update'),
 
+    trackingCapturePreview: (id) => invoke('tracking_capture_preview', { id }),
+    trackingCaptureAndSend: (id, username, webhookUrl, regions) => invoke('tracking_capture_and_send', { id, username, webhookUrl, regions }),
+
     loadSettings: () => invoke('settings_load'),
     saveSettings: (data) => invoke('settings_save', { data }),
 

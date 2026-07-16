@@ -476,7 +476,7 @@ pub async fn set_roblox_volume(app: &AppHandle, state: &AppState, percent: f64) 
 }
 
 pub async fn count_roblox_processes(app: &AppHandle, state: &AppState) -> u32 {
-    native_pids(app, state)
+    cached_or_spawn_pids(app, state)
         .await
         .map(|s| s.len() as u32)
         .unwrap_or(0)
@@ -511,7 +511,7 @@ fn trim_process_memory(_pid: u32) -> bool {
 }
 
 pub async fn trim_roblox_memory(app: &AppHandle, state: &AppState) -> Value {
-    let Some(alive_pids) = native_pids(app, state).await else {
+    let Some(alive_pids) = cached_or_spawn_pids(app, state).await else {
         return serde_json::json!({ "ok": false, "trimmed": 0, "total": 0, "error": "could not enumerate Roblox processes" });
     };
 
@@ -556,7 +556,7 @@ pub async fn trim_account_memory(app: &AppHandle, state: &AppState, account_id: 
     {
         return serde_json::json!({ "ok": false, "error": "Instance is still launching" });
     }
-    let Some(alive_pids) = native_pids(app, state).await else {
+    let Some(alive_pids) = cached_or_spawn_pids(app, state).await else {
         return serde_json::json!({ "ok": false, "error": "Could not enumerate Roblox processes" });
     };
     if !alive_pids.contains(&pid) {
@@ -754,6 +754,31 @@ pub fn get_fflag_path() -> Option<PathBuf> {
     Some(dir.join("ClientSettings").join("ClientAppSettings.json"))
 }
 
+// A real RobloxPlayerBeta.exe is tens of MB; anything implausibly small is
+// still being written (e.g. a self-update triggered by another account's
+// launch a few seconds earlier is still extracting into this version
+// folder). Spawning that half-written exe is what makes Roblox's own
+// launcher think the install is broken and offer to repair/reinstall it.
+const MIN_PLAUSIBLE_EXE_BYTES: u64 = 5_000_000;
+
+async fn spawn_roblox_direct(roblox_uri: &str) -> Option<u32> {
+    let exe = get_latest_roblox_version_dir().map(|(_, exe)| exe)?;
+    let meta = std::fs::metadata(&exe).ok()?;
+    if meta.len() < MIN_PLAUSIBLE_EXE_BYTES {
+        return None;
+    }
+    let mut cmd = Command::new(&exe);
+    cmd.arg(roblox_uri)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    hide_window(&mut cmd);
+    let child = cmd.spawn().ok()?;
+    let pid = child.id();
+    std::mem::forget(child); // detached: outlives this process, matches child.unref()
+    pid
+}
+
 // ---- watch loop ----
 // One shared poll covering every watched account instead of one spawn per
 // account per tick (see main.js's _watchTick comment for the reasoning).
@@ -771,12 +796,86 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+// Bounds how often crash-recovery will relaunch a single account so a bad
+// cookie/target that crashes immediately on every launch can't spin-loop.
+const AUTO_RELAUNCH_MAX: usize = 3;
+const AUTO_RELAUNCH_WINDOW_MS: i64 = 10 * 60 * 1000;
+
+fn auto_relaunch_allowed(state: &AppState, account_id: &str) -> bool {
+    let now = now_ms();
+    let mut hist = state.auto_relaunch_history.lock().unwrap();
+    let entry = hist.entry(account_id.to_string()).or_default();
+    entry.retain(|t| now - *t < AUTO_RELAUNCH_WINDOW_MS);
+    if entry.len() >= AUTO_RELAUNCH_MAX {
+        return false;
+    }
+    entry.push(now);
+    true
+}
+
 fn stop_watch_poll_if_idle(state: &AppState) {
     if state.watched_accounts.lock().unwrap().is_empty() {
         if let Some(handle) = state.watch_handle.lock().unwrap().take() {
             handle.abort();
         }
+        stop_pid_watcher(state);
     }
+}
+
+// Resident "watch" helper (see RobloxNative.cs) -- started once per watch
+// session instead of watch_tick spawning a fresh process every poll tick.
+// That per-tick spawn (process creation + .NET Framework cold start + AV
+// re-scan of the exe on every launch) was the main source of the reported
+// idle CPU usage with instances running; this replaces it with one
+// long-lived process, same pattern as the mutex holder and anti-AFK helper.
+async fn ensure_pid_watcher(app: &AppHandle, state: &AppState) {
+    if state.watch_pid_child.lock().unwrap().is_some() {
+        return;
+    }
+    let Some(exe) = ensure_native_helper(app, state).await else {
+        return;
+    };
+    let mut cmd = Command::new(&exe);
+    cmd.args(["watch", &POLL_INTERVAL.as_millis().to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    hide_window(&mut cmd);
+    let Ok(mut child) = cmd.spawn() else {
+        return;
+    };
+    if let Some(stdout) = child.stdout.take() {
+        let app2 = app.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let Some(rest) = line.trim().strip_prefix("PIDS:") else {
+                    continue;
+                };
+                let set: std::collections::HashSet<u32> = rest.split(',').filter_map(|s| s.trim().parse::<u32>().ok()).collect();
+                let st = app2.state::<AppState>();
+                *st.watch_pid_cache.lock().unwrap() = Some(set);
+            }
+        });
+    }
+    *state.watch_pid_child.lock().unwrap() = Some(child);
+}
+
+fn stop_pid_watcher(state: &AppState) {
+    if let Some(mut child) = state.watch_pid_child.lock().unwrap().take() {
+        let _ = child.start_kill();
+    }
+    *state.watch_pid_cache.lock().unwrap() = None;
+}
+
+// Ground truth for "who's alive right now": the resident watcher's last
+// report if it's running, else a one-off spawn (covers the brief window
+// before the watcher's first report, and callers with nothing watched).
+async fn cached_or_spawn_pids(app: &AppHandle, state: &AppState) -> Option<std::collections::HashSet<u32>> {
+    if let Some(pids) = state.watch_pid_cache.lock().unwrap().clone() {
+        return Some(pids);
+    }
+    native_pids(app, state).await
 }
 
 fn start_watch_poll(app: &AppHandle, state_handle: tauri::AppHandle) {
@@ -798,7 +897,7 @@ fn start_watch_poll(app: &AppHandle, state_handle: tauri::AppHandle) {
     *app.state::<AppState>().watch_handle.lock().unwrap() = Some(handle);
 }
 
-pub fn watch_roblox(app: &AppHandle, account_id: &str) {
+pub async fn watch_roblox(app: &AppHandle, account_id: &str) {
     let st = app.state::<AppState>();
     st.watched_accounts
         .lock()
@@ -809,6 +908,7 @@ pub fn watch_roblox(app: &AppHandle, account_id: &str) {
         .unwrap()
         .insert(account_id.to_string(), 0);
     start_watch_poll(app, app.clone());
+    ensure_pid_watcher(app, &st).await;
 }
 
 static WATCH_TICK_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
@@ -827,7 +927,7 @@ async fn watch_tick(app: &AppHandle) {
     if WATCH_TICK_IN_FLIGHT.swap(true, Ordering::SeqCst) {
         return;
     }
-    let pids = native_pids(app, &state).await;
+    let pids = cached_or_spawn_pids(app, &state).await;
     WATCH_TICK_IN_FLIGHT.store(false, Ordering::SeqCst);
     // Couldn't get a reading this tick (helper unavailable, spawn/timeout
     // failure) -- can't tell who's alive. Bail without touching miss counts
@@ -927,6 +1027,31 @@ async fn watch_tick(app: &AppHandle) {
         );
         state.account_pids.lock().unwrap().remove(account_id);
         let _ = app.emit("roblox:closed", account_id);
+
+        let auto_relaunch = crate::settings::load_settings().get("autoRelaunch").and_then(|v| v.as_bool()).unwrap_or(false);
+        if auto_relaunch {
+            let cookie = acct.get("cookie").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let target = acct.get("gameTarget").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if !cookie.is_empty() {
+                if auto_relaunch_allowed(&state, account_id) {
+                    emit_log(app, "info", "crash", &format!("Auto-relaunching {}...", username.unwrap_or(account_id)), None);
+                    let app2 = app.clone();
+                    let account_id2 = account_id.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let st = app2.state::<AppState>();
+                        let _ = do_launch(&app2, &st, &account_id2, &cookie, &target).await;
+                    });
+                } else {
+                    emit_log(
+                        app,
+                        "warn",
+                        "crash",
+                        &format!("Auto-relaunch skipped for {} -- too many recent crashes", username.unwrap_or(account_id)),
+                        None,
+                    );
+                }
+            }
+        }
     }
 
     let _ = app.emit("roblox:count", alive_pids.len());
@@ -1113,21 +1238,23 @@ pub async fn do_launch(
         format!("roblox-player:1+launchmode:app+gameinfo:{}+launchtime:{}+browsertrackerid:{}+robloxLocale:en_us+gameLocale:en_us", ticket, launch_time, browser_id)
     };
 
-    let roblox_exe = get_latest_roblox_version_dir().map(|(_, exe)| exe);
-
+    // Falling straight through to the OS URI handler on any spawn failure
+    // is what surfaces as "attempts to reinstall Roblox" -- that handler is
+    // RobloxPlayerLauncher.exe, whose job includes repairing/reinstalling
+    // when it doesn't like what it finds. The most common transient cause:
+    // a launch staggered right after another one caught Roblox mid
+    // self-update, so the "latest" version folder's exe is still being
+    // written (present but truncated) at the moment we go looking. Retry a
+    // few times before giving up to that fallback instead of escalating on
+    // the first miss.
     let mut spawned_pid: Option<u32> = None;
-    if let Some(exe) = &roblox_exe {
-        if exe.exists() {
-            let mut cmd = Command::new(exe);
-            cmd.arg(&roblox_uri)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            hide_window(&mut cmd);
-            if let Ok(child) = cmd.spawn() {
-                spawned_pid = child.id();
-                std::mem::forget(child); // detached: outlives this process, matches child.unref()
-            }
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+        spawned_pid = spawn_roblox_direct(&roblox_uri).await;
+        if spawned_pid.is_some() {
+            break;
         }
     }
     match spawned_pid {
@@ -1180,7 +1307,7 @@ pub async fn do_launch(
         ),
     );
 
-    watch_roblox(app, account_id);
+    watch_roblox(app, account_id).await;
 
     if let Some(vol) = crate::settings::load_settings()
         .get("masterVolume")

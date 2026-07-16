@@ -21,6 +21,15 @@ pub struct AppState {
     pub watched_accounts: Mutex<HashMap<String, i64>>, // accountId -> readyAt epoch ms
     pub miss_counts: Mutex<HashMap<String, u32>>,
     pub watch_handle: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    // accountId -> recent auto-relaunch-on-crash timestamps (ms), oldest
+    // first. Bounds how often watch_tick's crash handler will relaunch a
+    // given account so a bad cookie/account can't spin-loop launches.
+    pub auto_relaunch_history: Mutex<HashMap<String, Vec<i64>>>,
+    // Resident "watch" mode helper process (see native.rs) -- reports PIDs on
+    // its own interval so watch_tick doesn't spawn a fresh process every poll
+    // tick. None = not running or hasn't reported yet.
+    pub watch_pid_child: Mutex<Option<Child>>,
+    pub watch_pid_cache: Mutex<Option<std::collections::HashSet<u32>>>,
 
     // ---- roblox network caches ----
     pub csrf_cache: Mutex<HashMap<String, (String, i64)>>,
@@ -51,6 +60,9 @@ impl AppState {
             watched_accounts: Mutex::new(HashMap::new()),
             miss_counts: Mutex::new(HashMap::new()),
             watch_handle: Mutex::new(None),
+            auto_relaunch_history: Mutex::new(HashMap::new()),
+            watch_pid_child: Mutex::new(None),
+            watch_pid_cache: Mutex::new(None),
             csrf_cache: Mutex::new(HashMap::new()),
             ticket_cache: Mutex::new(HashMap::new()),
             last_launch_ts: Mutex::new(0),
