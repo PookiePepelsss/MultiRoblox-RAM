@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.rbxcdn.com https://*.roblox.com; connect-src 'self' https://*.roblox.com; object-src 'none'; base-uri 'self'; frame-src 'none'"/>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.rbxcdn.com https://*.roblox.com; connect-src 'self' https://*.roblox.com https://core.bloxgen.net; object-src 'none'; base-uri 'self'; frame-src 'none'"/>
 <title>MultiRoblox</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet"/>
@@ -46,6 +46,9 @@
     </button>
     <button class="nav-item" id="nav-generator" onclick="goTo('generator')">
       <span class="material-icons-round">shuffle</span>Generator
+    </button>
+    <button class="nav-item" id="nav-tracking" onclick="goTo('tracking')">
+      <span class="material-icons-round">track_changes</span>Tracking
     </button>
     <button class="nav-item" id="nav-settings" onclick="goTo('settings')">
       <span class="material-icons-round">settings</span>Settings
@@ -293,6 +296,42 @@
         </div>
       </div>
 
+      <!-- tracking page -->
+      <div class="page" id="page-tracking">
+        <div class="ph">
+          <div>
+            <div class="ph-title">Tracking</div>
+            <div class="ph-sub">Automated screenshots sent to a Discord webhook</div>
+          </div>
+        </div>
+        <div class="sw">
+          <div class="sc">
+            <div class="sc-head">Webhook</div>
+            <div class="sr" style="flex-direction:column;align-items:stretch;gap:8px">
+              <div class="sr-left"><div class="sr-label">Discord webhook URL</div><div class="sr-desc">Screenshots are posted here as an image upload.</div></div>
+              <input class="sr-input" id="tracking-webhook-url" type="text" placeholder="https://discord.com/api/webhooks/..." onchange="saveTrackingWebhookUrl()" style="width:auto"/>
+            </div>
+            <div class="sr" style="flex-direction:column;align-items:stretch;gap:10px">
+              <div class="sr-left">
+                <div class="sr-label">Timed capture interval</div>
+                <div class="sr-desc">Capture each enabled account at this interval, and post to the webhook.</div>
+              </div>
+              <div class="mix-row">
+                <span class="material-icons-round" style="font-size:17px;color:var(--t3);flex-shrink:0">schedule</span>
+                <input type="range" class="fps-slider" id="tracking-interval" min="30" max="3600" step="30" value="300"
+                       oninput="trackingIntervalInput(this.value)" onchange="saveTrackingInterval()"/>
+                <span class="fps-val-label" id="tracking-interval-val" style="min-width:60px">5 min</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="sc tracking-accounts-sc">
+            <div class="sc-head">Accounts</div>
+            <div id="tracking-accounts" class="tracking-accounts"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- settings page -->
       <div class="page" id="page-settings">
         <div class="ph">
@@ -338,6 +377,12 @@
                 <span class="fps-val-label" id="set-antiafk-interval-val" style="min-width:50px">19 min</span>
               </div>
             </div>
+          </div>
+
+          <!-- Relaunch on disconnect -->
+          <div class="sc">
+            <div class="sc-head">Relaunch on Disconnect</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Relaunch on disconnect</div><div class="sr-desc">If a running instance disconnects unexpectedly, relaunch that same account back into the same game automatically.</div></div><label class="toggle"><input type="checkbox" id="set-autorelaunch" onchange="toggleAutoRelaunch()"/><span class="toggle-trk"></span></label></div>
           </div>
         </div>
 
@@ -653,6 +698,23 @@
 
     </div>
   </main>
+</div>
+
+<!-- tracking region picker -->
+<div class="overlay" id="m-region-picker" data-backdrop-close="true" onclick="if(event.target===this)closeRegionPicker()">
+  <div class="modal" onclick="event.stopPropagation()" style="width:660px;max-width:92vw">
+    <div class="modal-title">Outline capture region</div>
+    <div class="modal-sub">Drag to outline one or more spots to capture. Click a spot to remove it. Leave empty to capture the full window.</div>
+    <div class="region-picker-wrap" id="region-picker-wrap">
+      <img id="region-picker-img" draggable="false" alt=""/>
+      <div id="region-picker-box" class="region-picker-box" style="display:none"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="resetRegionPicker()">Full window</button>
+      <button class="btn btn-ghost" onclick="closeRegionPicker()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveRegionPicker()">Save</button>
+    </div>
+  </div>
 </div>
 
 <!-- confirm delete -->

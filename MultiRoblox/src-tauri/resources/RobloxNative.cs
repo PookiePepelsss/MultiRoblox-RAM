@@ -14,23 +14,33 @@
 //                                      running Roblox; prints HANDLES_DONE.
 //   RobloxNative.exe volume <0-100> -> set OS volume on every Roblox audio
 //                                      session; prints SET:<count>.
-//   RobloxNative.exe pids           -> print each running RobloxPlayerBeta
-//                                      PID on its own line. Uses .NET's own
+//   RobloxNative.exe pids           -> one-shot: print each running
+//                                      RobloxPlayerBeta PID on its own line,
+//                                      then exit. Uses .NET's own
 //                                      Process.GetProcessesByName instead of
-//                                      shelling out to tasklist.exe/cmd.exe
-//                                      -- the same reliable enumeration the
-//                                      anti-AFK loop already depends on, no
-//                                      CSV parsing or extra process hop.
-//   RobloxNative.exe capture <pid> <path> -> save the selected Roblox window
-//                                      to a local PNG file.
+//                                      shelling out to tasklist.exe/cmd.exe.
+//   RobloxNative.exe watch [ms]     -> resident: print "PIDS:1,2,3" on the
+//                                      given interval (default 2000ms) and
+//                                      keep running. Used by the Rust watch
+//                                      loop so it isn't spawning a fresh
+//                                      process every poll tick.
+//   RobloxNative.exe capture <pid> [xFrac yFrac wFrac hFrac] -> screenshot
+//                                      that window (optionally cropped to a
+//                                      fractional sub-rectangle, 0-1 of the
+//                                      captured width/height), print
+//                                      "CAPTURED_B64:<base64 png>" to stdout.
+//                                      No disk write -- encoded straight from
+//                                      a MemoryStream so the caller decides
+//                                      what to do with the bytes (save,
+//                                      upload, preview).
 //
 // Build (done once, by the app or build.bat) with the .NET Framework compiler:
 //   csc /nologo /optimize+ /platform:x64 /target:exe /out:RobloxNative.exe RobloxNative.cs
 
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 
@@ -48,9 +58,10 @@ internal static class RobloxNative
                 case "volume":       return RunVolume(args);
                 case "antiafk":      return RunAntiAfk(args);
                 case "pids":         return RunPids();
+                case "watch":        return RunWatch(args);
                 case "capture":      return RunCapture(args);
                 default:
-                    Console.Error.WriteLine("Unknown command. Use: mutex | closehandles | volume <0-100> | antiafk <seconds> | pids | capture <pid> <path>");
+                    Console.Error.WriteLine("Unknown command. Use: mutex | closehandles | volume <0-100> | antiafk <seconds> | pids | watch [ms] | capture <pid> [xFrac yFrac wFrac hFrac]");
                     return 2;
             }
         }
@@ -179,45 +190,121 @@ internal static class RobloxNative
         return 0;
     }
 
+    // Resident mode for the Rust watch loop: instead of spawning a fresh
+    // process every poll tick (measurable CPU/AV-scan overhead at a 2s
+    // cadence -- the reported cause of high idle CPU with instances open),
+    // this stays running and reports PIDs on an interval, matching the same
+    // long-lived-helper pattern mutex/antiafk already use. The Rust side
+    // just reads whatever this already-running process last printed.
+    private static int RunWatch(string[] args)
+    {
+        int intervalMs = 2000;
+        if (args.Length > 1) { int v; if (int.TryParse(args[1], out v) && v >= 250) intervalMs = v; }
+        while (true)
+        {
+            var ids = new System.Collections.Generic.List<string>();
+            foreach (var p in Process.GetProcessesByName("RobloxPlayerBeta"))
+            {
+                try { ids.Add(p.Id.ToString()); } catch { }
+            }
+            Console.Out.WriteLine("PIDS:" + string.Join(",", ids));
+            Console.Out.Flush();
+            Thread.Sleep(intervalMs);
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
-    private struct RECT { public int Left, Top, Right, Bottom; }
+    struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
 
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
-
-    [DllImport("user32.dll")]
-    private static extern bool IsIconic(IntPtr hWnd);
-
+    // Screenshots one Roblox window (by PID), optionally cropped to a
+    // fractional sub-rectangle of the captured image, and prints the PNG as
+    // base64 -- no temp file. Briefly focuses/restores the window like
+    // AntiAfk's taps do, since a minimised or occluded window can't be
+    // captured correctly with CopyFromScreen.
     private static int RunCapture(string[] args)
     {
-        if (args.Length < 3) { Console.Error.WriteLine("Capture requires a PID and output path"); return 2; }
+        if (args.Length < 2) { Console.Error.WriteLine("Capture requires a PID"); return 2; }
         int pid;
         if (!int.TryParse(args[1], out pid) || pid <= 0) { Console.Error.WriteLine("Invalid PID"); return 2; }
 
-        var process = Process.GetProcessById(pid);
+        double xFrac = 0, yFrac = 0, wFrac = 1, hFrac = 1;
+        bool hasCrop = false;
+        if (args.Length >= 6)
+        {
+            double x, y, w, h;
+            if (double.TryParse(args[2], out x) && double.TryParse(args[3], out y) &&
+                double.TryParse(args[4], out w) && double.TryParse(args[5], out h))
+            {
+                xFrac = x; yFrac = y; wFrac = w; hFrac = h;
+                hasCrop = true;
+            }
+        }
+
+        Process process;
+        try { process = Process.GetProcessById(pid); }
+        catch { Console.Error.WriteLine("Process not found"); return 1; }
+
         var hwnd = process.MainWindowHandle;
         if (hwnd == IntPtr.Zero) { Console.Error.WriteLine("Roblox window not found"); return 1; }
-        if (IsIconic(hwnd)) { Console.Error.WriteLine("Restore the Roblox window before capturing it"); return 1; }
-        AntiAfk.FocusWindow(hwnd);
-        Thread.Sleep(150);
 
-        RECT rect;
-        if (!GetWindowRect(hwnd, out rect)) { Console.Error.WriteLine("Could not read Roblox window bounds"); return 1; }
-        int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
-        if (width <= 0 || height <= 0) { Console.Error.WriteLine("Roblox window has invalid bounds"); return 1; }
-
-        string path = args[2];
-        string dir = System.IO.Path.GetDirectoryName(path);
-        if (!String.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
-        using (var bitmap = new Bitmap(width, height))
-        using (var graphics = Graphics.FromImage(bitmap))
+        bool wasMinimised = IsIconic(hwnd);
+        try
         {
-            graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(width, height));
-            bitmap.Save(path, ImageFormat.Png);
+            if (wasMinimised) ShowWindowCapture(hwnd, SW_RESTORE_CAPTURE);
+            AntiAfk.ForceForeground(hwnd);
+            Thread.Sleep(150);
+
+            RECT rect;
+            if (!GetWindowRect(hwnd, out rect)) { Console.Error.WriteLine("Could not read Roblox window bounds"); return 1; }
+            int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
+            if (width <= 0 || height <= 0) { Console.Error.WriteLine("Roblox window has invalid bounds"); return 1; }
+
+            using (var full = new Bitmap(width, height))
+            {
+                using (var g = Graphics.FromImage(full))
+                {
+                    g.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(width, height));
+                }
+
+                Bitmap output = full;
+                Bitmap cropped = null;
+                if (hasCrop)
+                {
+                    int cx = Clamp((int)(xFrac * width), 0, width - 1);
+                    int cy = Clamp((int)(yFrac * height), 0, height - 1);
+                    int cw = Clamp((int)(wFrac * width), 1, width - cx);
+                    int ch = Clamp((int)(hFrac * height), 1, height - cy);
+                    cropped = full.Clone(new Rectangle(cx, cy, cw, ch), full.PixelFormat);
+                    output = cropped;
+                }
+
+                using (var ms = new System.IO.MemoryStream())
+                {
+                    output.Save(ms, ImageFormat.Png);
+                    Console.Out.WriteLine("CAPTURED_B64:" + Convert.ToBase64String(ms.ToArray()));
+                    Console.Out.Flush();
+                }
+                if (cropped != null) cropped.Dispose();
+            }
+            return 0;
         }
-        Console.Out.WriteLine("CAPTURED:" + path);
-        return 0;
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("Capture: " + ex.Message);
+            return 1;
+        }
+        finally
+        {
+            if (wasMinimised) ShowWindowCapture(hwnd, SW_MINIMIZE_CAPTURE);
+        }
     }
+
+    static int Clamp(int v, int min, int max) { return v < min ? min : (v > max ? max : v); }
+
+    const int SW_RESTORE_CAPTURE = 9, SW_MINIMIZE_CAPTURE = 6;
+    [DllImport("user32.dll", EntryPoint = "IsIconic")] static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll", EntryPoint = "ShowWindow")] static extern bool ShowWindowCapture(IntPtr hWnd, int nCmdShow);
 }
 
 // ── ROBLOX_singletonEvent handle closing (ported from closehandles.ps1) ─────
@@ -504,7 +591,7 @@ internal static class AntiAfk
 
     // Force a window to the foreground, defeating Windows' foreground lock by
     // attaching to the currently-foreground thread's input queue for the call.
-    static void ForceForeground(IntPtr hWnd)
+    public static void ForceForeground(IntPtr hWnd)
     {
         IntPtr fg = GetForegroundWindow();
         uint thisThread = GetCurrentThreadId();
@@ -513,11 +600,6 @@ internal static class AntiAfk
         if (fgThread != 0 && fgThread != thisThread) attached = AttachThreadInput(thisThread, fgThread, true);
         try { SetForegroundWindow(hWnd); BringWindowToTop(hWnd); }
         finally { if (attached) AttachThreadInput(thisThread, fgThread, false); }
-    }
-
-    public static void FocusWindow(IntPtr hWnd)
-    {
-        ForceForeground(hWnd);
     }
 
     // Focus one window and send a single benign key tap. Does NOT restore the

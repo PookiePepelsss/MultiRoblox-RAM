@@ -8,6 +8,7 @@ mod roblox_api;
 mod settings;
 mod state;
 mod storage;
+mod tracking;
 mod update;
 
 use state::AppState;
@@ -101,6 +102,8 @@ pub fn run() {
             commands::login_cancel,
             commands::open_external,
             commands::check_for_update,
+            commands::tracking_capture_preview,
+            commands::tracking_capture_and_send,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
