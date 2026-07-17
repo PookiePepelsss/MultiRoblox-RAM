@@ -326,31 +326,6 @@ pub fn fps_read() -> i64 {
         .unwrap_or(60)
 }
 
-// Roblox's DFIntTaskSchedulerTargetFps Fast Flag must be kept in sync with
-// the XML FramerateCap or the internal scheduler falls back toward its own
-// default at the extremes (30/360) -- see native::get_fflag_path callers.
-fn set_frame_rate_fflag(value: i64) {
-    let Some(p) = crate::native::get_fflag_path() else {
-        return;
-    };
-    if let Some(parent) = p.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let mut flags: Map<String, Value> = if p.exists() {
-        std::fs::read_to_string(&p)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    } else {
-        Map::new()
-    };
-    flags.insert("DFIntTaskSchedulerTargetFps".into(), Value::Number(value.into()));
-    let _ = std::fs::write(
-        &p,
-        serde_json::to_string_pretty(&flags).unwrap_or_else(|_| "{}".into()),
-    );
-}
-
 #[tauri::command]
 pub fn fps_write(cap: f64) -> Value {
     let p = global_settings_path();
@@ -371,10 +346,20 @@ pub fn fps_write(cap: f64) -> Value {
         )
         .to_string()
     };
-    if std::fs::write(&p, new_xml).is_err() {
-        return serde_json::json!({ "ok": false, "error": "Failed to write GlobalBasicSettings_13.xml" });
+    // Bloxstrap/Froststrap/Fishstrap's own FPS-unlocker can mark this file
+    // read-only to stop Roblox's engine from resetting it -- that also
+    // blocks OUR write, so clear it first if set (this app is the one the
+    // user just told to change the cap, so it should win).
+    if let Ok(meta) = std::fs::metadata(&p) {
+        let mut perms = meta.permissions();
+        if perms.readonly() {
+            perms.set_readonly(false);
+            let _ = std::fs::set_permissions(&p, perms);
+        }
     }
-    set_frame_rate_fflag(value);
+    if std::fs::write(&p, new_xml).is_err() {
+        return serde_json::json!({ "ok": false, "error": "Failed to write GlobalBasicSettings_13.xml (file may be locked by another app)" });
+    }
     serde_json::json!({ "ok": true })
 }
 

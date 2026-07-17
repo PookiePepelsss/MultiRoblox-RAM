@@ -1796,22 +1796,24 @@ function mixFpsInput(v) {
   document.getElementById('mix-fps-val').textContent = v;
   updateSliderFill(document.getElementById('mix-fps'));
 }
-function mixFpsUnlToggle() {
+async function mixFpsUnlToggle() {
   const unl = document.getElementById('mix-fps-unl').checked;
   document.getElementById('mix-fps').disabled = unl;
   if (unl) {
     document.getElementById('mix-fps-val').textContent = '\u221e';
-    api.writeFpsCap(0);
-    toast('FPS set to unlimited (next launch)', 'ok');
+    const res = await api.writeFpsCap(0);
+    if (res && res.ok === false) toast(res.error || 'Failed to set FPS cap', 'err');
+    else toast('FPS set to unlimited (next launch)', 'ok');
   } else {
     mixFpsCommit();
   }
 }
-function mixFpsCommit() {
+async function mixFpsCommit() {
   if (document.getElementById('mix-fps-unl').checked) return;
   const v = parseInt(document.getElementById('mix-fps').value, 10);
   document.getElementById('mix-fps-val').textContent = v;
-  api.writeFpsCap(v);
+  const res = await api.writeFpsCap(v);
+  if (res && res.ok === false) { toast(res.error || 'Failed to set FPS cap', 'err'); return; }
   toast('FPS cap: ' + v + ' (next launch)', 'ok');
 }
 

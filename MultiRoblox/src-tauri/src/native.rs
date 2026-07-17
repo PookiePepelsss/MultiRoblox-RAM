@@ -711,18 +711,36 @@ async fn close_singleton_and_hold_mutex(app: &AppHandle, state: &AppState) {
     close_singleton_handles_only(app, state).await;
 }
 
-fn get_latest_roblox_version_dir() -> Option<(PathBuf, PathBuf)> {
+// Third-party bootstrappers (Bloxstrap and its forks Froststrap, Voidstrap,
+// Fishstrap) install the real RobloxPlayerBeta.exe under their own
+// %LOCALAPPDATA%\<Name>\Versions\version-*\ folder instead of the vanilla
+// %LOCALAPPDATA%\Roblox\Versions\ one -- same layout, different root. A
+// machine with only one of these installed (no vanilla Roblox launcher ever
+// run) had nothing here at all, so direct-launch and the FFlags tab (which
+// also derives its file path from this, via get_fflag_path) both silently
+// no-op'd.
+//
+// Only ONE of these is ever actually in use -- comparing mtimes across all
+// of them isn't reliable (a bootstrapper's mod-copy step touches its version
+// folder on every launch regardless of whether Roblox itself updated, so a
+// long-unused install can still look "newer" than the one you actually
+// play through). Priority order: vanilla Roblox first since it's the most
+// common case, then check each fork; stop at the first one that has a real
+// install and pick the newest version- folder within *that* one only.
+const ROBLOX_INSTALL_ROOTS: [&str; 5] = ["Roblox", "Bloxstrap", "Froststrap", "Voidstrap", "Fishstrap"];
+
+// Returns (install root name, version dir, exe path) -- the root name is
+// needed by get_fflag_path below since vanilla Roblox and the Bloxstrap-
+// family forks keep their FFlags file in differently-shaped locations.
+fn get_latest_roblox_install() -> Option<(&'static str, PathBuf, PathBuf)> {
     let home = dirs_home()?;
-    let versions_base = home
-        .join("AppData")
-        .join("Local")
-        .join("Roblox")
-        .join("Versions");
-    if !versions_base.exists() {
-        return None;
-    }
-    let mut candidates: Vec<(PathBuf, PathBuf, std::time::SystemTime)> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&versions_base) {
+    let local_appdata = home.join("AppData").join("Local");
+    for root in ROBLOX_INSTALL_ROOTS {
+        let versions_base = local_appdata.join(root).join("Versions");
+        let Ok(entries) = std::fs::read_dir(&versions_base) else {
+            continue;
+        };
+        let mut candidates: Vec<(PathBuf, PathBuf, std::time::SystemTime)> = Vec::new();
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
@@ -737,21 +755,49 @@ fn get_latest_roblox_version_dir() -> Option<(PathBuf, PathBuf)> {
                 }
             }
         }
+        if candidates.is_empty() {
+            continue;
+        }
+        candidates.sort_by(|a, b| b.2.cmp(&a.2));
+        return candidates
+            .into_iter()
+            .next()
+            .map(|(dir, exe, _)| (root, dir, exe));
     }
-    candidates.sort_by(|a, b| b.2.cmp(&a.2));
-    candidates
-        .into_iter()
-        .next()
-        .map(|(dir, exe, _)| (dir, exe))
+    None
+}
+
+fn get_latest_roblox_version_dir() -> Option<(PathBuf, PathBuf)> {
+    get_latest_roblox_install().map(|(_, dir, exe)| (dir, exe))
 }
 
 fn dirs_home() -> Option<PathBuf> {
     std::env::var("USERPROFILE").ok().map(PathBuf::from)
 }
 
+// Vanilla Roblox keeps FFlags per-version-folder:
+//   Roblox\Versions\version-xxx\ClientSettings\ClientAppSettings.json
+// Bloxstrap and its forks (Froststrap, Voidstrap, Fishstrap) instead keep a
+// single fixed copy that their launcher overlays into the version folder at
+// launch time -- writing to the per-version path for those does nothing,
+// since the bootstrapper doesn't read from there and overwrites it on next
+// launch anyway. Confirmed against a real Fishstrap install: its file lives
+// at <Root>\Modifications\ClientSettings\ClientAppSettings.json, not inside
+// Versions\ at all.
 pub fn get_fflag_path() -> Option<PathBuf> {
-    let (dir, _) = get_latest_roblox_version_dir()?;
-    Some(dir.join("ClientSettings").join("ClientAppSettings.json"))
+    let (root, dir, _) = get_latest_roblox_install()?;
+    if root == "Roblox" {
+        Some(dir.join("ClientSettings").join("ClientAppSettings.json"))
+    } else {
+        let local_appdata = dirs_home()?.join("AppData").join("Local");
+        Some(
+            local_appdata
+                .join(root)
+                .join("Modifications")
+                .join("ClientSettings")
+                .join("ClientAppSettings.json"),
+        )
+    }
 }
 
 // A real RobloxPlayerBeta.exe is tens of MB; anything implausibly small is
