@@ -11,7 +11,11 @@ const REPO_TAGS_URL: &str = "https://github.com/PookiePepelsss/MultiRoblox-RAM/t
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn parse_semver(tag: &str) -> Option<(u32, u32, u32)> {
-    let s = tag.strip_prefix('v').unwrap_or(tag);
+    // Must require the leading "v" -- a stray non-"v" tag on the remote
+    // (e.g. a bare "1.1.2" left over from a since-corrected version bump)
+    // was silently accepted here too, making it outrank the real "v1.1.1"
+    // tag and falsely claim an update was available.
+    let s = tag.strip_prefix('v')?;
     let mut parts = s.split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;

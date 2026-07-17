@@ -60,22 +60,27 @@ pub async fn fetch_user_info(state: &AppState, cookie: &str) -> UserInfo {
     }
 }
 
-pub async fn get_roblox_version(state: &AppState) -> Option<String> {
+// Returns Err(reason) instead of None on failure so the caller can log *why*
+// detection failed (network error vs bad status vs unexpected body) instead
+// of just showing an unexplained "Not detected" badge.
+pub async fn get_roblox_version(state: &AppState) -> Result<String, String> {
     let res = state
         .http
         .get("https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer")
         .header("User-Agent", UA)
         .send()
         .await
-        .ok()?;
-    if res.status() != 200 {
-        return None;
+        .map_err(|e| format!("network error: {e}"))?;
+    let status = res.status();
+    if status != 200 {
+        return Err(format!("unexpected status {status}"));
     }
-    let json: Value = res.json().await.ok()?;
+    let json: Value = res.json().await.map_err(|e| format!("bad response body: {e}"))?;
     json.get("clientVersionUpload")
         .or_else(|| json.get("version"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+        .ok_or_else(|| "response missing version field".to_string())
 }
 
 async fn csrf_from_endpoint(state: &AppState, cookie: &str, endpoint: &str) -> Option<String> {

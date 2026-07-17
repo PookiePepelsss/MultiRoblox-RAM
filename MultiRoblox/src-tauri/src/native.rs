@@ -829,6 +829,11 @@ fn stop_watch_poll_if_idle(state: &AppState) {
 // idle CPU usage with instances running; this replaces it with one
 // long-lived process, same pattern as the mutex holder and anti-AFK helper.
 async fn ensure_pid_watcher(app: &AppHandle, state: &AppState) {
+    // Holds this for the whole spawn attempt so two racing callers can't both
+    // pass the is_some() check while the first is still mid-spawn (there's an
+    // await below, between the check and the write, that a plain std Mutex
+    // can't close).
+    let _guard = state.watch_pid_spawn_lock.lock().await;
     if state.watch_pid_child.lock().unwrap().is_some() {
         return;
     }
@@ -844,6 +849,11 @@ async fn ensure_pid_watcher(app: &AppHandle, state: &AppState) {
     let Ok(mut child) = cmd.spawn() else {
         return;
     };
+    let my_gen = {
+        let mut gen = state.watch_pid_generation.lock().unwrap();
+        *gen += 1;
+        *gen
+    };
     if let Some(stdout) = child.stdout.take() {
         let app2 = app.clone();
         tokio::spawn(async move {
@@ -856,12 +866,25 @@ async fn ensure_pid_watcher(app: &AppHandle, state: &AppState) {
                 let st = app2.state::<AppState>();
                 *st.watch_pid_cache.lock().unwrap() = Some(set);
             }
+            // Reader loop only ends when the watcher's stdout closes (it
+            // exited, deliberately via stop_pid_watcher's start_kill() or
+            // otherwise). Clear the handle so a dead-but-still-"present"
+            // child doesn't permanently block ensure_pid_watcher from ever
+            // respawning it -- but only if no newer watcher has taken over
+            // in the meantime (stop-then-immediate-restart), else this
+            // stale cleanup would wipe out the new one's state instead.
+            let st = app2.state::<AppState>();
+            if *st.watch_pid_generation.lock().unwrap() == my_gen {
+                *st.watch_pid_child.lock().unwrap() = None;
+                *st.watch_pid_cache.lock().unwrap() = None;
+            }
         });
     }
     *state.watch_pid_child.lock().unwrap() = Some(child);
 }
 
 fn stop_pid_watcher(state: &AppState) {
+    *state.watch_pid_generation.lock().unwrap() += 1;
     if let Some(mut child) = state.watch_pid_child.lock().unwrap().take() {
         let _ = child.start_kill();
     }
@@ -1039,6 +1062,12 @@ async fn watch_tick(app: &AppHandle) {
                     let account_id2 = account_id.clone();
                     tauri::async_runtime::spawn(async move {
                         let st = app2.state::<AppState>();
+                        // Manual launches serialize through this same lock (commands.rs
+                        // roblox_launch) -- without it here, a mass-crash could fire
+                        // several concurrent do_launch calls with no stagger between
+                        // them, reopening the reinstall-prompt race the stagger exists
+                        // to prevent.
+                        let _guard = st.launch_lock.lock().await;
                         let _ = do_launch(&app2, &st, &account_id2, &cookie, &target).await;
                     });
                 } else {
@@ -1183,7 +1212,7 @@ pub async fn do_launch(
                             state,
                             place_id,
                             private_code,
-                            cookie,
+                            &cookie,
                             &csrf_token,
                         )
                         .await;
@@ -1205,7 +1234,7 @@ pub async fn do_launch(
                         let resolved = crate::roblox_api::resolve_share_link(
                             state,
                             &code,
-                            cookie,
+                            &cookie,
                             Some(&csrf_token),
                         )
                         .await;
@@ -1271,7 +1300,7 @@ pub async fn do_launch(
     }
 
     *state.last_launch_ts.lock().unwrap() = now_ms();
-    crate::roblox_api::invalidate_ticket(state, cookie);
+    crate::roblox_api::invalidate_ticket(state, &cookie);
 
     let mut accounts = crate::storage::load_accounts(state);
     let (username, user_id) = if let Some(idx) = accounts

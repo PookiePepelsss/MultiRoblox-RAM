@@ -30,6 +30,15 @@ pub struct AppState {
     // tick. None = not running or hasn't reported yet.
     pub watch_pid_child: Mutex<Option<Child>>,
     pub watch_pid_cache: Mutex<Option<std::collections::HashSet<u32>>>,
+    // Serializes ensure_pid_watcher so two racing callers (e.g. concurrent
+    // auto-relaunches) can't both see watch_pid_child == None and each spawn
+    // their own resident watcher, orphaning one.
+    pub watch_pid_spawn_lock: tokio::sync::Mutex<()>,
+    // Bumped on every spawn/stop of the resident watcher. Lets a dying
+    // watcher's cleanup task tell whether it's still the current one before
+    // clearing state, so a stop-then-immediate-restart can't have the old
+    // watcher's delayed EOF wipe out the new watcher's state.
+    pub watch_pid_generation: Mutex<u64>,
 
     // ---- roblox network caches ----
     pub csrf_cache: Mutex<HashMap<String, (String, i64)>>,
@@ -63,6 +72,8 @@ impl AppState {
             auto_relaunch_history: Mutex::new(HashMap::new()),
             watch_pid_child: Mutex::new(None),
             watch_pid_cache: Mutex::new(None),
+            watch_pid_spawn_lock: tokio::sync::Mutex::new(()),
+            watch_pid_generation: Mutex::new(0),
             csrf_cache: Mutex::new(HashMap::new()),
             ticket_cache: Mutex::new(HashMap::new()),
             last_launch_ts: Mutex::new(0),

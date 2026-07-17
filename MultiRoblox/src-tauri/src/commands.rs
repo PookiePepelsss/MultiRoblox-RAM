@@ -195,6 +195,13 @@ pub fn accounts_remove(state: State<AppState>, id: String) -> Result<bool, Strin
         .filter(|a| a.get("id").and_then(|v| v.as_str()) != Some(id.as_str()))
         .collect();
     storage::save_accounts(&state, filtered)?;
+    // A running instance for this id (if any) keeps running untouched -- but
+    // drop it from our own bookkeeping so watch_tick doesn't keep polling
+    // and logging about an account that's no longer in the list.
+    state.account_pids.lock().unwrap().remove(&id);
+    state.watched_accounts.lock().unwrap().remove(&id);
+    state.miss_counts.lock().unwrap().remove(&id);
+    state.auto_relaunch_history.lock().unwrap().remove(&id);
     Ok(true)
 }
 
@@ -337,10 +344,7 @@ fn set_frame_rate_fflag(value: i64) {
     } else {
         Map::new()
     };
-    flags.insert(
-        "DFIntTaskSchedulerTargetFps".into(),
-        Value::Number((if value == 0 { 9999 } else { value }).into()),
-    );
+    flags.insert("DFIntTaskSchedulerTargetFps".into(), Value::Number(value.into()));
     let _ = std::fs::write(
         &p,
         serde_json::to_string_pretty(&flags).unwrap_or_else(|_| "{}".into()),
@@ -353,7 +357,8 @@ pub fn fps_write(cap: f64) -> Value {
     let Ok(xml) = std::fs::read_to_string(&p) else {
         return serde_json::json!({ "ok": false, "error": "GlobalBasicSettings_13.xml not found - launch Roblox once to create it." });
     };
-    let value = cap.round().max(0.0) as i64;
+    let raw = cap.round().max(0.0) as i64;
+    let value = if raw == 0 { 9999 } else { raw };
     let re = regex::Regex::new(r#"(?i)<int\s+name="FramerateCap"\s*>\d+</int>"#).unwrap();
     let new_xml = if re.is_match(&xml) {
         re.replace(&xml, format!(r#"<int name="FramerateCap">{}</int>"#, value))
@@ -375,8 +380,22 @@ pub fn fps_write(cap: f64) -> Value {
 
 // ---- roblox process / launch ----
 #[tauri::command]
-pub async fn roblox_get_version(state: State<'_, AppState>) -> Result<Option<String>, ()> {
-    Ok(crate::roblox_api::get_roblox_version(&state).await)
+pub async fn roblox_get_version(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>, ()> {
+    // One retry -- covers a transient blip (CDN hiccup, brief DNS failure)
+    // instead of leaving the badge stuck on "Not detected" until next launch.
+    match crate::roblox_api::get_roblox_version(&state).await {
+        Ok(v) => Ok(Some(v)),
+        Err(_) => {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            match crate::roblox_api::get_roblox_version(&state).await {
+                Ok(v) => Ok(Some(v)),
+                Err(e) => {
+                    crate::native::emit_log(&app, "warn", "system", &format!("Could not fetch latest Roblox version: {e}"), None);
+                    Ok(None)
+                }
+            }
+        }
+    }
 }
 
 #[tauri::command]
