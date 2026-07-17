@@ -13,7 +13,7 @@ function logEntry(level, category, message, meta) {
   const entry = { ts: Date.now(), level, category, message, meta: meta || {} };
   _logs.push(entry);
   if (_logs.length > MAX_LOGS) _logs.shift(); // keep the most-recent tail
-  if (document.getElementById('page-logs')?.classList.contains('active')) renderLogs();
+  if (document.getElementById('page-logs')?.classList.contains('active')) _appendLogRow(entry);
 }
 
 // An uncaught invoke() rejection (e.g. a Tauri IPC arg-type mismatch) used to
@@ -52,6 +52,19 @@ function renderLogs() {
   // Tail behaviour: only auto-scroll to the newest line if already near the end.
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   el.innerHTML = _logs.map(_logLine).join('');
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+// Appends one row instead of rejoining/replacing the whole log list on every
+// event -- renderLogs() rebuilding up to MAX_LOGS rows per log line got
+// expensive when accounts were actively logging (AFK taps, watch-tick, etc).
+function _appendLogRow(entry) {
+  const el = document.getElementById('logs-list');
+  if (!el) return;
+  if (el.querySelector('.logs-empty')) el.innerHTML = '';
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  el.insertAdjacentHTML('beforeend', _logLine(entry));
+  while (el.children.length > MAX_LOGS) el.removeChild(el.firstChild);
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
@@ -1198,13 +1211,14 @@ async function removeAcc(id) {
       api.savePackages(packages);
       renderPackages();
     }
+    forgetTrackingAccount(id);
     toast('Removed ' + a.username, 'err');
   });
 }
 async function clearAll() {
   if (!accounts.length) return;
   confirmAction('Remove all ' + accounts.length + ' accounts? This cannot be undone.', async () => {
-    for (const a of accounts) await api.removeAccount(a.id);
+    for (const a of accounts) { await api.removeAccount(a.id); forgetTrackingAccount(a.id); }
     accounts = []; render(); document.getElementById('stat-count').textContent = '0';
     packages.forEach(p => { p.accountIds = []; });
     api.savePackages(packages);
@@ -2270,6 +2284,17 @@ function getTrackingRegions(id) {
 function formatTrackingInterval(sec) {
   if (sec < 60) return sec + 's';
   return Math.round(sec / 60) + ' min';
+}
+// Removing an account left its outlined spots/timed-capture flag orphaned in
+// settings.json forever (dead weight that only grows across add/remove
+// cycles) -- strip them alongside the account itself.
+function forgetTrackingAccount(id) {
+  let changed = false;
+  const regions = Object.assign({}, settings.trackingRegions || {});
+  if (id in regions) { delete regions[id]; settings.trackingRegions = regions; changed = true; }
+  const timedIds = getTrackingTimedIds();
+  if (timedIds.has(id)) { timedIds.delete(id); settings.trackingTimedIds = [...timedIds]; changed = true; }
+  if (changed) api.saveSettings({ trackingRegions: settings.trackingRegions, trackingTimedIds: settings.trackingTimedIds });
 }
 
 function renderTrackingPage() {
