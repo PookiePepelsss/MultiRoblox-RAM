@@ -9,7 +9,6 @@ mod settings;
 mod state;
 mod storage;
 mod tracking;
-mod update;
 
 use state::AppState;
 use tauri::Manager;
@@ -101,7 +100,7 @@ pub fn run() {
             commands::roblox_open_account_browser,
             commands::login_cancel,
             commands::open_external,
-            commands::check_for_update,
+            commands::app_version,
             commands::tracking_capture_preview,
             commands::tracking_capture_and_send,
         ])

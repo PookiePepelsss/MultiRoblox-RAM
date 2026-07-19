@@ -195,7 +195,7 @@ async function continueInit() {
   applySettings();
   refreshMultiStatus();
   detectRobloxVersion();
-  checkForUpdate();
+  showAppVersion();
   startStatusPoll();
   if (settings.autoTrim) startAutoTrimLoop();
   startTrackingLoop();
@@ -318,19 +318,11 @@ async function detectRobloxVersion() {
   }
 }
 
-let _updateUrl = '';
-async function checkForUpdate() {
-  let res;
-  try { res = await api.checkForUpdate(); } catch { return; }
-  if (!res || !res.ok) return;
+async function showAppVersion() {
+  let v;
+  try { v = await api.getAppVersion(); } catch { return; }
   const verEl = document.getElementById('stat-app-ver');
-  if (verEl) verEl.textContent = 'Version ' + res.current;
-  if (!res.updateAvailable) return;
-  _updateUrl = res.url;
-  const badge = document.getElementById('update-badge');
-  if (badge) badge.style.display = 'inline-flex';
-  toast('Update available: v' + res.latest, 'ok');
-  logEntry('info', 'system', `Update available: v${res.latest} (running v${res.current})`, { current: res.current, latest: res.latest });
+  if (verEl && v) verEl.textContent = 'Version ' + v;
 }
 
 function applySettings() {
@@ -626,6 +618,18 @@ async function ctxOpenBrowser(id) {
 function refreshPkgAvatarStatus() {
   document.querySelectorAll('.pkg-avatar[data-acc-id]').forEach(av => {
     av.classList.toggle('online', _launchedIds.has(av.dataset.accId));
+  });
+  // Keeps each group's Kill button in sync with reality even when instances
+  // start/stop outside launchPackage/killPackage (crash, single-account
+  // launch, the watch-loop's own close detection) -- this fires from all of
+  // those paths already (onRobloxClosed, onAllRobloxClosed, the watched-ids
+  // reconcile poll), so piggybacking here covers every case for free instead
+  // of only updating on a full renderPackages() re-render.
+  packages.forEach(p => {
+    const btn = document.querySelector('.pkg-card[data-id="' + p.id + '"] .pkg-kill-btn');
+    if (!btn || btn.dataset.busy === '1') return;
+    const anyRunning = (p.accountIds || []).some(id => _launchedIds.has(id));
+    btn.disabled = !anyRunning;
   });
 }
 
@@ -1309,6 +1313,9 @@ function renderPackages() {
         <button class="btn btn-launch pkg-launch-btn" onclick="launchPackage('${p.id}')" ${members.length ? '' : 'disabled'}>
           Launch All
         </button>
+        <button class="btn btn-del pkg-kill-btn" onclick="killPackage('${p.id}')" title="Kill running instances in this group" ${members.some(m => _launchedIds.has(m.id)) ? '' : 'disabled'}>
+          <span class="material-icons-round">power_settings_new</span>
+        </button>
       </div>
       <div class="pkg-progress" id="pkg-progress-${p.id}"></div>
     </div>`;
@@ -1407,6 +1414,16 @@ async function launchPackage(id) {
 
   const card = document.querySelector('.pkg-card[data-id="' + id + '"]');
   const btn = card ? card.querySelector('.pkg-launch-btn') : null;
+  const killBtn = card ? card.querySelector('.pkg-kill-btn') : null;
+  // launchPackage and killPackage both write into the same #pkg-progress-*
+  // chip set for this group -- running both at once on the same group would
+  // have them stomp each other's chips (a launch result landing on a chip
+  // the kill call just created, or vice versa). Block one while the other
+  // is in flight instead of just guarding each button individually.
+  if (btn && btn.dataset.busy === '1') return;
+  if (killBtn && killBtn.dataset.busy === '1') { toast('A kill is already in progress for this group', 'err'); return; }
+  if (btn) btn.dataset.busy = '1';
+  if (killBtn) killBtn.disabled = true;
   const progress = document.getElementById('pkg-progress-' + id);
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="spin"></div>Launching'; }
   if (progress) {
@@ -1436,8 +1453,52 @@ async function launchPackage(id) {
     }
   }));
 
-  if (btn) { btn.disabled = false; btn.innerHTML = 'Launch All'; }
+  if (btn) { btn.disabled = false; btn.innerHTML = 'Launch All'; delete btn.dataset.busy; }
+  if (killBtn && killBtn.dataset.busy !== '1') killBtn.disabled = !members.some(m => _launchedIds.has(m.id));
   toast('Launched ' + okCount + '/' + members.length + ' accounts in "' + p.name + '"', okCount === members.length ? 'ok' : 'err');
+}
+
+async function killPackage(id) {
+  const p = packages.find(x => x.id === id); if (!p) return;
+  const members = (p.accountIds || []).map(aid => accounts.find(a => a.id === aid)).filter(Boolean);
+  const running = members.filter(m => _launchedIds.has(m.id));
+  if (!running.length) { toast('No running instances in this group', 'err'); return; }
+
+  const card = document.querySelector('.pkg-card[data-id="' + id + '"]');
+  const btn = card ? card.querySelector('.pkg-kill-btn') : null;
+  const launchBtn = card ? card.querySelector('.pkg-launch-btn') : null;
+  if (btn && btn.dataset.busy === '1') return;
+  if (launchBtn && launchBtn.dataset.busy === '1') { toast('A launch is already in progress for this group', 'err'); return; }
+  if (btn) btn.dataset.busy = '1';
+  if (launchBtn) launchBtn.disabled = true;
+  const progress = document.getElementById('pkg-progress-' + id);
+  if (btn) btn.disabled = true;
+  if (progress) {
+    progress.innerHTML = running.map(m => `
+      <span class="pkg-chip load" id="pkg-chip-${id}-${m.id}">
+        <div class="spin" style="width:9px;height:9px;border-width:2px"></div>${esc(m.nickname || m.username || '')}
+      </span>`).join('');
+  }
+
+  let okCount = 0;
+  await Promise.all(running.map(async (m) => {
+    logEntry('warn', 'kill', `Killing Roblox instance for ${m.username || m.id} (package)...`, { accountId: m.id, username: m.username || null, userId: m.userId || null });
+    const res = await api.killOneRoblox(m.id);
+    const chip = document.getElementById('pkg-chip-' + id + '-' + m.id);
+    if (res && res.ok) {
+      okCount++;
+      logEntry('ok', 'kill', `Killed instance for ${m.username || m.id} (package)`, { accountId: m.id });
+      if (chip) { chip.className = 'pkg-chip ok'; chip.innerHTML = '<span class="material-icons-round">check_circle</span>' + esc(m.nickname || m.username || ''); }
+    } else if (chip) {
+      chip.className = 'pkg-chip err';
+      chip.title = (res && res.error) || '';
+      chip.innerHTML = '<span class="material-icons-round">error_outline</span>' + esc(m.nickname || m.username || '');
+    }
+  }));
+
+  if (btn) { btn.disabled = !members.some(m => _launchedIds.has(m.id)); delete btn.dataset.busy; }
+  if (launchBtn && launchBtn.dataset.busy !== '1') launchBtn.disabled = false;
+  toast('Killed ' + okCount + '/' + running.length + ' instances in "' + p.name + '"', okCount === running.length ? 'ok' : 'err');
 }
 
 function toggleKeyVisibility(inputId = 'custom-key', iconId = 'key-vis-icon') {

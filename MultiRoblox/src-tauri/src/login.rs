@@ -214,11 +214,20 @@ pub async fn open_login(app: &AppHandle, state: &AppState) -> LoginResult {
         }
     };
 
+    // incognito(true) gives this window its own throwaway WebView2 session --
+    // without it, WebView2's default persistent cookie store is shared
+    // across every login window (and survives after the window closes), so
+    // logging into one account and then opening "Add Account" again just
+    // silently reuses that still-authenticated session instead of showing a
+    // fresh login page. This is the same class of bug the old chromiumoxide
+    // flow avoided with a fresh --user-data-dir per attempt; incognito mode
+    // is the WebView2 equivalent.
     let window = match tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(login_url))
         .title("Log in to Roblox")
         .inner_size(900.0, 720.0)
         .resizable(true)
         .center()
+        .incognito(true)
         .build()
     {
         Ok(w) => w,

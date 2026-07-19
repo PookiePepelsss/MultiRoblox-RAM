@@ -602,6 +602,6 @@ pub fn open_external(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn check_for_update(state: State<'_, AppState>) -> Result<Value, ()> {
-    Ok(crate::update::check_for_update(&state).await)
+pub fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
 }

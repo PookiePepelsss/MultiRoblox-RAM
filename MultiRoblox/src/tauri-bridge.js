@@ -37,7 +37,7 @@
 
     launchRoblox: (id, cookie, target) => invoke('roblox_launch', { id, cookie, target }),
     openExternal: (url) => invoke('open_external', { url }),
-    checkForUpdate: () => invoke('check_for_update'),
+    getAppVersion: () => invoke('app_version'),
 
     trackingCapturePreview: (id) => invoke('tracking_capture_preview', { id }),
     trackingCaptureAndSend: (id, username, webhookUrl, regions) => invoke('tracking_capture_and_send', { id, username, webhookUrl, regions }),
