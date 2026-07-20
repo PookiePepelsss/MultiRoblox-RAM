@@ -18,10 +18,8 @@ pub fn load_accounts_raw() -> Vec<Value> {
     read_json_array(&accounts_path())
 }
 
-// Decrypt failure is itself proof a cookie is unusable -- flag it immediately
-// (_cookieInvalid) instead of waiting on the renderer's async network
-// validation to discover the same thing (matches the fix already shipped in
-// the Electron build's main.js this session).
+// Decrypt failure means the cookie is unusable -- flag it immediately
+// instead of waiting on the renderer's async validation to find out.
 pub fn decrypt_account(state: &AppState, mut a: Value) -> Value {
     if let Some(cookie) = a.get("cookie").and_then(|v| v.as_str()) {
         if !cookie.is_empty() {
@@ -60,13 +58,12 @@ pub fn save_accounts(state: &AppState, accounts: Vec<Value>) -> Result<(), Strin
     write_json_array(&accounts_path(), &out).map_err(|e| e.to_string())
 }
 
-/// One-time, best-effort upgrade: re-encrypt any legacy device-key (gcm:) or
-/// unauthenticated (cbc:) cookies to DPAPI storage (safe2:). Only runs when no
-/// passphrase is set. Aborts untouched if any non-empty cookie fails to
-/// decrypt, so a bad read can never wipe data.
+// One-time upgrade of legacy (gcm:/cbc:) cookies to DPAPI storage. Skipped
+// entirely in passphrase mode, and aborts without writing if any cookie
+// fails to decrypt.
 pub fn migrate_account_encryption_to_keychain(state: &AppState) {
     if crate::encryption::passphrase_mode() {
-        return; // passphrase user: never touch (avoids wrong-key writes)
+        return;
     }
     let raw = load_accounts_raw();
     let needs = raw.iter().any(|a| {

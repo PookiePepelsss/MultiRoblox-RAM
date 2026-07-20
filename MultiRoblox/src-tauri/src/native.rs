@@ -1,7 +1,3 @@
-// Port of main.js's native-helper orchestration (mutex holder, anti-AFK,
-// volume, kill/count, launch, watch loop). Behaviour, timing constants, and
-// comments explaining *why* are carried over unchanged from the Electron
-// source -- this is a port, not a redesign.
 use crate::paths::app_data_dir;
 use crate::state::AppState;
 use serde_json::Value;
@@ -22,14 +18,8 @@ pub(crate) fn hide_window(cmd: &mut Command) {
 }
 
 // ---- native helper (RobloxNative.exe) resolution ----
-// Prefer a prebuilt exe shipped in resources (built by build.bat). If missing,
-// compile the bundled .cs source once via the .NET Framework csc.exe (present
-// on every Windows machine) and cache the result in the app data dir.
-//
-// Tauri's resource_dir() returns a `\\?\`-prefixed extended-length path on
-// Windows. csc.exe's older argument parser chokes on that prefix, so it must
-// be stripped before being handed to csc -- the exact bug hit (and fixed) the
-// first time this migration was built.
+// Tauri's resource_dir() returns a \\?\-prefixed path on Windows that
+// csc.exe's argument parser chokes on, so it has to be stripped first.
 fn strip_verbatim_prefix(p: &Path) -> PathBuf {
     let s = p.to_string_lossy();
     if let Some(rest) = s.strip_prefix(r"\\?\") {
@@ -54,13 +44,8 @@ fn bundled_native_exe_path(app: &AppHandle) -> Option<PathBuf> {
     })
 }
 
-// Baked into the binary at compile time so the built exe works standalone --
-// copying just mr_tauri.exe/MultiRoblox.exe elsewhere (without its sibling
-// resources/ folder) used to leave ensure_native_helper() with nothing to
-// resolve, silently breaking the mutex holder (and everything else that
-// shells out to the native helper). Extracted to the app data dir once (or
-// re-extracted if size drifts, e.g. after an app update) instead of relying
-// on Tauri's resource_dir(), which is only populated next to the exe.
+// Baked in at compile time so the exe works standalone without its sibling
+// resources/ folder; extracted to the app data dir on first use.
 const EMBEDDED_NATIVE_EXE: &[u8] = include_bytes!("../resources/RobloxNative.exe");
 
 fn ensure_embedded_native_exe() -> Option<PathBuf> {
@@ -159,8 +144,7 @@ async fn resolve_native_helper(app: &AppHandle) -> Option<PathBuf> {
     }
 }
 
-// tokio::process::Child has no built-in timeout on output(); small helper to
-// mirror the 30s safety timeout in the Electron version.
+// tokio's Child has no built-in output() timeout.
 trait OutputTimeout {
     async fn output_timeout(self, dur: Duration) -> Option<std::io::Result<std::process::Output>>;
 }
@@ -174,10 +158,8 @@ impl OutputTimeout for Command {
 }
 
 // ---- mutex holder ----
-// Windows only releases a named mutex when the owning process fully exits.
-// stop_mutex_holder awaits the real child-exit event (not just kill()) so a
-// respawned holder never races the OS for the handle -- see the Electron
-// source's big comment on this exact hazard.
+// Windows only releases a named mutex when the owning process fully exits,
+// so stop_mutex_holder waits for the real exit event, not just kill().
 pub async fn start_mutex_holder(app: &AppHandle, state: &AppState) {
     {
         let guard = state.mutex_child.lock().unwrap();
@@ -232,10 +214,7 @@ pub async fn start_mutex_holder(app: &AppHandle, state: &AppState) {
     *state.mutex_child.lock().unwrap() = Some(child);
 }
 
-// Fire-and-forget variant for callers that don't need to know when the OS has
-// actually released the mutex (settings toggle, app-exit). start_kill() is a
-// synchronous syscall (TerminateProcess), so the signal goes out immediately
-// even though this fn isn't async -- only the wait-for-exit is backgrounded.
+// Fire-and-forget: doesn't wait for the OS to actually release the mutex.
 pub fn stop_mutex_holder(state: &AppState) {
     let child = state.mutex_child.lock().unwrap().take();
     if let Some(mut child) = child {
@@ -246,17 +225,9 @@ pub fn stop_mutex_holder(state: &AppState) {
     }
 }
 
-// Awaitable variant: blocks until the holder process has actually torn down
-// (or 2s elapses), not just until kill() was requested. Windows only releases
-// a named mutex when the owning process fully exits, so anything that
-// respawns a new holder right after calling kill() is racing the OS: if the
-// new holder's Mutex(true, "ROBLOX_singletonMutex", out created) runs before
-// the old process's handle is actually gone, `created` comes back false and
-// RobloxNative's fallback WaitOne(0) can return false (mutex still held
-// elsewhere) WITHOUT throwing -- the code doesn't check that return value, so
-// it prints MUTEX_HELD and this app believes the mutex is held even though it
-// isn't. That's the exact "unheld mutex" scenario that corrupts Roblox's
-// install pipeline. Awaiting the real exit event here closes that window.
+// Waits for the old holder to actually exit before a caller respawns a new
+// one -- otherwise the new holder can win a false "mutex created" race
+// while the OS handle is still held, corrupting Roblox's install pipeline.
 async fn stop_mutex_holder_and_wait(state: &AppState) {
     let child = state.mutex_child.lock().unwrap().take();
     if let Some(mut child) = child {
@@ -266,7 +237,7 @@ async fn stop_mutex_holder_and_wait(state: &AppState) {
 }
 
 pub async fn restart_mutex_holder(app: &AppHandle, state: &AppState) {
-    stop_mutex_holder_and_wait(state).await; // wait for the OS to actually release the old mutex handle first
+    stop_mutex_holder_and_wait(state).await;
     start_mutex_holder(app, state).await;
 }
 
@@ -369,10 +340,7 @@ pub fn stop_antiafk(state: &AppState) {
     }
 }
 
-// renderer.js's onLogEntry handler reads data.meta as a nested object
-// (logEntry(data.level, data.category, data.message, data.meta)) and stamps
-// its own Date.now() ts, ignoring whatever ts we send -- so `extra` must
-// stay nested under "meta", not flattened into the top level.
+// `extra` must stay nested under "meta" -- renderer.js's log handler expects it there.
 pub fn emit_log(app: &AppHandle, level: &str, category: &str, message: &str, extra: Option<Value>) {
     let payload = serde_json::json!({
         "level": level,
@@ -384,10 +352,9 @@ pub fn emit_log(app: &AppHandle, level: &str, category: &str, message: &str, ext
 }
 
 // ---- Roblox process helpers ----
-// None = tasklist itself failed to run (no signal either way). Callers must
-// NOT treat that the same as "empty output" (= confirmed zero processes),
-// otherwise a transient spawn failure falsely reads as "nothing running" and
-// watch_tick() counts it as a miss against accounts that are still alive.
+// None means tasklist failed to run -- callers must not treat that as
+// "confirmed zero processes" or a transient spawn failure looks like a
+// closed account.
 async fn tasklist(filter_image: &str) -> Option<String> {
     if !cfg!(windows) {
         return Some(String::new());
@@ -407,13 +374,9 @@ async fn tasklist(filter_image: &str) -> Option<String> {
     }
 }
 
-// Preferred over tasklist(): asks the native helper for RobloxPlayerBeta
-// PIDs via .NET's own Process.GetProcessesByName (same enumeration AntiAfk
-// already relies on) instead of shelling out to tasklist.exe/cmd.exe and
-// regex-parsing CSV output. None = couldn't get a reading (helper
-// unavailable, spawn/timeout failure) -- same "don't treat as zero" contract
-// as tasklist() above. Falls back to tasklist() if the helper can't resolve
-// (e.g. very first launch before ensure_native_helper has ever run).
+// Preferred over tasklist() -- asks the native helper directly instead of
+// shelling out and regex-parsing CSV. Falls back to tasklist() if the
+// helper isn't resolved yet.
 async fn native_pids(app: &AppHandle, state: &AppState) -> Option<std::collections::HashSet<u32>> {
     if !cfg!(windows) {
         return Some(std::collections::HashSet::new());
@@ -482,12 +445,8 @@ pub async fn count_roblox_processes(app: &AppHandle, state: &AppState) -> u32 {
         .unwrap_or(0)
 }
 
-// EmptyWorkingSet only forces the process to give back currently-idle
-// physical pages back to the OS -- it doesn't touch the process itself
-// (no thread/handle to the game logic, nothing killed or suspended), so
-// it can't crash Roblox and has zero effect on the tasklist-based
-// alive/closed detection above. Pages the process actually needs get
-// paged back in on next touch, same as normal working-set trimming.
+// Just hands idle physical pages back to the OS -- doesn't touch the
+// process itself, can't crash it.
 #[cfg(windows)]
 fn trim_process_memory(pid: u32) -> bool {
     use windows::Win32::Foundation::CloseHandle;
@@ -515,9 +474,8 @@ pub async fn trim_roblox_memory(app: &AppHandle, state: &AppState) -> Value {
         return serde_json::json!({ "ok": false, "trimmed": 0, "total": 0, "error": "could not enumerate Roblox processes" });
     };
 
-    // Skip PIDs still inside their launch grace window (ready_at, same window
-    // watch_tick uses) -- trimming a client while it's still loading assets
-    // can evict pages it just allocated, causing a stutter mid-load.
+    // Skip PIDs still inside their launch grace window -- trimming while a
+    // client is still loading assets can cause a stutter.
     let now = now_ms();
     let launching_pids: std::collections::HashSet<u32> = {
         let watched = state.watched_accounts.lock().unwrap();
@@ -711,36 +669,26 @@ async fn close_singleton_and_hold_mutex(app: &AppHandle, state: &AppState) {
     close_singleton_handles_only(app, state).await;
 }
 
-// Third-party bootstrappers (Bloxstrap and its forks Froststrap, Voidstrap,
-// Fishstrap) install the real RobloxPlayerBeta.exe under their own
-// %LOCALAPPDATA%\<Name>\Versions\version-*\ folder instead of the vanilla
-// %LOCALAPPDATA%\Roblox\Versions\ one -- same layout, different root. A
-// machine with only one of these installed (no vanilla Roblox launcher ever
-// run) had nothing here at all, so direct-launch and the FFlags tab (which
-// also derives its file path from this, via get_fflag_path) both silently
-// no-op'd.
-//
-// Only ONE of these is ever actually in use -- comparing mtimes across all
-// of them isn't reliable (a bootstrapper's mod-copy step touches its version
-// folder on every launch regardless of whether Roblox itself updated, so a
-// long-unused install can still look "newer" than the one you actually
-// play through). Priority order: vanilla Roblox first since it's the most
-// common case, then check each fork; stop at the first one that has a real
-// install and pick the newest version- folder within *that* one only.
+// Third-party bootstrappers (Bloxstrap, Froststrap, Voidstrap, Fishstrap)
+// install Roblox under their own %LOCALAPPDATA%\<Name>\Versions\ folder
+// instead of the vanilla one. A hardcoded vanilla-first priority picked a
+// stale, long-unused vanilla install over the bootstrapper someone actually
+// plays through, so this instead compares RobloxPlayerBeta.exe's own
+// mtime across every root and picks whichever is genuinely newest -- a
+// bootstrapper's mod overlay only overwrites content/asset files on launch,
+// never the exe itself, so the exe's mtime reliably tracks the last real
+// Roblox self-update (and therefore actual use) for that install.
 const ROBLOX_INSTALL_ROOTS: [&str; 5] = ["Roblox", "Bloxstrap", "Froststrap", "Voidstrap", "Fishstrap"];
 
-// Returns (install root name, version dir, exe path) -- the root name is
-// needed by get_fflag_path below since vanilla Roblox and the Bloxstrap-
-// family forks keep their FFlags file in differently-shaped locations.
 fn get_latest_roblox_install() -> Option<(&'static str, PathBuf, PathBuf)> {
     let home = dirs_home()?;
     let local_appdata = home.join("AppData").join("Local");
+    let mut best: Option<(&'static str, PathBuf, PathBuf, std::time::SystemTime)> = None;
     for root in ROBLOX_INSTALL_ROOTS {
         let versions_base = local_appdata.join(root).join("Versions");
         let Ok(entries) = std::fs::read_dir(&versions_base) else {
             continue;
         };
-        let mut candidates: Vec<(PathBuf, PathBuf, std::time::SystemTime)> = Vec::new();
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
@@ -749,22 +697,14 @@ fn get_latest_roblox_install() -> Option<(&'static str, PathBuf, PathBuf)> {
             }
             let dir = versions_base.join(&*name);
             let exe = dir.join("RobloxPlayerBeta.exe");
-            if let Ok(meta) = std::fs::metadata(&exe) {
-                if let Ok(mtime) = meta.modified() {
-                    candidates.push((dir, exe, mtime));
-                }
+            let Ok(meta) = std::fs::metadata(&exe) else { continue };
+            let Ok(mtime) = meta.modified() else { continue };
+            if best.as_ref().map(|(_, _, _, t)| mtime > *t).unwrap_or(true) {
+                best = Some((root, dir, exe, mtime));
             }
         }
-        if candidates.is_empty() {
-            continue;
-        }
-        candidates.sort_by(|a, b| b.2.cmp(&a.2));
-        return candidates
-            .into_iter()
-            .next()
-            .map(|(dir, exe, _)| (root, dir, exe));
     }
-    None
+    best.map(|(root, dir, exe, _)| (root, dir, exe))
 }
 
 fn get_latest_roblox_version_dir() -> Option<(PathBuf, PathBuf)> {
@@ -775,15 +715,9 @@ fn dirs_home() -> Option<PathBuf> {
     std::env::var("USERPROFILE").ok().map(PathBuf::from)
 }
 
-// Vanilla Roblox keeps FFlags per-version-folder:
-//   Roblox\Versions\version-xxx\ClientSettings\ClientAppSettings.json
-// Bloxstrap and its forks (Froststrap, Voidstrap, Fishstrap) instead keep a
-// single fixed copy that their launcher overlays into the version folder at
-// launch time -- writing to the per-version path for those does nothing,
-// since the bootstrapper doesn't read from there and overwrites it on next
-// launch anyway. Confirmed against a real Fishstrap install: its file lives
-// at <Root>\Modifications\ClientSettings\ClientAppSettings.json, not inside
-// Versions\ at all.
+// Vanilla Roblox keeps FFlags per-version-folder; Bloxstrap-family forks
+// instead keep one fixed copy under Modifications\ that gets overlaid in at
+// launch time, so the per-version path doesn't work for those.
 pub fn get_fflag_path() -> Option<PathBuf> {
     let (root, dir, _) = get_latest_roblox_install()?;
     if root == "Roblox" {
@@ -800,11 +734,8 @@ pub fn get_fflag_path() -> Option<PathBuf> {
     }
 }
 
-// A real RobloxPlayerBeta.exe is tens of MB; anything implausibly small is
-// still being written (e.g. a self-update triggered by another account's
-// launch a few seconds earlier is still extracting into this version
-// folder). Spawning that half-written exe is what makes Roblox's own
-// launcher think the install is broken and offer to repair/reinstall it.
+// A real exe is tens of MB; anything smaller is still mid-self-update and
+// spawning it triggers Roblox's own repair/reinstall prompt.
 const MIN_PLAUSIBLE_EXE_BYTES: u64 = 5_000_000;
 
 async fn spawn_roblox_direct(roblox_uri: &str) -> Option<u32> {
@@ -821,19 +752,14 @@ async fn spawn_roblox_direct(roblox_uri: &str) -> Option<u32> {
     hide_window(&mut cmd);
     let child = cmd.spawn().ok()?;
     let pid = child.id();
-    std::mem::forget(child); // detached: outlives this process, matches child.unref()
+    std::mem::forget(child); // detached: outlives this process
     pid
 }
 
 // ---- watch loop ----
-// One shared poll covering every watched account instead of one spawn per
-// account per tick (see main.js's _watchTick comment for the reasoning).
-// PIDs now come from the native helper's in-process Process.GetProcessesByName
-// (see native_pids) instead of shelling out to tasklist.exe/cmd.exe, so a
-// tick is fast and reliable enough to poll much more often than before --
-// MISS_THRESHOLD=3 * POLL_INTERVAL=2s gives ~6s worst-case detection latency
-// (was ~30s) while still tolerating a couple of transient misses under real
-// multi-instance CPU/IO contention.
+// One shared poll covers every watched account instead of a spawn per
+// account per tick. MISS_THRESHOLD * POLL_INTERVAL gives ~6s worst-case
+// close-detection latency while tolerating transient misses under load.
 const MISS_THRESHOLD: u32 = 3;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const LAUNCH_DELAY_MS: i64 = 15_000;
@@ -868,17 +794,11 @@ fn stop_watch_poll_if_idle(state: &AppState) {
     }
 }
 
-// Resident "watch" helper (see RobloxNative.cs) -- started once per watch
-// session instead of watch_tick spawning a fresh process every poll tick.
-// That per-tick spawn (process creation + .NET Framework cold start + AV
-// re-scan of the exe on every launch) was the main source of the reported
-// idle CPU usage with instances running; this replaces it with one
-// long-lived process, same pattern as the mutex holder and anti-AFK helper.
+// Resident "watch" helper process (see RobloxNative.cs), started once per
+// watch session instead of spawning fresh on every poll tick.
 async fn ensure_pid_watcher(app: &AppHandle, state: &AppState) {
-    // Holds this for the whole spawn attempt so two racing callers can't both
-    // pass the is_some() check while the first is still mid-spawn (there's an
-    // await below, between the check and the write, that a plain std Mutex
-    // can't close).
+    // Held for the whole spawn attempt so two racing callers can't both
+    // pass the is_some() check while the first is still mid-spawn.
     let _guard = state.watch_pid_spawn_lock.lock().await;
     if state.watch_pid_child.lock().unwrap().is_some() {
         return;
@@ -912,13 +832,9 @@ async fn ensure_pid_watcher(app: &AppHandle, state: &AppState) {
                 let st = app2.state::<AppState>();
                 *st.watch_pid_cache.lock().unwrap() = Some(set);
             }
-            // Reader loop only ends when the watcher's stdout closes (it
-            // exited, deliberately via stop_pid_watcher's start_kill() or
-            // otherwise). Clear the handle so a dead-but-still-"present"
-            // child doesn't permanently block ensure_pid_watcher from ever
-            // respawning it -- but only if no newer watcher has taken over
-            // in the meantime (stop-then-immediate-restart), else this
-            // stale cleanup would wipe out the new one's state instead.
+            // Clear the handle once the watcher's stdout closes, so a dead
+            // child can't block a respawn -- unless a newer watcher has
+            // already taken over, in which case this is stale.
             let st = app2.state::<AppState>();
             if *st.watch_pid_generation.lock().unwrap() == my_gen {
                 *st.watch_pid_child.lock().unwrap() = None;
@@ -937,9 +853,7 @@ fn stop_pid_watcher(state: &AppState) {
     *state.watch_pid_cache.lock().unwrap() = None;
 }
 
-// Ground truth for "who's alive right now": the resident watcher's last
-// report if it's running, else a one-off spawn (covers the brief window
-// before the watcher's first report, and callers with nothing watched).
+// The watcher's last report if running, else a one-off spawn.
 async fn cached_or_spawn_pids(app: &AppHandle, state: &AppState) -> Option<std::collections::HashSet<u32>> {
     if let Some(pids) = state.watch_pid_cache.lock().unwrap().clone() {
         return Some(pids);
@@ -988,11 +902,9 @@ async fn watch_tick(app: &AppHandle) {
         stop_watch_poll_if_idle(&state);
         return;
     }
-    // setInterval-equivalent re-entrancy guard: a slow tasklist spawn under
-    // heavy multi-instance load can outlast POLL_INTERVAL. Two concurrent
-    // ticks would race on the same account_pids/miss_counts maps and can
-    // false-positive a still-running account as closed. Skipping a tick is
-    // fine -- the next one 5s later covers the same ground.
+    // Re-entrancy guard: a slow tick under heavy load can outlast
+    // POLL_INTERVAL, and two concurrent ticks racing on the same maps can
+    // false-positive a running account as closed. Skip instead.
     if WATCH_TICK_IN_FLIGHT.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -1108,11 +1020,9 @@ async fn watch_tick(app: &AppHandle) {
                     let account_id2 = account_id.clone();
                     tauri::async_runtime::spawn(async move {
                         let st = app2.state::<AppState>();
-                        // Manual launches serialize through this same lock (commands.rs
-                        // roblox_launch) -- without it here, a mass-crash could fire
-                        // several concurrent do_launch calls with no stagger between
-                        // them, reopening the reinstall-prompt race the stagger exists
-                        // to prevent.
+                        // Same lock manual launches use -- without it a
+                        // mass-crash could fire several concurrent launches
+                        // with no stagger between them.
                         let _guard = st.launch_lock.lock().await;
                         let _ = do_launch(&app2, &st, &account_id2, &cookie, &target).await;
                     });
@@ -1193,11 +1103,8 @@ pub async fn do_launch(
     let t = target.trim();
     let mut launcher_url = String::new();
 
-    // Shorthand for joining one specific running server instance: "placeId:jobId"
-    // or "placeId,jobId" (jobId is the server's GUID, e.g. from game.JobId).
-    // Uses the same RequestGameJob endpoint as the private-server/share-link
-    // paths below, just without a linkCode -- that's what Roblox's own client
-    // uses to join a specific public server instance by job id.
+    // "placeId:jobId" or "placeId,jobId" shorthand for joining one specific
+    // running server instance.
     let job_shorthand_re = regex::Regex::new(r"^(\d+)[,:]\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$").unwrap();
 
     if !t.is_empty() {
@@ -1231,9 +1138,6 @@ pub async fn do_launch(
                     let private_code = query.get("privateServerLinkCode").cloned();
                     let share_code = query.get("code").cloned();
                     let share_type = query.get("type").cloned();
-                    // jobId/gameInstanceId: join one specific running server instance,
-                    // e.g. from a roblox://experiences/start?placeId=X&gameInstanceId=Y
-                    // deep link, or a URL with a plain ?jobId= query param.
                     let job_id = query
                         .get("jobId")
                         .or_else(|| query.get("gameInstanceId"))
@@ -1313,15 +1217,10 @@ pub async fn do_launch(
         format!("roblox-player:1+launchmode:app+gameinfo:{}+launchtime:{}+browsertrackerid:{}+robloxLocale:en_us+gameLocale:en_us", ticket, launch_time, browser_id)
     };
 
-    // Falling straight through to the OS URI handler on any spawn failure
-    // is what surfaces as "attempts to reinstall Roblox" -- that handler is
-    // RobloxPlayerLauncher.exe, whose job includes repairing/reinstalling
-    // when it doesn't like what it finds. The most common transient cause:
-    // a launch staggered right after another one caught Roblox mid
-    // self-update, so the "latest" version folder's exe is still being
-    // written (present but truncated) at the moment we go looking. Retry a
-    // few times before giving up to that fallback instead of escalating on
-    // the first miss.
+    // Falling through to the OS URI handler on spawn failure is what
+    // triggers Roblox's own "reinstall?" prompt -- usually just a launch
+    // catching Roblox mid self-update with a truncated exe, so retry a few
+    // times before giving up to that fallback.
     let mut spawned_pid: Option<u32> = None;
     for attempt in 0..3 {
         if attempt > 0 {

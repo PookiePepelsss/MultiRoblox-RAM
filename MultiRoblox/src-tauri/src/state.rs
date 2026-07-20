@@ -8,45 +8,28 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub http_no_redirect: reqwest::Client,
 
-    // ---- encryption session (mirrors main.js's _sessionPass/_cachedKey) ----
     pub session_pass: Mutex<Option<String>>,
     pub cached_key: Mutex<Option<[u8; 32]>>,
     pub cached_legacy_key: Mutex<Option<[u8; 32]>>,
 
-    // ---- process control (native helper / launch / watch loop) ----
     pub mutex_child: Mutex<Option<Child>>,
     pub antiafk_child: Mutex<Option<Child>>,
-    pub native_helper_path: Mutex<Option<Option<std::path::PathBuf>>>, // Some(None) = resolved-to-unavailable
+    pub native_helper_path: Mutex<Option<Option<std::path::PathBuf>>>, // Some(None) = unavailable
     pub account_pids: Mutex<HashMap<String, u32>>,
-    pub watched_accounts: Mutex<HashMap<String, i64>>, // accountId -> readyAt epoch ms
+    pub watched_accounts: Mutex<HashMap<String, i64>>,
     pub miss_counts: Mutex<HashMap<String, u32>>,
     pub watch_handle: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
-    // accountId -> recent auto-relaunch-on-crash timestamps (ms), oldest
-    // first. Bounds how often watch_tick's crash handler will relaunch a
-    // given account so a bad cookie/account can't spin-loop launches.
     pub auto_relaunch_history: Mutex<HashMap<String, Vec<i64>>>,
-    // Resident "watch" mode helper process (see native.rs) -- reports PIDs on
-    // its own interval so watch_tick doesn't spawn a fresh process every poll
-    // tick. None = not running or hasn't reported yet.
     pub watch_pid_child: Mutex<Option<Child>>,
     pub watch_pid_cache: Mutex<Option<std::collections::HashSet<u32>>>,
-    // Serializes ensure_pid_watcher so two racing callers (e.g. concurrent
-    // auto-relaunches) can't both see watch_pid_child == None and each spawn
-    // their own resident watcher, orphaning one.
     pub watch_pid_spawn_lock: tokio::sync::Mutex<()>,
-    // Bumped on every spawn/stop of the resident watcher. Lets a dying
-    // watcher's cleanup task tell whether it's still the current one before
-    // clearing state, so a stop-then-immediate-restart can't have the old
-    // watcher's delayed EOF wipe out the new watcher's state.
     pub watch_pid_generation: Mutex<u64>,
 
-    // ---- roblox network caches ----
     pub csrf_cache: Mutex<HashMap<String, (String, i64)>>,
     pub ticket_cache: Mutex<HashMap<String, (String, i64)>>,
     pub last_launch_ts: Mutex<i64>,
-    pub launch_lock: tokio::sync::Mutex<()>, // serializes launches (replaces the old _launchQueue chain)
+    pub launch_lock: tokio::sync::Mutex<()>,
 
-    // ---- login flow cancellation ----
     pub login_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 

@@ -3,8 +3,6 @@ let packages = [], editingPackageId = null;
 const _launchedIds = new Set();
 
 // ── Logs ─────────────────────────────────────────────────────────────────────
-// Plain, append-only session log rendered like a tailed .txt file. No in-app
-// filters or search box -- use Ctrl+F (native find) over the text instead.
 const _logs = [];
 const MAX_LOGS = 2000;
 const LOG_CATS = { launch:'launch', crash:'crash', kill:'kill', cookie:'cookie', afk:'afk', enc:'enc', system:'system', close:'close' };
@@ -16,18 +14,13 @@ function logEntry(level, category, message, meta) {
   if (document.getElementById('page-logs')?.classList.contains('active')) _appendLogRow(entry);
 }
 
-// An uncaught invoke() rejection (e.g. a Tauri IPC arg-type mismatch) used to
-// just vanish -- no error toast, no log line, the triggering button just sat
-// there. Surface anything that slips through a missing catch so it's visible
-// in the Logs page instead of silently doing nothing.
+// Surface uncaught invoke() rejections in the Logs page instead of losing them silently.
 window.addEventListener('unhandledrejection', (e) => {
   const msg = (e.reason && (e.reason.message || e.reason)) || 'Unknown error';
   logEntry('err', 'system', `Unhandled error: ${msg}`);
 });
 
-// div/span elements using role="button" (theme cards, dropdown options) only
-// had a click handler -- keyboard/AT users tabbing to them had no way to
-// activate. Enter/Space now triggers the same click.
+// Enter/Space activates role="button" elements for keyboard/AT users.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
   const el = e.target.closest('[role="button"]');
@@ -55,9 +48,7 @@ function renderLogs() {
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
-// Appends one row instead of rejoining/replacing the whole log list on every
-// event -- renderLogs() rebuilding up to MAX_LOGS rows per log line got
-// expensive when accounts were actively logging (AFK taps, watch-tick, etc).
+// Appends one row instead of rejoining/replacing the whole log list.
 function _appendLogRow(entry) {
   const el = document.getElementById('logs-list');
   if (!el) return;
@@ -499,9 +490,7 @@ function updateCddDisplay(name, value) {
 }
 document.addEventListener('click', e => { if (!e.target.closest('.cdd')) closeAllCdd(); });
 
-// Called after any navigation/tab switch so slider fills are always correct
-// regardless of whether the page that just rendered remembered to call
-// updateSliderFill itself (several didn't -- see updateSliderFill's comment).
+// Called after any navigation/tab switch so slider fills are always correct.
 function refreshAllSliderFills() {
   document.querySelectorAll('.fps-slider').forEach(updateSliderFill);
 }
@@ -619,12 +608,8 @@ function refreshPkgAvatarStatus() {
   document.querySelectorAll('.pkg-avatar[data-acc-id]').forEach(av => {
     av.classList.toggle('online', _launchedIds.has(av.dataset.accId));
   });
-  // Keeps each group's Kill button in sync with reality even when instances
-  // start/stop outside launchPackage/killPackage (crash, single-account
-  // launch, the watch-loop's own close detection) -- this fires from all of
-  // those paths already (onRobloxClosed, onAllRobloxClosed, the watched-ids
-  // reconcile poll), so piggybacking here covers every case for free instead
-  // of only updating on a full renderPackages() re-render.
+  // Keeps each group's Kill button in sync even when instances start/stop
+  // outside launchPackage/killPackage.
   packages.forEach(p => {
     const btn = document.querySelector('.pkg-card[data-id="' + p.id + '"] .pkg-kill-btn');
     if (!btn || btn.dataset.busy === '1') return;
@@ -673,39 +658,41 @@ function render() {
         </button>
       </div>
     </div>`).join('') + `<div class="card-add" onclick="openLogin()"><span class="material-icons-round card-add-icon">add</span><span class="card-add-label">Add account</span></div>`;
-  // Scope per-render work to the cards actually on screen. The grid is rebuilt
-  // each render, so cached avatars/names still paint instantly; only uncached
-  // lookups for visible cards hit the network, and filtered-out accounts are
-  // resolved lazily when they next become visible (results stay cached).
   loadAvatarsBatch(list);
   list.forEach(a => { if (a.gameTarget && !_gameNameCache[a.id]) fetchGameName(a.id, a.gameTarget); });
   checkCookieHealth(list);
-  // Bind right-click context menus to cards
   document.querySelectorAll('.card[data-id]').forEach(card => {
     card.addEventListener('contextmenu', e => { e.preventDefault(); showCardMenu(card.dataset.id, e.clientX, e.clientY); });
   });
   initDrag();
 }
 
-// Cookie expiry detection. Validates each account's cookie once per session (the
-// same authenticated endpoint used at login) and flags dead ones with a red
-// badge so only genuinely-expired accounts need re-adding. Staggered so we never
-// burst the endpoint, and cached so repeated renders don't re-check.
 const _cookieStatus = {}; // id -> 'checking' | 'ok' | 'dead' | 'unknown'
 function applyCookieStatus(id) {
   const card = document.querySelector(`.card[data-id="${id}"]`);
   if (card) card.classList.toggle('cookie-dead', _cookieStatus[id] === 'dead');
 }
-// On a launch auth failure, surface a likely-expired cookie immediately rather
-// than waiting for the per-session health check. Only genuine auth/cookie errors
-// flip the badge -- rate-limit (429) and transient HTTP errors are left alone so
-// a temporary hiccup never mislabels a valid account.
+// Surfaces a likely-expired cookie right after a launch auth failure, without
+// waiting for the periodic health check. Only genuine auth/cookie errors
+// flip the badge, not rate-limits or transient HTTP errors.
 function _flagCookieMaybeDead(id, error) {
   if (id && error && /cookie|expired|\b403\b/i.test(error)) {
     _cookieStatus[id] = 'dead';
     applyCookieStatus(id);
   }
 }
+// Runs `worker` over `items` with at most `limit` in flight at once.
+async function _runWithConcurrency(items, limit, worker) {
+  let next = 0;
+  async function lane() {
+    while (next < items.length) {
+      const item = items[next++];
+      await worker(item);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+}
+
 let _cookieCheckRunning = false;
 async function checkCookieHealth(list) {
   if (_cookieCheckRunning) return;
@@ -713,8 +700,8 @@ async function checkCookieHealth(list) {
   if (!todo.length) return;
   _cookieCheckRunning = true;
   try {
-    for (const a of todo) {
-      if (_cookieStatus[a.id] !== undefined) continue;
+    await _runWithConcurrency(todo, 4, async (a) => {
+      if (_cookieStatus[a.id] !== undefined) return;
       _cookieStatus[a.id] = 'checking';
       try {
         const res = await api.validateCookie(a.cookie);
@@ -724,8 +711,7 @@ async function checkCookieHealth(list) {
         else logEntry('info', 'cookie', `Cookie valid for ${a.username || a.id}`, { accountId: a.id, username: a.username || null, userId: a.userId || null });
       } catch { _cookieStatus[a.id] = 'unknown'; logEntry('warn', 'cookie', `Cookie check failed for ${a.username || a.id}`, { accountId: a.id }); }
       applyCookieStatus(a.id);
-      await new Promise(r => setTimeout(r, 200)); // stagger; avoid bursting the endpoint
-    }
+    });
   } finally { _cookieCheckRunning = false; }
 }
 
@@ -736,18 +722,18 @@ const OK_RECHECK_MS = 5 * 60 * 1000;    // re-check known-good cookies at most e
 async function recheckAllCookies(force) {
   if (_recheckRunning) return; // bail if a previous pass is still going
   _recheckRunning = true;
-  // flag unchecked cookies as 'checking' before the first await, otherwise the
-  // checkCookieHealth pass inside render() races us and validates them twice
+  // Flag before the first await so checkCookieHealth's render() pass doesn't race us.
   for (const a of accounts) if (a.cookie && _cookieStatus[a.id] === undefined) _cookieStatus[a.id] = 'checking';
   try {
   let changed = false;
   const now = Date.now();
-  for (const a of accounts) {
-    if (!a.cookie) continue;
-    // good cookies only get re-checked every few minutes to keep the request
-    // rate down; dead/unknown ones are retried every tick so a recovery shows
-    // up fast. force (the decrypt pass) ignores this and checks everything.
-    if (!force && _cookieStatus[a.id] === 'ok' && _cookieCheckedAt[a.id] && (now - _cookieCheckedAt[a.id]) < OK_RECHECK_MS) continue;
+  const todo = accounts.filter(a => {
+    if (!a.cookie) return false;
+    // Known-good cookies recheck every few minutes; dead/unknown ones every tick.
+    if (!force && _cookieStatus[a.id] === 'ok' && _cookieCheckedAt[a.id] && (now - _cookieCheckedAt[a.id]) < OK_RECHECK_MS) return false;
+    return true;
+  });
+  await _runWithConcurrency(todo, 4, async (a) => {
     const prev = _cookieStatus[a.id];
     _cookieStatus[a.id] = 'checking';
     try {
@@ -764,8 +750,7 @@ async function recheckAllCookies(force) {
         _cookieStatus[a.id] = next;
       }
     } catch { _cookieStatus[a.id] = prev || 'unknown'; }
-    await new Promise(r => setTimeout(r, 300));
-  }
+  });
   if (changed) render(); // rebuild once at the end so the cards match
   } finally { _recheckRunning = false; }
 }
@@ -773,10 +758,7 @@ setInterval(() => { if (accounts.length) recheckAllCookies(false); }, 60000);
 
 
 const _gameNameCache = {}; // accountId -> resolved game name
-// Persistent target -> resolved name map. Game names are stable, so caching them
-// across restarts avoids re-resolving every launch. Stored in localStorage
-// (available in the Electron renderer, same as the theme setting).
-let _gameNamePersist = {};
+let _gameNamePersist = {}; // target -> resolved name, persisted to localStorage
 try { _gameNamePersist = JSON.parse(localStorage.getItem('mr-gamenames') || '{}'); } catch { _gameNamePersist = {}; }
 function _saveGameNames() { try { localStorage.setItem('mr-gamenames', JSON.stringify(_gameNamePersist)); } catch {} }
 
@@ -908,9 +890,7 @@ function onDragMove(e) {
   if (newId === _dragOverId) return; // already settled against this neighbour
   _dragOverId = newId;
 
-  // Live-reorder by moving the dragged node in place -- no full re-render, so
-  // the node (and its listeners) persists and the grid only reflows. Direction
-  // mirrors the old swap-to-target-index behaviour.
+  // Move the dragged node in place instead of a full re-render.
   const grid = document.getElementById('grid');
   const cards = Array.from(grid.querySelectorAll('.card[data-id]'));
   const srcPos = cards.indexOf(_dragging);
@@ -920,10 +900,8 @@ function onDragMove(e) {
   _syncAccountsOrderFromDom();
 }
 
-// Reorder the `accounts` array to match the current on-screen card order.
-// Only the slots occupied by currently-visible cards are reassigned; accounts
-// hidden by an active search/filter keep their positions, so dragging within a
-// filtered view never disturbs the rest of the list.
+// Reorders `accounts` to match the on-screen card order; accounts hidden by
+// an active search/filter keep their positions.
 function _syncAccountsOrderFromDom() {
   const grid = document.getElementById('grid');
   const visIds = Array.from(grid.querySelectorAll('.card[data-id]')).map(c => c.dataset.id);
@@ -973,9 +951,7 @@ function paintAccountAvatar(id, uid, url) {
   });
 }
 
-// Batched avatar load: one request for every uncached account instead of one per
-// account. The thumbnails endpoint takes up to 100 ids per call. Falls back to
-// per-account fetches if a batch fails, so behaviour is never worse than before.
+// One batched request for uncached accounts instead of one per account.
 async function loadAvatarsBatch(list) {
   const paint = a => {
     if (a.userId && _avatarCache[a.userId]) {
@@ -1415,11 +1391,7 @@ async function launchPackage(id) {
   const card = document.querySelector('.pkg-card[data-id="' + id + '"]');
   const btn = card ? card.querySelector('.pkg-launch-btn') : null;
   const killBtn = card ? card.querySelector('.pkg-kill-btn') : null;
-  // launchPackage and killPackage both write into the same #pkg-progress-*
-  // chip set for this group -- running both at once on the same group would
-  // have them stomp each other's chips (a launch result landing on a chip
-  // the kill call just created, or vice versa). Block one while the other
-  // is in flight instead of just guarding each button individually.
+  // launchPackage/killPackage share the same progress chips -- block one while the other runs.
   if (btn && btn.dataset.busy === '1') return;
   if (killBtn && killBtn.dataset.busy === '1') { toast('A kill is already in progress for this group', 'err'); return; }
   if (btn) btn.dataset.busy = '1';
@@ -1810,9 +1782,6 @@ function gamePageOpen() {
 
 
 // ── Mixer (graphics / fps / volume / kill) ─────────────────────────────────
-// Graphics & FPS are written as global Fast Flags (one shared ClientAppSettings
-// file → every instance reads them), so they apply to all instances on next
-// launch. Volume is applied live to running clients via the OS audio mixer.
 const FF_GFX = 'DFIntDebugFRMQualityLevelOverride';
 const FF_FPS = 'DFIntTaskSchedulerTargetFps';
 let _volTimer = null, _mixRunning = 0;
@@ -1836,7 +1805,7 @@ async function mixInit() {
     const fpsCap = await api.readFpsCap();
     const fpsUnl = (fpsCap === 0);
     document.getElementById('mix-fps-unl').checked = fpsUnl;
-    document.getElementById('mix-fps').value = fpsUnl ? 60 : Math.max(30, fpsCap || 60);
+    document.getElementById('mix-fps').value = fpsUnl ? 60 : Math.max(10, fpsCap || 60);
     document.getElementById('mix-fps-val').textContent = fpsUnl ? '\u221e' : (fpsCap || 60);
     document.getElementById('mix-fps').disabled = fpsUnl;
   } catch {}
@@ -1884,9 +1853,6 @@ function clampInt(v, min, max, dflt) {
   return Math.max(min, Math.min(max, n));
 }
 
-// Updates both the Mixer badge and the always-visible titlebar badge (next to
-// the Roblox version hash) so the running count shows everywhere, not just on
-// the Mixer page. The titlebar badge goes "live" (green dot) when >0.
 function setRunningBadges(n) {
   const txt = n + ' running';
   const tb = document.getElementById('tb-running');
@@ -1897,15 +1863,10 @@ function setRunningBadges(n) {
   }
 }
 
-// Single shared poll covering both the running-count badge and the
-// per-account live/closed reconcile -- was two separate intervals each
-// firing their own invoke() round-trip; merged so there's one IPC round
-// trip per tick instead of two on overlapping cadences.
 let _statusPoll = null;
 let _lastCountPushAt = 0;
 async function pollRunningCount() {
-  // main pushes the count every ~5s while watching; skip our own tasklist
-  // call if one of those landed recently.
+  // Skip if a push from the backend landed recently.
   if (Date.now() - _lastCountPushAt < 6500) return;
   let n = 0;
   try { n = await api.getRunningCount(); } catch { n = 0; }
@@ -1913,21 +1874,15 @@ async function pollRunningCount() {
   setRunningBadges(n);
 }
 
-// Ground-truth reconcile: push events (onRobloxClosed/onAllRobloxClosed) can
-// be missed or lag, leaving a card stuck showing "closed" for an account
-// that's still actually running (or vice versa). Asks the backend which
-// accounts it still considers watched/alive and corrects any card that
-// disagrees, instead of trusting events alone.
+// Reconciles card state against the backend's watched/alive list, in case a
+// push event (onRobloxClosed etc) was missed or lagged.
 async function pollWatchedIds() {
   let ids;
   try { ids = await api.getWatchedIds(); } catch { return; }
   const watched = new Set(ids);
-  // Cards that stop matching the active Running/Idle filter get pulled from
-  // the DOM directly rather than going through a full render() -- render()
-  // rebuilds the whole grid (replaying every card's entrance animation via
-  // its inline animation-delay), which would flicker on every 3s poll tick
-  // if anything changed while filtered. New cards that start matching still
-  // wait for the next natural render() (switching pages/filters etc).
+  // Cards that drop out of the active filter get pulled from the DOM
+  // directly instead of a full render(), which would replay entrance
+  // animations and flicker on every poll tick.
   const dropFromFilter = (_acctFilter === 'running' || _acctFilter === 'idle')
     ? id => (_acctFilter === 'running' ? !watched.has(id) : watched.has(id))
     : null;
@@ -1963,8 +1918,7 @@ async function mixRefreshRunning() {
   } catch { _mixRunning = 0; }
   setRunningBadges(_mixRunning);
 
-  // If processes are running but we have no launched IDs (e.g. app restarted),
-  // seed _launchedIds from accounts that have been used recently (last 2 hours).
+  // Seed _launchedIds from recently-used accounts if the app just restarted.
   if (_mixRunning > 0 && _launchedIds.size === 0) {
     const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
     const recentAccounts = accounts.filter(a => a.lastUsed && new Date(a.lastUsed).getTime() > twoHoursAgo);
@@ -1992,11 +1946,7 @@ function updateSliderFill(el) {
   el.style.background = 'linear-gradient(90deg, var(--ac) ' + pct + '%, var(--s4) ' + pct + '%)';
 }
 
-// Fill-tracking is only correct if every place that sets a slider's value
-// also calls updateSliderFill -- several didn't (e.g. the sound volume
-// slider), leaving no fill until the user happened to drag it. A delegated
-// listener plus a sweep on every page switch makes this self-healing instead
-// of depending on each call site remembering to do it.
+// Delegated listener so slider fill stays correct without every call site remembering to update it.
 document.addEventListener('input', e => {
   if (e.target.matches && e.target.matches('.fps-slider')) updateSliderFill(e.target);
 });
@@ -2066,12 +2016,8 @@ async function mixKillAll() {
   else toast('Kill failed' + (res && res.error ? ': ' + res.error : ''), 'err');
 }
 
-// Apply graphics/fps to instances that are already open by relaunching the
-// accounts currently marked as launched (each with its saved target).
-// Graphics/FPS/volume sliders already save on change -- this just re-pushes
-// the current values in one action and confirms, without touching any
-// running Roblox process (killing/relaunching is a separate explicit action
-// via the Kill all Roblox button).
+// Re-pushes current graphics/fps/volume values and confirms; doesn't touch
+// any running process (that's the separate Kill all Roblox button).
 async function mixApply() {
   const btn = document.getElementById('mix-relaunch-btn');
   if (btn.disabled) return;
@@ -2292,10 +2238,7 @@ async function genAddToAccounts() {
   } catch(e) { toast('Failed: ' + e.message, 'err'); if(btn)btn.disabled=false; }
 }
 
-// Tracked so a Generate click right after Clear can wait for the clear's disk
-// write to actually land first -- otherwise writeGenHistory() from the new
-// generation and this clear-to-[] both hit disk, and whichever finishes last
-// wins, silently dropping or resurrecting entries depending on timing.
+// Tracked so a Generate right after Clear can wait for the clear's write to land first.
 let _genClearPromise = null;
 async function genClearHistory() {
   _genHistory = [];
@@ -2338,8 +2281,6 @@ function getTrackingIntervalSec() {
   return Number.isFinite(s) ? Math.min(3600, Math.max(30, Math.round(s))) : 300;
 }
 function getTrackingTimedIds() { return new Set(Array.isArray(settings.trackingTimedIds) ? settings.trackingTimedIds : []); }
-// Multiple outlined spots per account -- each gets captured and sent as its
-// own attachment in the same webhook message. Empty/missing = full window.
 function getTrackingRegions(id) {
   const r = (settings.trackingRegions || {})[id];
   return Array.isArray(r) ? r : [];
@@ -2348,9 +2289,7 @@ function formatTrackingInterval(sec) {
   if (sec < 60) return sec + 's';
   return Math.round(sec / 60) + ' min';
 }
-// Removing an account left its outlined spots/timed-capture flag orphaned in
-// settings.json forever (dead weight that only grows across add/remove
-// cycles) -- strip them alongside the account itself.
+// Strips orphaned tracking settings when an account is removed.
 function forgetTrackingAccount(id) {
   let changed = false;
   const regions = Object.assign({}, settings.trackingRegions || {});
@@ -2469,10 +2408,7 @@ async function captureTrackingNow(id) {
   }
 }
 
-// ── Region picker: drag rectangles over a live preview to outline multiple
-// capture spots, saved as fractions (0-1 of the captured window) so they
-// stay correct if the window is resized. Each drag adds a new spot; clicking
-// an existing one removes it.
+// ── Region picker: drag rectangles to outline capture spots, saved as 0-1 fractions of the window.
 let _regionPickerAccountId = null;
 let _regionPickerDrag = null;
 let _regionPickerRects = [];
@@ -2858,7 +2794,10 @@ function saveRegionPicker() {
   };
 
   // ── State ─────────────────────────────────────────────────────────────────
-  let _currentProfile = 'creamy';
+  // Defaults to off for a fresh install -- only kicks in when localStorage
+  // has no saved preference yet, so anyone who already picked a profile
+  // keeps it untouched.
+  let _currentProfile = 'off';
   let _volume = 0.35;
 
   try {

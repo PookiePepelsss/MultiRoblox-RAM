@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "static-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "serve", "-l", "4173", "src"],
+      "port": 4173
+    },
+    {
+      "name": "website-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "serve", "-l", "4174", "../website"],
+      "port": 4174
+    }
+  ]
+}

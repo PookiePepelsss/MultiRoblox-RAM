@@ -1,8 +1,3 @@
-// "Add Account" login (open_login/browser_login below) uses a native Tauri
-// window -- see the comment on open_login for why. "Open in browser" still
-// drives a real, separately-downloaded Chromium over CDP (chromiumoxide,
-// replacing puppeteer-core from the Electron build) since it's meant to be
-// an actual full browser, not a login popup.
 use crate::state::AppState;
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::network::SetCookieParams;
@@ -63,8 +58,6 @@ fn chrome_cache_dir() -> PathBuf {
     crate::paths::app_data_dir().join("chrome-for-login")
 }
 
-// Finds a chrome.exe under the chrome-for-testing cache dir from a previous
-// download (win64/chrome-win64/chrome.exe layout).
 fn find_cached_chrome() -> Option<PathBuf> {
     let dir = chrome_cache_dir();
     if !dir.exists() {
@@ -184,21 +177,12 @@ pub struct LoginResult {
     pub error: Option<String>,
 }
 
-// Switched from driving a separately-downloaded Chrome over CDP to a native
-// Tauri window. Three problems with the old approach turned out to be
-// unfixable from our side: Chrome 136+ forces the "being controlled by
-// automated test software" banner and a full tabbed browser window whenever
-// CDP is attached (Google hardened this specifically so automation can't
-// hide a real browser UI from the user -- --app=<url> gets silently
-// ignored), the standalone downloaded Chrome build rendered a solid black
-// page for some users, and its pixel-based --window-size didn't account for
-// the display's actual scale factor. A Tauri WebviewWindow (WebView2 on
-// Windows) has none of this: no tabs/address bar ever (that's a browser-app
-// concept, not something a plain window has), no CDP banner, respects DPI
-// scaling automatically, and Tauri's own cookies_for_url() reads HttpOnly
-// cookies directly -- no CDP needed at all. ensure_chrome/download_chrome
-// below are kept only for "Open in browser", which genuinely wants a real,
-// full browser.
+// Native Tauri window instead of driving a downloaded Chrome over CDP --
+// Chrome 136+ forces the "controlled by automated test software" banner and
+// full tabbed UI whenever CDP is attached (--app=<url> gets ignored), so a
+// clean chromeless login window isn't possible that way anymore. A
+// WebviewWindow has no tabs/address bar by default and reads cookies via
+// cookies_for_url() with no CDP needed.
 pub async fn open_login(app: &AppHandle, state: &AppState) -> LoginResult {
     let label = format!("login-{}", uuid::Uuid::new_v4().simple());
     let login_url = match Url::parse("https://www.roblox.com/login") {
@@ -214,14 +198,9 @@ pub async fn open_login(app: &AppHandle, state: &AppState) -> LoginResult {
         }
     };
 
-    // incognito(true) gives this window its own throwaway WebView2 session --
-    // without it, WebView2's default persistent cookie store is shared
-    // across every login window (and survives after the window closes), so
-    // logging into one account and then opening "Add Account" again just
-    // silently reuses that still-authenticated session instead of showing a
-    // fresh login page. This is the same class of bug the old chromiumoxide
-    // flow avoided with a fresh --user-data-dir per attempt; incognito mode
-    // is the WebView2 equivalent.
+    // incognito: a persistent cookie store here would leak the session
+    // across login attempts, silently reusing whichever account was already
+    // logged in instead of showing a fresh login page.
     let window = match tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(login_url))
         .title("Log in to Roblox")
         .inner_size(900.0, 720.0)
@@ -252,16 +231,9 @@ pub async fn open_login(app: &AppHandle, state: &AppState) -> LoginResult {
         });
     }
 
-    // state.login_cancel is a single global slot -- if a previous open_login
-    // is still running (e.g. the UI's "Back" button just hides the browser
-    // panel without cancelling it, so "Use browser" -> Back -> "Use browser"
-    // again calls this while the first attempt is still in flight), just
-    // overwriting it here would drop the old sender, which the old attempt
-    // would read as its own cancellation on its next poll -- and then ITS
-    // cleanup would null out the slot we just set for the new attempt,
-    // permanently breaking Cancel for the new (still running) login. Cancel
-    // the stale attempt explicitly first so ownership of the slot is never
-    // ambiguous.
+    // Cancel any still-running previous attempt first -- state.login_cancel
+    // is a single slot, so a stray "Use browser" -> Back -> "Use browser"
+    // sequence could otherwise clobber a still-live sender.
     if let Some(stale) = state.login_cancel.lock().unwrap().take() {
         let _ = stale.send(());
     }
@@ -306,14 +278,8 @@ pub async fn open_login(app: &AppHandle, state: &AppState) -> LoginResult {
     }
     .await;
 
-    // Deliberately NOT clearing state.login_cancel here -- if this attempt
-    // was itself the one just cancelled by a newer open_login call (see the
-    // "cancel any stale attempt" block above), the slot already belongs to
-    // that newer attempt and clearing it unconditionally would rip its
-    // cancel_tx out from under it. The slot only ever needs replacing (by
-    // the next open_login call) or explicit cancelling (cancel_login), both
-    // of which already .take() it safely; leaving a spent/stale sender
-    // sitting there after a normal finish is harmless.
+    // Not clearing state.login_cancel here -- if a newer open_login call
+    // already cancelled and replaced it, doing so would rip out its sender.
     let _ = window.close();
     result
 }
@@ -324,10 +290,7 @@ pub fn cancel_login(state: &AppState) {
     }
 }
 
-// Leftover from when login used its own per-attempt temp Chrome profile dir
-// (mr-login-*) -- login is a native Tauri window now and creates none, but
-// this sweep is kept in case any still linger in %TEMP% from before an
-// update, or a crash mid-login on an older build left one behind.
+// Cleans up mr-login-* temp profile dirs left behind by older builds.
 pub fn sweep_stale_login_profiles() {
     let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
         return;
@@ -347,12 +310,8 @@ pub fn sweep_stale_login_profiles() {
     }
 }
 
-// "Open in browser" from a saved account's context menu: launches a real
-// Chrome window (same detection/download as the login flow, but its own
-// fresh temp profile so it doesn't touch the user's main browser profile),
-// seeds the .ROBLOSECURITY cookie via CDP before any navigation happens so
-// the page loads already authenticated, then leaves the window open for the
-// user -- unlike browser_login() above, this never calls browser.close().
+// "Open in browser": launches a real Chrome window with the account's
+// cookie pre-seeded, and leaves it open for the user.
 pub async fn open_account_in_browser(
     app: &AppHandle,
     state: &AppState,
@@ -394,6 +353,6 @@ pub async fn open_account_in_browser(
         .await
         .map_err(|e| e.to_string())?;
 
-    std::mem::forget(browser); // detached: stays open for the user, matches child.forget() elsewhere
+    std::mem::forget(browser);
     Ok(())
 }

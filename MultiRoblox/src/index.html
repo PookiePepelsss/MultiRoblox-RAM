@@ -212,7 +212,7 @@
               </div>
               <div class="mix-row">
                 <label class="mix-auto"><span class="toggle sm"><input type="checkbox" id="mix-fps-unl" onchange="mixFpsUnlToggle()"/><span class="toggle-trk"></span></span> Unlimited</label>
-                <input type="range" class="fps-slider" id="mix-fps" min="60" max="240" step="10" value="60"
+                <input type="range" class="fps-slider" id="mix-fps" min="10" max="9999" step="1" value="60"
                        oninput="mixFpsInput(this.value)" onchange="mixFpsCommit()"/>
                 <span class="fps-val-label" id="mix-fps-val" style="min-width:40px">60</span>
               </div>
@@ -245,10 +245,6 @@
               <span class="material-icons-round" style="font-size:15px">power_settings_new</span>Kill all Roblox
             </button>
           </div>
-          <div class="sr-desc" style="margin-top:8px;padding:0 2px">
-            Graphics quality is saved to your Fast Flags and takes effect on next launch. Note: FPS cap via Fast Flags is currently blocked by Roblox - use the in-game Settings menu to change your FPS cap.
-          </div>
-
         </div>
       </div>
 
@@ -838,10 +834,11 @@
       <input type="text" id="in-nickname" placeholder="e.g. MainAlt or FarmBot"/>
     </div>
     <div class="field">
-      <label for="in-target">Game ID or Private Server Link</label>
+      <label for="in-target">Game ID, Invite Link, or Private Server Link</label>
       <input type="text" id="in-target" placeholder="e.g. 6872265039 or https://www.roblox.com/share?..."/>
       <div class="field-hint">
         <strong style="color:var(--t1)">Game ID:</strong> paste just the numbers from the URL.<br/>
+        <strong style="color:var(--t1)">Invite link:</strong> paste a friend's "Join" share link, joins their exact server.<br/>
         <strong style="color:var(--t1)">Private server:</strong> paste the full server link.<br/>
         <strong style="color:var(--t1)">Specific server:</strong> paste <code style="font-size:11px;background:var(--s3);padding:1px 5px;border-radius:4px">placeId:jobId</code> to join that exact running server.<br/>
         <strong style="color:var(--t1)">Blank:</strong> opens Roblox normally.

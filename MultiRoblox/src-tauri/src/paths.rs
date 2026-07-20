@@ -1,9 +1,6 @@
-// The Electron build stored its userData at %APPDATA%\multiroblox (Electron
-// derives that folder name from package.json's "name" field). Tauri's own
-// app_data_dir() would resolve to a DIFFERENT folder (keyed off the bundle
-// identifier), which would silently orphan every existing user's saved
-// accounts/settings on upgrade. Hardcoding the exact legacy path is what
-// makes this migration lossless.
+// Hardcoded to match the old Electron build's userData path -- Tauri's
+// default app_data_dir() would pick a different folder and orphan existing
+// users' saved data on upgrade.
 use std::path::PathBuf;
 
 pub fn app_data_dir() -> PathBuf {

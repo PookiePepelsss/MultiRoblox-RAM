@@ -20,8 +20,6 @@ fn decode_capture_output(stdout: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
-// Screenshots one account's window, cropped to `region` (x, y, w, h as 0-1
-// fractions of the captured window) if given, else the full window.
 pub async fn capture_account_png(app: &AppHandle, state: &AppState, account_id: &str, region: Option<(f64, f64, f64, f64)>) -> Result<Vec<u8>, String> {
     let pid = state
         .account_pids
@@ -82,8 +80,6 @@ pub async fn send_to_discord_webhook(state: &AppState, webhook_url: &str, images
     }
 }
 
-// `regions` empty = one full-window capture; non-empty = one capture per
-// outlined spot, all delivered together in a single webhook message.
 pub async fn capture_and_send(
     app: &AppHandle,
     state: &AppState,

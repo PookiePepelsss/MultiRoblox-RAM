@@ -1,6 +1,3 @@
-// Port of main.js's Roblox network layer: CSRF token, auth ticket, cookie
-// validation, game name lookup, share-link / private-server resolution.
-// Request shapes/headers are unchanged from the Electron build.
 use crate::state::AppState;
 use serde_json::Value;
 use std::time::Duration;
@@ -9,6 +6,27 @@ const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
+}
+
+// Roblox errors come back as {"errors":[{"code":N,"message":"..."}]} (or,
+// on some endpoints, a flat {"message":"..."}) -- pull just the human
+// message out instead of showing the raw JSON in the UI.
+fn extract_roblox_error(body: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<Value>(body) {
+        if let Some(msg) = v
+            .get("errors")
+            .and_then(|e| e.as_array())
+            .and_then(|a| a.first())
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+        {
+            return msg.to_string();
+        }
+        if let Some(msg) = v.get("message").and_then(|m| m.as_str()) {
+            return msg.to_string();
+        }
+    }
+    body.chars().take(200).collect()
 }
 
 pub struct UserInfo {
@@ -47,7 +65,7 @@ pub async fn fetch_user_info(state: &AppState, cookie: &str) -> UserInfo {
                     ok: false,
                     username: None,
                     user_id: None,
-                    reason: Some(body.chars().take(200).collect()),
+                    reason: Some(extract_roblox_error(&body)),
                 },
             }
         }
@@ -60,9 +78,7 @@ pub async fn fetch_user_info(state: &AppState, cookie: &str) -> UserInfo {
     }
 }
 
-// Returns Err(reason) instead of None on failure so the caller can log *why*
-// detection failed (network error vs bad status vs unexpected body) instead
-// of just showing an unexplained "Not detected" badge.
+// Err carries the failure reason so the caller can log why, not just fail.
 pub async fn get_roblox_version(state: &AppState) -> Result<String, String> {
     let res = state
         .http
@@ -135,10 +151,7 @@ pub struct TicketResult {
     pub error: Option<String>,
 }
 
-// Mirrors the 405-retry fix already shipped in the Electron build: any
-// non-429/403 status (including a stray 405) gets the same backoff-and-retry
-// treatment across all 3 attempts instead of giving up on the first one
-// while still telling the user "try again in a moment."
+// Any non-429/403 status also gets backoff-and-retry across all 3 attempts.
 pub async fn get_auth_ticket(
     state: &AppState,
     cookie: &str,
@@ -246,8 +259,6 @@ pub async fn get_auth_ticket(
             }
             continue;
         }
-        // Any other status -- keep retrying with backoff instead of giving up
-        // on the first hit; only surface an error once all 3 attempts are spent.
     }
     if last_status != 0 {
         return TicketResult {
@@ -559,12 +570,8 @@ pub async fn get_access_code(
         .map(|m| m.as_str().to_string())
 }
 
-// Renderer-side fetch() to *.roblox.com fails under Tauri: those endpoints send
-// no Access-Control-Allow-Origin header, and unlike Electron's file:// origin
-// (which Chromium exempts from CORS), Tauri's https://tauri.localhost origin is
-// a real origin subject to normal CORS enforcement. Routing these through Rust
-// sidesteps the browser entirely -- CORS is a fetch()/browser concept, reqwest
-// doesn't apply it. Used for avatar thumbnails, user lookups, and game charts.
+// Proxied through Rust since *.roblox.com sends no CORS headers and a
+// renderer-side fetch() would get blocked.
 pub async fn get_json_public(state: &AppState, url: &str) -> Result<Value, String> {
     let parsed = url::Url::parse(url).map_err(|e| e.to_string())?;
     let host = parsed.host_str().unwrap_or("");
@@ -585,11 +592,7 @@ pub async fn get_json_public(state: &AppState, url: &str) -> Result<Value, Strin
     Ok(serde_json::json!({ "ok": ok, "status": status, "data": data }))
 }
 
-// Altgen (api.altgen.me) account generator -- same CORS gap as *.roblox.com,
-// confirmed via a preflight check: the API sends Access-Control-Allow-Headers/
-// Methods but no Access-Control-Allow-Origin, so a direct renderer fetch()
-// gets blocked. Routed through Rust like the roblox_get_json proxy above.
-// API contract: https://altgen.me/docs/generate-accounts
+// Same CORS gap as roblox.com above -- see altgen.me/docs/generate-accounts.
 pub async fn altgen_generate(
     state: &AppState,
     api_key: &str,

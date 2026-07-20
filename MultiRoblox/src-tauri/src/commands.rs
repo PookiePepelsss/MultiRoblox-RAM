@@ -195,9 +195,7 @@ pub fn accounts_remove(state: State<AppState>, id: String) -> Result<bool, Strin
         .filter(|a| a.get("id").and_then(|v| v.as_str()) != Some(id.as_str()))
         .collect();
     storage::save_accounts(&state, filtered)?;
-    // A running instance for this id (if any) keeps running untouched -- but
-    // drop it from our own bookkeeping so watch_tick doesn't keep polling
-    // and logging about an account that's no longer in the list.
+    // Drop bookkeeping so watch_tick stops polling a removed account.
     state.account_pids.lock().unwrap().remove(&id);
     state.watched_accounts.lock().unwrap().remove(&id);
     state.miss_counts.lock().unwrap().remove(&id);
@@ -346,10 +344,8 @@ pub fn fps_write(cap: f64) -> Value {
         )
         .to_string()
     };
-    // Bloxstrap/Froststrap/Fishstrap's own FPS-unlocker can mark this file
-    // read-only to stop Roblox's engine from resetting it -- that also
-    // blocks OUR write, so clear it first if set (this app is the one the
-    // user just told to change the cap, so it should win).
+    // Some bootstrappers mark this file read-only for their own FPS
+    // unlocker -- clear it so our write isn't silently blocked.
     if let Ok(meta) = std::fs::metadata(&p) {
         let mut perms = meta.permissions();
         if perms.readonly() {
@@ -476,10 +472,7 @@ pub async fn roblox_running_count(app: AppHandle, state: State<'_, AppState>) ->
     Ok(crate::native::count_roblox_processes(&app, &state).await)
 }
 
-// Ground truth for which accounts the backend still considers launched.
-// Frontend polls this every 5s to self-heal card state instead of relying
-// solely on push events, which can be missed (listener registered late,
-// event dropped, etc).
+// Polled by the frontend to self-heal card state if a push event is missed.
 #[tauri::command]
 pub async fn roblox_watched_ids(state: State<'_, AppState>) -> Result<Vec<String>, ()> {
     Ok(state
