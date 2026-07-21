@@ -403,6 +403,16 @@
             </div>
           </div>
 
+          <div class="sc">
+            <div class="sc-head">Crash Handler</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Block crash handler</div><div class="sr-desc">Kills RobloxCrashHandler.exe right after each launch, then stops watching. Saves a bit of RAM per instance without polling in the background.</div></div><label class="toggle"><input type="checkbox" id="set-blockcrash" onchange="toggleBlockCrashHandler()"/><span class="toggle-trk"></span></label></div>
+          </div>
+
+          <div class="sc">
+            <div class="sc-head">CPU Priority</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Lower priority when multiple accounts run</div><div class="sr-desc">Once more than one account is running, sets all of them to Below Normal priority so the OS scheduler doesn't split CPU evenly across idle instances. Reverts to Normal automatically when back down to one.</div></div><label class="toggle"><input type="checkbox" id="set-lowpriority" onchange="toggleLowPriority()"/><span class="toggle-trk"></span></label></div>
+          </div>
+
         </div>
 
         <div class="sw" id="stab-panel-privacy" style="display:none">

@@ -282,6 +282,8 @@ button:focus-visible,.nav-item:focus-visible,.tab-btn:focus-visible{outline:none
 .sr-desc{font-size:12px;color:var(--t2);line-height:1.6;font-weight:400}
 .badge{font-size:10.5px;font-weight:600;padding:2px 9px;border-radius:5px;background:var(--s3);color:var(--t2);flex-shrink:0;white-space:nowrap;letter-spacing:.01em}
 .badge.g{background:var(--gd);color:var(--green)}
+.badge.muted{background:var(--s4);color:var(--t3)}
+
 /* One shared text-field look used everywhere a plain input appears (settings,
    edit-account modal, package name, generator key) -- .sr-input/.field
    input/.pm-input used to be three near-duplicate rules that had quietly
@@ -308,12 +310,12 @@ button:focus-visible,.nav-item:focus-visible,.tab-btn:focus-visible{outline:none
 .cdd-option{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;transition:background var(--dur) var(--smooth);border-bottom:1px solid var(--bd)}
 .cdd-option:last-child{border-bottom:none}
 .cdd-option:hover{background:var(--s3)}
-.cdd-option.selected{background:var(--ac2)}
+.cdd-option.selected{background:var(--s3)}
 .cdd-opt-left{flex:1;display:flex;flex-direction:column;gap:2px}
 .cdd-opt-name{font-size:12.5px;font-weight:500;color:var(--t1)}
 .cdd-opt-desc{font-size:11px;color:var(--t3);line-height:1.4;font-weight:400}
 .cdd-option.selected .cdd-opt-name{color:var(--t1)}
-.cdd-option.selected .cdd-opt-desc{color:var(--t3)}
+.cdd-option.selected .cdd-opt-desc{color:var(--t2)}
 .cdd-check{font-size:15px;color:var(--ac);flex-shrink:0;opacity:0;transition:opacity var(--dur) var(--smooth)}
 .cdd-option.selected .cdd-check{opacity:1}
 

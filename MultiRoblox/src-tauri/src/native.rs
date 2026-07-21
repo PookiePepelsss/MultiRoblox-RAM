@@ -469,6 +469,53 @@ fn trim_process_memory(_pid: u32) -> bool {
     false
 }
 
+#[cfg(windows)]
+fn set_process_priority(pid: u32, below_normal: bool) -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
+        PROCESS_SET_INFORMATION,
+    };
+    unsafe {
+        let Ok(handle) = OpenProcess(PROCESS_SET_INFORMATION, false, pid) else {
+            return false;
+        };
+        let class = if below_normal {
+            BELOW_NORMAL_PRIORITY_CLASS
+        } else {
+            NORMAL_PRIORITY_CLASS
+        };
+        let ok = SetPriorityClass(handle, class).is_ok();
+        let _ = CloseHandle(handle);
+        ok
+    }
+}
+#[cfg(not(windows))]
+fn set_process_priority(_pid: u32, _below_normal: bool) -> bool {
+    false
+}
+
+// User opt-in (Settings -> Performance): once more than one account is
+// running, Windows splits CPU evenly across every instance even though only
+// one is actually being interacted with -- dropping the rest to Below
+// Normal lets the OS scheduler favor whichever isn't idle. Re-evaluated
+// after every launch/kill so it self-corrects back to Normal once only one
+// instance is left running.
+async fn apply_priority_policy(state: &AppState) {
+    let enabled = crate::settings::load_settings()
+        .get("lowPriorityMultiInstance")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if !enabled {
+        return;
+    }
+    let pids: Vec<u32> = state.account_pids.lock().unwrap().values().copied().collect();
+    let below_normal = pids.len() > 1;
+    for pid in pids {
+        set_process_priority(pid, below_normal);
+    }
+}
+
 pub async fn trim_roblox_memory(app: &AppHandle, state: &AppState) -> Value {
     let Some(alive_pids) = cached_or_spawn_pids(app, state).await else {
         return serde_json::json!({ "ok": false, "trimmed": 0, "total": 0, "error": "could not enumerate Roblox processes" });
@@ -621,7 +668,33 @@ pub async fn kill_account_roblox(app: &AppHandle, state: &AppState, account_id: 
     hide_window(&mut cmd);
     let _ = tokio::time::timeout(Duration::from_secs(4), cmd.output()).await;
     notify(app);
+    apply_priority_policy(state).await;
     serde_json::json!({ "ok": true })
+}
+
+// RobloxCrashHandler.exe spawns as a companion process within the first few
+// seconds of RobloxPlayerBeta.exe starting -- there's no launch flag to stop
+// it, so the only way to suppress it is to kill it the moment it appears.
+// Blind taskkill on an absent image just fails silently, so no need to check
+// existence first.
+// Runs for as long as the toggle is on (started at app boot / toggle-on,
+// Checks (cheap tasklist query, no taskkill overhead) for RobloxCrashHandler.exe
+// a few times right after it would normally spawn, kills it the moment it's
+// seen, then stops -- no perpetual background polling. Re-armed on every
+// launch call, which is the only time this process actually spawns.
+pub async fn sweep_crash_handler() {
+    for _ in 0..10 {
+        if let Some(out) = tasklist("RobloxCrashHandler.exe").await {
+            if out.to_lowercase().contains("robloxcrashhandler") {
+                let mut cmd = Command::new("cmd");
+                cmd.args(["/c", "taskkill /F /IM RobloxCrashHandler.exe"]);
+                hide_window(&mut cmd);
+                let _ = cmd.output().await;
+                return;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 fn close_singleton_handles_only<'a>(
@@ -1008,6 +1081,7 @@ async fn watch_tick(app: &AppHandle) {
         );
         state.account_pids.lock().unwrap().remove(account_id);
         let _ = app.emit("roblox:closed", account_id);
+        apply_priority_policy(&state).await;
 
         let auto_relaunch = crate::settings::load_settings().get("autoRelaunch").and_then(|v| v.as_bool()).unwrap_or(false);
         if auto_relaunch {
@@ -1242,6 +1316,16 @@ pub async fn do_launch(
         None => {
             let _ = tauri_plugin_opener::open_url(&roblox_uri, None::<&str>);
         }
+    }
+
+    apply_priority_policy(state).await;
+
+    if crate::settings::load_settings()
+        .get("blockCrashHandler")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+    {
+        tokio::spawn(sweep_crash_handler());
     }
 
     *state.last_launch_ts.lock().unwrap() = now_ms();

@@ -349,6 +349,10 @@ function applySettings() {
   }
   const relaunch = document.getElementById('set-autorelaunch');
   if (relaunch) relaunch.checked = !!settings.autoRelaunch;
+  const blockCrash = document.getElementById('set-blockcrash');
+  if (blockCrash) blockCrash.checked = settings.blockCrashHandler !== false;
+  const lowPriority = document.getElementById('set-lowpriority');
+  if (lowPriority) lowPriority.checked = settings.lowPriorityMultiInstance !== false;
 }
 
 let _acctQuery = '', _acctFilter = (() => { try { const f = localStorage.getItem('mr-acct-filter'); return (f && f !== 'running' && f !== 'idle') ? f : 'all'; } catch { return 'all'; } })(), _acctView = (() => { try { return localStorage.getItem('mr-acct-view') === 'list' ? 'list' : 'grid'; } catch { return 'grid'; } })();
@@ -442,6 +446,20 @@ function toggleAutoRelaunch() {
   settings.autoRelaunch = on;
   api.saveSettings({ autoRelaunch: on });
   toast(on ? 'Relaunch on disconnect on' : 'Relaunch on disconnect off', on ? 'ok' : 'err');
+}
+function toggleBlockCrashHandler() {
+  const el = document.getElementById('set-blockcrash');
+  const on = el.checked;
+  settings.blockCrashHandler = on;
+  api.saveSettings({ blockCrashHandler: on });
+  toast(on ? 'Crash handler blocked on next launch' : 'Crash handler allowed', on ? 'ok' : 'err');
+}
+function toggleLowPriority() {
+  const el = document.getElementById('set-lowpriority');
+  const on = el.checked;
+  settings.lowPriorityMultiInstance = on;
+  api.saveSettings({ lowPriorityMultiInstance: on });
+  toast(on ? 'Multi-instance priority lowering on' : 'Multi-instance priority lowering off', on ? 'ok' : 'err');
 }
 function toggleAutoTrim() {
   const el = document.getElementById('set-autotrim');

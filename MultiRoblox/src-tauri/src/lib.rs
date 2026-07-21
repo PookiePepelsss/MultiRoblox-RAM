@@ -57,6 +57,13 @@ pub fn run() {
                     native::start_antiafk(&handle3, &state).await;
                 });
             }
+            let block_crash = settings::load_settings()
+                .get("blockCrashHandler")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            if block_crash {
+                tauri::async_runtime::spawn(native::sweep_crash_handler());
+            }
 
             Ok(())
         })

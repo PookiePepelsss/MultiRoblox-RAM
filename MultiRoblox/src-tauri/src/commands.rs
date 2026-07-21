@@ -37,6 +37,7 @@ pub fn settings_save(state: State<AppState>, data: Map<String, Value>) -> bool {
     let multi_instance = data.get("multiInstance").cloned();
     let antiafk = data.get("antiAfk").cloned();
     let antiafk_interval_changed = data.contains_key("antiAfkInterval");
+    let block_crash = data.get("blockCrashHandler").cloned();
     for (k, v) in data {
         s.insert(k, v);
     }
@@ -72,6 +73,9 @@ pub fn settings_save(state: State<AppState>, data: Map<String, Value>) -> bool {
             let st = app.state::<AppState>();
             crate::native::start_antiafk(&app, &st).await;
         });
+    }
+    if let Some(Value::Bool(true)) = block_crash {
+        tauri::async_runtime::spawn(crate::native::sweep_crash_handler());
     }
     true
 }
