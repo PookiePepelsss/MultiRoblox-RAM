@@ -106,7 +106,7 @@ If MultiRoblox saved you time, consider tossing a tip my way.
 
 ## License
 
-PolyForm Noncommercial License 1.0.0. Source is open and free to use, modify, and share for any noncommercial purpose. Commercial use requires a separate license — contact **pookiepepelss** to arrange one.
+PolyForm Noncommercial License 1.0.0. Source is open and free to use, modify, and share for any noncommercial purpose. Commercial use requires a separate license contact **pookiepepelss** to arrange one.
 
 See [LICENSE](LICENSE) for the full text.
 
