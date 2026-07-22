@@ -1215,6 +1215,7 @@ pub async fn do_launch(
                     let job_id = query
                         .get("jobId")
                         .or_else(|| query.get("gameInstanceId"))
+                        .or_else(|| query.get("serverJobId"))
                         .cloned();
                     let place_id_re = regex::Regex::new(r"/games/(\d+)").unwrap();
                     let place_id_re2 = regex::Regex::new(r"/(\d+)").unwrap();
