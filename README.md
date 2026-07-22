@@ -8,7 +8,7 @@
 
 [![platform](https://img.shields.io/badge/platform-windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/PookiePepelsss/MultiRoblox-RAM/releases)
 [![built with tauri](https://img.shields.io/badge/built%20with-tauri-24C8DB?style=for-the-badge&logo=tauri&logoColor=white)](https://tauri.app/)
-[![license](https://img.shields.io/badge/license-MIT-3DDC97?style=for-the-badge)](LICENSE)
+[![license](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-3DDC97?style=for-the-badge)](LICENSE)
 [![latest release](https://img.shields.io/github/v/tag/PookiePepelsss/MultiRoblox-RAM?style=for-the-badge&label=latest&color=FF6B6B)](https://github.com/PookiePepelsss/MultiRoblox-RAM/releases)
 
 <br>
@@ -39,18 +39,18 @@ build.bat
 
 ### 👤 Accounts
 - Launch as many accounts side by side as you want
-- Sign in through a real Chrome window, or paste a cookie directly
-- Set a game ID or private server link per account so it launches straight there
+- Sign in through a real Roblox login window, or paste a cookie directly
+- Set a game ID, invite link, or private server link per account so it launches straight there
 - Nicknames, search, and filtering across all saved accounts
 - Cookies encrypted with AES-256-GCM, stored locally. Nothing leaves your device
 - Auto-relaunch on unexpected disconnect, back into the same game (crash-loop protected)
 
-### 📦 Packages
-- Group accounts into packages (farm squad, trading alts, etc.)
-- Launch an entire group at once, with a shared or per-account game target
+### 📦 Groups
+- Bundle accounts into groups (farm squad, trading alts, etc.)
+- Launch or kill an entire group at once, with a shared or per-account game target
 
 ### 🎚️ Mixer
-- Render quality, FPS target, and volume for all running instances, one panel
+- Render quality, FPS cap (10-9999), and volume for all running instances, one panel
 - Graphics quality writes to Roblox's fast flags; FPS cap writes Roblox's global client settings
 - Works with vanilla Roblox and Bloxstrap / Froststrap / Voidstrap / Fishstrap
 - Live, per-instance OS-level volume control
@@ -68,10 +68,11 @@ build.bat
 - Generate Roblox accounts via a [bloxgen.net](https://bloxgen.net/) API key
 
 ### ⚙️ Settings
-- General, themes, and sounds tabs
-- Custom encryption key (AES-256-GCM) or OS-native DPAPI (Windows keychain)
-- Custom UI sound profiles, with volume control and upload-your-own support
-- Light/dark theme, built-in update checker
+- **General**: multi-instance status, anti-AFK, relaunch-on-disconnect
+- **Performance**: RAM trim (manual or automatic on an interval), block RobloxCrashHandler.exe from starting, lower CPU priority once multiple accounts are running
+- **Data & Privacy**: custom encryption key (AES-256-GCM) or OS-native DPAPI (Windows keychain), clear all accounts
+- **Themes**: light/dark and several accent themes
+- **Sounds**: custom UI sound profiles with volume control and upload-your-own support
 
 ### 🕹️ Anti-AFK
 - Taps a benign key into every open Roblox window on a configurable interval, so the idle kick never fires
@@ -85,7 +86,7 @@ build.bat
 
 Roblox prevents multiple instances by holding a Windows mutex. MultiRoblox grabs that mutex first through a lightweight native helper (`RobloxNative.exe`, written in C#), so Roblox opens a fresh instance every time. Each account gets its own auth ticket before launch, so they all sign in as different accounts.
 
-Browser login downloads a private copy of Chrome on first use and won't touch your existing install.
+Login opens a native, chromeless window (no external browser involved) that reads the session cookie directly once you sign in.
 
 If the native helper isn't shipped with a build, it compiles from the bundled source using the .NET Framework `csc.exe` already on every Windows machine.
 
@@ -103,8 +104,14 @@ If MultiRoblox saved you time, consider tossing a tip my way.
 
 ---
 
+## License
+
+PolyForm Noncommercial License 1.0.0. Source is open and free to use, modify, and share for any noncommercial purpose. Commercial use requires a separate license — contact **pookiepepelss** to arrange one.
+
+See [LICENSE](LICENSE) for the full text.
+
 <div align="center">
 
-MIT License. See [LICENSE](LICENSE)
+Not affiliated with Roblox Corporation.
 
 </div>
