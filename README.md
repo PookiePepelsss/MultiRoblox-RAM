@@ -107,7 +107,7 @@ If MultiRoblox saved you time, consider tossing a tip my way.
 |---|---|
 | BTC | `15kEbCxtNKbQ2g16AmiW8BeEKU3h6i9S46` |
 | ETH | `0x179ab005a9CD84769934aB66825D38C347D9AB4d` |
-| LTC | `LTLYLK9mUMVUk9Gk5j3W8oYqtq1cYiU3Uy` |
+| LTC | `LTLYLK9mUMVUk9Gk5j3W8oYqtq1cYiU3Uy` | 
 
 ---
 
