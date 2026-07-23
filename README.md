@@ -8,7 +8,7 @@
 
 [![platform](https://img.shields.io/badge/platform-windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/PookiePepelsss/MultiRoblox-RAM/releases)
 [![built with tauri](https://img.shields.io/badge/built%20with-tauri-24C8DB?style=for-the-badge&logo=tauri&logoColor=white)](https://tauri.app/)
-[![license](https://img.shields.io/badge/license-PolyForm%20Noncommercial%20-3DDC97?style=for-the-badge)](LICENSE)
+[![license](https://img.shields.io/badge/license-MultiRoblox%20(no%20resale)-3DDC97?style=for-the-badge)](LICENSE)
 [![latest release](https://img.shields.io/github/v/tag/PookiePepelsss/MultiRoblox-RAM?style=for-the-badge&label=latest&color=FF6B6B)](https://github.com/PookiePepelsss/MultiRoblox-RAM/releases)
 
 <br>
@@ -44,6 +44,7 @@ build.bat
 - Nicknames, search, and filtering across all saved accounts
 - Cookies encrypted with AES-256-GCM, stored locally. Nothing leaves your device
 - Auto-relaunch on unexpected disconnect, back into the same game (crash-loop protected)
+- Right-click a running account to set its process priority (Realtime down to Low)
 
 ### 📦 Groups
 - Bundle accounts into groups (farm squad, trading alts, etc.)
@@ -69,7 +70,7 @@ build.bat
 
 ### ⚙️ Settings
 - **General**: multi-instance status, anti-AFK, relaunch-on-disconnect
-- **Performance**: RAM trim (manual or automatic on an interval), block RobloxCrashHandler.exe from starting, lower CPU priority once multiple accounts are running
+- **Performance**: RAM trim (manual or automatic on an interval), block RobloxCrashHandler.exe from starting, lower CPU priority once multiple accounts are running, force a specific rendering engine (Direct3D 11/9, OpenGL, Vulkan) via Fast Flags
 - **Data & Privacy**: custom encryption key (AES-256-GCM) or OS-native DPAPI (Windows keychain), clear all accounts
 - **Themes**: light/dark and several accent themes
 - **Sounds**: custom UI sound profiles with volume control and upload-your-own support
@@ -92,6 +93,12 @@ If the native helper isn't shipped with a build, it compiles from the bundled so
 
 ---
 
+## Disclaimer
+
+Running multiple Roblox accounts isn't something Roblox actively bans for normal use, but using this software is at your own risk. The author is not responsible for any bans, suspensions, or other action taken against your account.
+
+---
+
 ## Support
 
 If MultiRoblox saved you time, consider tossing a tip my way.
@@ -106,7 +113,7 @@ If MultiRoblox saved you time, consider tossing a tip my way.
 
 ## License
 
-PolyForm Noncommercial License 1.0.0. Source is open and free to use, modify, and share for any noncommercial purpose. Commercial use requires a separate license contact **pookiepepelss** to arrange one.
+Free to use, modify, and share. You may not sell it, and any copy or fork must credit **pookiepepelss** as the original author.
 
 See [LICENSE](LICENSE) for the full text.
 
