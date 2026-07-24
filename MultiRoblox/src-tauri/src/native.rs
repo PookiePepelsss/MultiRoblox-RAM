@@ -396,6 +396,9 @@ async fn native_pids(app: &AppHandle, state: &AppState) -> Option<std::collectio
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     hide_window(&mut cmd);
+    // See the kill_on_drop comment in set_roblox_volume below -- same leak,
+    // same fix, on the "pids" one-shot instead of "volume".
+    cmd.kill_on_drop(true);
     match tokio::time::timeout(Duration::from_secs(10), cmd.output()).await {
         Ok(Ok(out)) if out.status.success() => {
             let s = String::from_utf8_lossy(&out.stdout);
@@ -423,6 +426,13 @@ pub async fn set_roblox_volume(app: &AppHandle, state: &AppState, percent: f64) 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     hide_window(&mut cmd);
+    // tokio::time::timeout wrapping cmd.output() below: on timeout, the
+    // future (and the child it owns internally) is just dropped -- without
+    // kill_on_drop that leaves RobloxNative.exe running forever, orphaned,
+    // with no Child handle left anywhere to clean it up. This runs once per
+    // launch (see do_launch), so a timeout here is exactly "one more
+    // RobloxNative.exe every time I open Roblox".
+    cmd.kill_on_drop(true);
     match tokio::time::timeout(Duration::from_secs(12), cmd.output()).await {
         Ok(Ok(out)) => {
             let s = String::from_utf8_lossy(&out.stdout);
@@ -469,21 +479,35 @@ fn trim_process_memory(_pid: u32) -> bool {
     false
 }
 
+// Matches Task Manager's own priority names/mapping (its "Low" is
+// IDLE_PRIORITY_CLASS, not a literal low-priority constant).
 #[cfg(windows)]
-fn set_process_priority(pid: u32, below_normal: bool) -> bool {
-    use windows::Win32::Foundation::CloseHandle;
+fn priority_class_from_name(name: &str) -> Option<windows::Win32::System::Threading::PROCESS_CREATION_FLAGS> {
     use windows::Win32::System::Threading::{
-        OpenProcess, SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
-        PROCESS_SET_INFORMATION,
+        ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS,
+        IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS, REALTIME_PRIORITY_CLASS,
+    };
+    Some(match name {
+        "realtime" => REALTIME_PRIORITY_CLASS,
+        "high" => HIGH_PRIORITY_CLASS,
+        "abovenormal" => ABOVE_NORMAL_PRIORITY_CLASS,
+        "normal" => NORMAL_PRIORITY_CLASS,
+        "belownormal" => BELOW_NORMAL_PRIORITY_CLASS,
+        "low" => IDLE_PRIORITY_CLASS,
+        _ => return None,
+    })
+}
+
+#[cfg(windows)]
+fn set_process_priority(pid: u32, class_name: &str) -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, SetPriorityClass, PROCESS_SET_INFORMATION};
+    let Some(class) = priority_class_from_name(class_name) else {
+        return false;
     };
     unsafe {
         let Ok(handle) = OpenProcess(PROCESS_SET_INFORMATION, false, pid) else {
             return false;
-        };
-        let class = if below_normal {
-            BELOW_NORMAL_PRIORITY_CLASS
-        } else {
-            NORMAL_PRIORITY_CLASS
         };
         let ok = SetPriorityClass(handle, class).is_ok();
         let _ = CloseHandle(handle);
@@ -491,8 +515,31 @@ fn set_process_priority(pid: u32, below_normal: bool) -> bool {
     }
 }
 #[cfg(not(windows))]
-fn set_process_priority(_pid: u32, _below_normal: bool) -> bool {
+fn set_process_priority(_pid: u32, _class_name: &str) -> bool {
     false
+}
+
+// Manually set priorities stick -- recorded here so apply_priority_policy's
+// automatic multi-instance rule leaves this account alone until it's
+// relaunched.
+pub fn set_account_priority(state: &AppState, account_id: &str, class_name: &str) -> Value {
+    let Some(pid) = state.account_pids.lock().unwrap().get(account_id).copied() else {
+        return serde_json::json!({ "ok": false, "error": "Account isn't running" });
+    };
+    if set_process_priority(pid, class_name) {
+        state
+            .manual_priority
+            .lock()
+            .unwrap()
+            .insert(account_id.to_string(), class_name.to_string());
+        serde_json::json!({ "ok": true })
+    } else {
+        serde_json::json!({ "ok": false, "error": "Failed to set priority" })
+    }
+}
+
+pub fn clear_manual_priority(state: &AppState, account_id: &str) {
+    state.manual_priority.lock().unwrap().remove(account_id);
 }
 
 // User opt-in (Settings -> Performance): once more than one account is
@@ -500,7 +547,8 @@ fn set_process_priority(_pid: u32, _below_normal: bool) -> bool {
 // one is actually being interacted with -- dropping the rest to Below
 // Normal lets the OS scheduler favor whichever isn't idle. Re-evaluated
 // after every launch/kill so it self-corrects back to Normal once only one
-// instance is left running.
+// instance is left running. Accounts with a manual override (right-click ->
+// Set priority) are skipped so the automatic rule doesn't stomp on it.
 async fn apply_priority_policy(state: &AppState) {
     let enabled = crate::settings::load_settings()
         .get("lowPriorityMultiInstance")
@@ -509,10 +557,20 @@ async fn apply_priority_policy(state: &AppState) {
     if !enabled {
         return;
     }
-    let pids: Vec<u32> = state.account_pids.lock().unwrap().values().copied().collect();
-    let below_normal = pids.len() > 1;
-    for pid in pids {
-        set_process_priority(pid, below_normal);
+    let accounts: Vec<(String, u32)> = state
+        .account_pids
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(id, pid)| (id.clone(), *pid))
+        .collect();
+    let class_name = if accounts.len() > 1 { "belownormal" } else { "normal" };
+    let overridden = state.manual_priority.lock().unwrap();
+    for (account_id, pid) in accounts {
+        if overridden.contains_key(&account_id) {
+            continue;
+        }
+        set_process_priority(pid, class_name);
     }
 }
 
@@ -629,6 +687,7 @@ pub async fn kill_all_roblox(app: &AppHandle, state: &AppState) -> Value {
     ]);
     hide_window(&mut cmd);
     state.account_pids.lock().unwrap().clear();
+    state.manual_priority.lock().unwrap().clear();
     let had_running = !watched_ids.is_empty();
 
     let result = tokio::time::timeout(Duration::from_secs(6), cmd.output()).await;
@@ -649,6 +708,7 @@ pub async fn kill_account_roblox(app: &AppHandle, state: &AppState, account_id: 
     let pid = state.account_pids.lock().unwrap().remove(account_id);
     state.watched_accounts.lock().unwrap().remove(account_id);
     state.miss_counts.lock().unwrap().remove(account_id);
+    clear_manual_priority(state, account_id);
     stop_watch_poll_if_idle(state);
 
     let notify = |app: &AppHandle| {
@@ -670,31 +730,6 @@ pub async fn kill_account_roblox(app: &AppHandle, state: &AppState, account_id: 
     notify(app);
     apply_priority_policy(state).await;
     serde_json::json!({ "ok": true })
-}
-
-// RobloxCrashHandler.exe spawns as a companion process within the first few
-// seconds of RobloxPlayerBeta.exe starting -- there's no launch flag to stop
-// it, so the only way to suppress it is to kill it the moment it appears.
-// Blind taskkill on an absent image just fails silently, so no need to check
-// existence first.
-// Runs for as long as the toggle is on (started at app boot / toggle-on,
-// Checks (cheap tasklist query, no taskkill overhead) for RobloxCrashHandler.exe
-// a few times right after it would normally spawn, kills it the moment it's
-// seen, then stops -- no perpetual background polling. Re-armed on every
-// launch call, which is the only time this process actually spawns.
-pub async fn sweep_crash_handler() {
-    for _ in 0..10 {
-        if let Some(out) = tasklist("RobloxCrashHandler.exe").await {
-            if out.to_lowercase().contains("robloxcrashhandler") {
-                let mut cmd = Command::new("cmd");
-                cmd.args(["/c", "taskkill /F /IM RobloxCrashHandler.exe"]);
-                hide_window(&mut cmd);
-                let _ = cmd.output().await;
-                return;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
 }
 
 fn close_singleton_handles_only<'a>(
@@ -731,7 +766,14 @@ fn close_singleton_handles_only<'a>(
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
+        // start_kill() only signals termination -- it doesn't confirm the
+        // process actually exited. Without an explicit wait(), a closehandles
+        // process that's slow to die (or that the kill signal races with)
+        // stays alive in the background, and since this runs on every single
+        // launch, that's exactly the kind of thing that looks like "a new
+        // RobloxNative process every time I launch an account".
         let _ = child.start_kill();
+        let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
     })
 }
 
@@ -811,8 +853,22 @@ pub fn get_fflag_path() -> Option<PathBuf> {
 // spawning it triggers Roblox's own repair/reinstall prompt.
 const MIN_PLAUSIBLE_EXE_BYTES: u64 = 5_000_000;
 
-async fn spawn_roblox_direct(roblox_uri: &str) -> Option<u32> {
-    let exe = get_latest_roblox_version_dir().map(|(_, exe)| exe)?;
+// live_version is the current LIVE-channel clientVersionUpload (e.g.
+// "version-0123456789abcdef"), which is exactly the install's own
+// version-folder name -- so this is a plain string compare, no parsing.
+// A locally installed copy that isn't LIVE (stale cache, beta/canary
+// channel someone's bootstrapper pulled, etc.) is refused here rather than
+// force-launched; returning None falls through to the existing
+// roblox-player: URI fallback, which hands off to Roblox's own updater to
+// fetch/launch the real LIVE client instead.
+async fn spawn_roblox_direct(roblox_uri: &str, live_version: Option<&str>) -> Option<u32> {
+    let (dir, exe) = get_latest_roblox_version_dir()?;
+    if let Some(live) = live_version {
+        let installed = dir.file_name()?.to_str()?;
+        if installed != live {
+            return None;
+        }
+    }
     let meta = std::fs::metadata(&exe).ok()?;
     if meta.len() < MIN_PLAUSIBLE_EXE_BYTES {
         return None;
@@ -1080,6 +1136,7 @@ async fn watch_tick(app: &AppHandle) {
             ),
         );
         state.account_pids.lock().unwrap().remove(account_id);
+        clear_manual_priority(&state, account_id);
         let _ = app.emit("roblox:closed", account_id);
         apply_priority_policy(&state).await;
 
@@ -1283,25 +1340,61 @@ pub async fn do_launch(
 
     let launch_time = now_ms();
     let browser_id: u64 = rand::random::<u64>() % 9_000_000_000_000 + 1_000_000_000_000;
+
+    // Settings > Roblox: which deployment channel to run, and whether that
+    // choice is pinned. Unlocked always means production/LIVE (empty
+    // channel), matching the previous hardcoded behavior.
+    let launch_settings = crate::settings::load_settings();
+    let lock_channel = launch_settings
+        .get("lockChannel")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let channel = if lock_channel {
+        launch_settings
+            .get("robloxChannel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    } else {
+        String::new()
+    };
+
     let roblox_uri = if !launcher_url.is_empty() {
         format!(
-            "roblox-player:1+launchmode:play+gameinfo:{}+launchtime:{}+placelauncherurl:{}+browsertrackerid:{}+robloxLocale:en_us+gameLocale:en_us+channel:+LaunchExp:InApp",
-            ticket, launch_time, urlencoding::encode(&launcher_url), browser_id
+            "roblox-player:1+launchmode:play+gameinfo:{}+launchtime:{}+placelauncherurl:{}+browsertrackerid:{}+robloxLocale:en_us+gameLocale:en_us+channel:{}+LaunchExp:InApp",
+            ticket, launch_time, urlencoding::encode(&launcher_url), browser_id, urlencoding::encode(&channel)
         )
     } else {
-        format!("roblox-player:1+launchmode:app+gameinfo:{}+launchtime:{}+browsertrackerid:{}+robloxLocale:en_us+gameLocale:en_us", ticket, launch_time, browser_id)
+        format!(
+            "roblox-player:1+launchmode:app+gameinfo:{}+launchtime:{}+browsertrackerid:{}+robloxLocale:en_us+gameLocale:en_us+channel:{}",
+            ticket, launch_time, browser_id, urlencoding::encode(&channel)
+        )
     };
+
+    // Only ever launch the current build for the target channel (LIVE by
+    // default, or the locked channel above) -- a stale cached version-folder
+    // or a different channel a bootstrapper pulled down shouldn't get
+    // force-launched just because it's the newest thing physically on disk.
+    // Unknown (network failure) doesn't block launch, since that's Roblox's
+    // API being unreachable, not a real mismatch.
+    let live_version = crate::roblox_api::get_roblox_version(
+        state,
+        if lock_channel { Some(channel.as_str()) } else { None },
+    )
+    .await
+    .ok();
 
     // Falling through to the OS URI handler on spawn failure is what
     // triggers Roblox's own "reinstall?" prompt -- usually just a launch
-    // catching Roblox mid self-update with a truncated exe, so retry a few
-    // times before giving up to that fallback.
+    // catching Roblox mid self-update with a truncated exe (or, now, a
+    // non-LIVE install), so retry a few times before giving up to that
+    // fallback, which hands off to Roblox's own updater.
     let mut spawned_pid: Option<u32> = None;
     for attempt in 0..3 {
         if attempt > 0 {
             tokio::time::sleep(Duration::from_secs(3)).await;
         }
-        spawned_pid = spawn_roblox_direct(&roblox_uri).await;
+        spawned_pid = spawn_roblox_direct(&roblox_uri, live_version.as_deref()).await;
         if spawned_pid.is_some() {
             break;
         }
@@ -1320,14 +1413,6 @@ pub async fn do_launch(
     }
 
     apply_priority_policy(state).await;
-
-    if crate::settings::load_settings()
-        .get("blockCrashHandler")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true)
-    {
-        tokio::spawn(sweep_crash_handler());
-    }
 
     *state.last_launch_ts.lock().unwrap() = now_ms();
     crate::roblox_api::invalidate_ticket(state, &cookie);

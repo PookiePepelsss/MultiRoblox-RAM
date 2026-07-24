@@ -337,6 +337,7 @@
         <div class="tab-bar" style="flex-shrink:0">
           <button class="tab-btn active" id="stab-general" onclick="settingsTab('general')">General</button>
           <button class="tab-btn" id="stab-performance" onclick="settingsTab('performance')">Performance</button>
+          <button class="tab-btn" id="stab-roblox" onclick="settingsTab('roblox')">Roblox</button>
           <button class="tab-btn" id="stab-privacy" onclick="settingsTab('privacy')">Data &amp; Privacy</button>
           <button class="tab-btn" id="stab-themes" onclick="settingsTab('themes')">Themes</button>
           <button class="tab-btn" id="stab-sounds" onclick="settingsTab('sounds')">Sounds</button>
@@ -404,13 +405,75 @@
           </div>
 
           <div class="sc">
-            <div class="sc-head">Crash Handler</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Block crash handler</div><div class="sr-desc">Kills RobloxCrashHandler.exe right after each launch, then stops watching. Saves a bit of RAM per instance without polling in the background.</div></div><label class="toggle"><input type="checkbox" id="set-blockcrash" onchange="toggleBlockCrashHandler()"/><span class="toggle-trk"></span></label></div>
+            <div class="sc-head">CPU Priority</div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Lower priority when multiple accounts run</div><div class="sr-desc">Once more than one account is running, sets all of them to Below Normal priority so the OS scheduler doesn't split CPU evenly across idle instances. Reverts to Normal automatically when back down to one.</div></div><label class="toggle"><input type="checkbox" id="set-lowpriority" onchange="toggleLowPriority()"/><span class="toggle-trk"></span></label></div>
           </div>
 
           <div class="sc">
-            <div class="sc-head">CPU Priority</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Lower priority when multiple accounts run</div><div class="sr-desc">Once more than one account is running, sets all of them to Below Normal priority so the OS scheduler doesn't split CPU evenly across idle instances. Reverts to Normal automatically when back down to one.</div></div><label class="toggle"><input type="checkbox" id="set-lowpriority" onchange="toggleLowPriority()"/><span class="toggle-trk"></span></label></div>
+            <div class="sc-head">Rendering Engine</div>
+            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
+              <div class="sr-left" style="width:100%"><div class="sr-label">Graphics API</div><div class="sr-desc">Forces which rendering backend Roblox uses via Fast Flags. Automatic lets Roblox pick. Applies on next launch.</div></div>
+              <div class="cdd" id="cdd-rendereng" style="width:100%">
+                <div class="cdd-trigger" id="cdd-rendereng-trigger" onclick="toggleCdd('rendereng')" role="button" tabindex="0" aria-label="Rendering engine">
+                  <span class="cdd-label" id="cdd-rendereng-label">Automatic</span>
+                  <span class="material-icons-round cdd-arrow">expand_more</span>
+                </div>
+                <div class="cdd-menu" id="cdd-rendereng-menu">
+                  <div class="cdd-option selected" data-value="" onclick="setRenderEngine('')" role="button" tabindex="0">
+                    <div class="cdd-opt-left"><div class="cdd-opt-name">Automatic</div><div class="cdd-opt-desc">Roblox picks the best backend for your GPU</div></div>
+                    <span class="material-icons-round cdd-check">check</span>
+                  </div>
+                  <div class="cdd-option" data-value="d3d11" onclick="setRenderEngine('d3d11')" role="button" tabindex="0">
+                    <div class="cdd-opt-left"><div class="cdd-opt-name">Direct3D 11</div><div class="cdd-opt-desc">Default on most Windows systems</div></div>
+                    <span class="material-icons-round cdd-check">check</span>
+                  </div>
+                  <div class="cdd-option" data-value="opengl" onclick="setRenderEngine('opengl')" role="button" tabindex="0">
+                    <div class="cdd-opt-left"><div class="cdd-opt-name">OpenGL</div><div class="cdd-opt-desc">Fallback for unsupported DirectX drivers</div></div>
+                    <span class="material-icons-round cdd-check">check</span>
+                  </div>
+                  <div class="cdd-option" data-value="vulkan" onclick="setRenderEngine('vulkan')" role="button" tabindex="0">
+                    <div class="cdd-opt-left"><div class="cdd-opt-name">Vulkan</div><div class="cdd-opt-desc">Newer GPUs, can improve performance</div></div>
+                    <span class="material-icons-round cdd-check">check</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="sw" id="stab-panel-roblox" style="display:none">
+
+          <div class="sc">
+            <div class="sc-head">Deployment Channel</div>
+            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
+              <div class="sr-left" style="width:100%"><div class="sr-label">Channel</div><div class="sr-desc">Which Roblox deployment channel to launch. Production is the normal LIVE client everyone gets.</div></div>
+              <div class="cdd" id="cdd-channel" style="width:100%">
+                <div class="cdd-trigger" id="cdd-channel-trigger" onclick="toggleCdd('channel')" role="button" tabindex="0" aria-label="Roblox channel">
+                  <span class="cdd-label" id="cdd-channel-label">Production (LIVE)</span>
+                  <span class="material-icons-round cdd-arrow">expand_more</span>
+                </div>
+                <div class="cdd-menu" id="cdd-channel-menu">
+                  <div class="cdd-option selected" data-value="" onclick="setRobloxChannel('')" role="button" tabindex="0">
+                    <div class="cdd-opt-left"><div class="cdd-opt-name">Production (LIVE)</div><div class="cdd-opt-desc">The normal, stable channel everyone gets</div></div>
+                    <span class="material-icons-round cdd-check">check</span>
+                  </div>
+                  <div class="cdd-option" data-value="zcanary" onclick="setRobloxChannel('zcanary')" role="button" tabindex="0">
+                    <div class="cdd-opt-left"><div class="cdd-opt-name">Canary</div><div class="cdd-opt-desc">Roblox's early test channel, less stable</div></div>
+                    <span class="material-icons-round cdd-check">check</span>
+                  </div>
+                  <div class="cdd-option" data-value="zintegration" onclick="setRobloxChannel('zintegration')" role="button" tabindex="0">
+                    <div class="cdd-opt-left"><div class="cdd-opt-name">Integration</div><div class="cdd-opt-desc">Roblox's internal test channel, least stable</div></div>
+                    <span class="material-icons-round cdd-check">check</span>
+                  </div>
+                  <div class="cdd-option" data-value="znext" onclick="setRobloxChannel('znext')" role="button" tabindex="0">
+                    <div class="cdd-opt-left"><div class="cdd-opt-name">Next</div><div class="cdd-opt-desc">Roblox's upcoming-features preview channel</div></div>
+                    <span class="material-icons-round cdd-check">check</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Lock channel</div><div class="sr-desc">Always launches the channel above, and refuses to launch a locally installed build that isn't on it. Off just runs whatever's newest on disk.</div></div><label class="toggle"><input type="checkbox" id="set-lockchannel" onchange="toggleLockChannel()"/><span class="toggle-trk"></span></label></div>
           </div>
 
         </div>

@@ -130,7 +130,14 @@ async function submitEnc() {
     if (_encMode === 'setup') {
       if (!val) { _encErr('Please enter an encryption key.'); action.disabled = false; return; }
       const r = await api.encSetKey(val);
-      if (!r || !r.ok) { _encErr('Could not set encryption key. Please try again.'); action.disabled = false; return; }
+      if (!r || !r.ok) {
+        const reason = r && r.error === 'decrypt failed'
+          ? 'One or more saved accounts cannot be decrypted (their cookies may be from a different PC or Windows profile). Remove those accounts and try again.'
+          : (r && r.error ? 'Could not set encryption key: ' + r.error : 'Could not set encryption key. Please try again.');
+        _encErr(reason);
+        action.disabled = false;
+        return;
+      }
     } else {
       if (!val) { _encErr('Please enter your encryption key.'); action.disabled = false; return; }
       const r = await api.encUnlock(val);
@@ -291,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function detectRobloxVersion() {
   try {
-    const ver = await api.getRobloxVersion();
+    const ver = await api.getRobloxVersion(settings.lockChannel ? settings.robloxChannel : '');
     if (ver) {
       // Show full hash in titlebar badge, also update settings stat
       document.getElementById('tb-roblox-ver').textContent = ver;
@@ -349,10 +356,11 @@ function applySettings() {
   }
   const relaunch = document.getElementById('set-autorelaunch');
   if (relaunch) relaunch.checked = !!settings.autoRelaunch;
-  const blockCrash = document.getElementById('set-blockcrash');
-  if (blockCrash) blockCrash.checked = settings.blockCrashHandler !== false;
   const lowPriority = document.getElementById('set-lowpriority');
   if (lowPriority) lowPriority.checked = settings.lowPriorityMultiInstance !== false;
+  const lockChannel = document.getElementById('set-lockchannel');
+  if (lockChannel) lockChannel.checked = !!settings.lockChannel;
+  robloxChannelUpdateUI(settings.robloxChannel || '');
 }
 
 let _acctQuery = '', _acctFilter = (() => { try { const f = localStorage.getItem('mr-acct-filter'); return (f && f !== 'running' && f !== 'idle') ? f : 'all'; } catch { return 'all'; } })(), _acctView = (() => { try { return localStorage.getItem('mr-acct-view') === 'list' ? 'list' : 'grid'; } catch { return 'grid'; } })();
@@ -447,19 +455,20 @@ function toggleAutoRelaunch() {
   api.saveSettings({ autoRelaunch: on });
   toast(on ? 'Relaunch on disconnect on' : 'Relaunch on disconnect off', on ? 'ok' : 'err');
 }
-function toggleBlockCrashHandler() {
-  const el = document.getElementById('set-blockcrash');
-  const on = el.checked;
-  settings.blockCrashHandler = on;
-  api.saveSettings({ blockCrashHandler: on });
-  toast(on ? 'Crash handler blocked on next launch' : 'Crash handler allowed', on ? 'ok' : 'err');
-}
 function toggleLowPriority() {
   const el = document.getElementById('set-lowpriority');
   const on = el.checked;
   settings.lowPriorityMultiInstance = on;
   api.saveSettings({ lowPriorityMultiInstance: on });
   toast(on ? 'Multi-instance priority lowering on' : 'Multi-instance priority lowering off', on ? 'ok' : 'err');
+}
+function toggleLockChannel() {
+  const el = document.getElementById('set-lockchannel');
+  const on = el.checked;
+  settings.lockChannel = on;
+  api.saveSettings({ lockChannel: on });
+  toast(on ? 'Channel locked' : 'Channel unlocked', on ? 'ok' : 'err');
+  detectRobloxVersion();
 }
 function toggleAutoTrim() {
   const el = document.getElementById('set-autotrim');
@@ -514,13 +523,14 @@ function refreshAllSliderFills() {
 }
 
 function settingsTab(tab) {
-  ['general','performance','privacy','themes','sounds'].forEach(t => {
+  ['general','performance','roblox','privacy','themes','sounds'].forEach(t => {
     const panel = document.getElementById('stab-panel-' + t);
     const btn = document.getElementById('stab-' + t);
     if (panel) panel.style.display = t === tab ? '' : 'none';
     if (btn) btn.classList.toggle('active', t === tab);
   });
   if (tab === 'sounds') typeof soundRenderPage === 'function' && soundRenderPage();
+  if (tab === 'performance') renderEngineInit();
   refreshAllSliderFills();
 }
 
@@ -577,6 +587,16 @@ function showCardMenu(id, x, y) {
     <div class="ctx-header">${esc(a ? (a.nickname || a.username || 'Unknown') : id)}</div>
     ${isLive ? `<button class="ctx-item ctx-danger" onclick="ctxKill('${id}')"><span class="material-icons-round">power_settings_new</span>Kill instance</button>` : ''}
     ${isLive ? `<button class="ctx-item" onclick="ctxTrim('${id}')"><span class="material-icons-round">memory</span>Trim memory</button>` : ''}
+    ${isLive ? `
+    <div class="ctx-item ctx-has-sub">
+      <span class="material-icons-round">speed</span>Set priority
+      <span class="material-icons-round ctx-sub-arrow">chevron_right</span>
+      <div class="ctx-submenu">
+        ${['realtime', 'high', 'abovenormal', 'normal', 'belownormal', 'low'].map(p =>
+          `<button class="ctx-item${_accountPriority[id] === p ? ' ctx-active' : ''}" onclick="ctxSetPriority('${id}','${p}')">${PRIORITY_LABELS[p]}</button>`
+        ).join('')}
+      </div>
+    </div>` : ''}
     <button class="ctx-item" onclick="ctxLaunch('${id}')"><span class="material-icons-round">rocket_launch</span>${isLive ? 'Relaunch' : 'Launch'}</button>
     <button class="ctx-item" onclick="ctxEdit('${id}')"><span class="material-icons-round">edit</span>Edit account</button>
     <div class="ctx-sep"></div>
@@ -607,6 +627,21 @@ async function ctxTrim(id) {
     toast(res?.error || 'Could not trim this instance', 'err');
   }
 }
+const PRIORITY_LABELS = { realtime: 'Realtime', high: 'High', abovenormal: 'Above normal', normal: 'Normal', belownormal: 'Below normal', low: 'Low' };
+const _accountPriority = {}; // id -> last priority manually set this session, drives the ctx-active highlight
+async function ctxSetPriority(id, priority) {
+  closeCardMenu();
+  const a = accounts.find(x => x.id === id);
+  let res;
+  try { res = await api.setAccountPriority(id, priority); } catch { res = null; }
+  if (res?.ok) {
+    _accountPriority[id] = priority;
+    toast(`Priority set to ${PRIORITY_LABELS[priority]} for ${a?.nickname || a?.username || 'instance'}`, 'ok');
+  } else {
+    toast(res?.error || 'Could not set priority', 'err');
+  }
+}
+
 function ctxLaunch(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a) { launchAcc = a; openModal('m-launch'); } }
 function ctxEdit(id) { closeCardMenu(); editAccount(id); }
 function ctxCopyId(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a?.userId) navigator.clipboard.writeText(a.userId).then(() => toast('User ID copied', 'ok')); else toast('No user ID', 'err'); }
@@ -1954,6 +1989,69 @@ async function mixWriteFlag(key, value) {
   if (value === null) delete flags[key];
   else flags[key] = String(value);
   try { await api.writeFFlags(flags); } catch {}
+}
+
+// ── Rendering engine (Settings > Performance) ────────────────────────────
+// D3D9 removed -- Roblox dropped that render path, forcing it now crashes
+// the client with a missing-DLL error instead of falling back.
+const RENDER_ENGINE_FLAGS = {
+  d3d11: 'FFlagDebugGraphicsPreferD3D11',
+  opengl: 'FFlagDebugGraphicsPreferOpenGL',
+  vulkan: 'FFlagDebugGraphicsPreferVulkan',
+};
+const RENDER_ENGINE_LABELS = { '': 'Automatic', d3d11: 'Direct3D 11', opengl: 'OpenGL', vulkan: 'Vulkan' };
+
+async function renderEngineInit() {
+  let flags = {};
+  try { flags = (await api.readFFlags()) || {}; } catch {}
+  // Purge a stale D3D9 flag from before it was removed -- forcing it now
+  // crashes the client on launch instead of degrading gracefully.
+  if ('FFlagDebugGraphicsPreferD3D9' in flags) {
+    delete flags['FFlagDebugGraphicsPreferD3D9'];
+    try { await api.writeFFlags(flags); } catch {}
+  }
+  let current = '';
+  for (const [engine, flagName] of Object.entries(RENDER_ENGINE_FLAGS)) {
+    if (String(flags[flagName]).toLowerCase() === 'true') { current = engine; break; }
+  }
+  renderEngineUpdateUI(current);
+}
+
+function renderEngineUpdateUI(engine) {
+  const label = document.getElementById('cdd-rendereng-label');
+  if (label) label.textContent = RENDER_ENGINE_LABELS[engine] || 'Automatic';
+  document.querySelectorAll('#cdd-rendereng-menu .cdd-option').forEach(o =>
+    o.classList.toggle('selected', o.dataset.value === engine));
+}
+
+async function setRenderEngine(engine) {
+  let flags = {};
+  try { flags = (await api.readFFlags()) || {}; } catch {}
+  for (const flagName of Object.values(RENDER_ENGINE_FLAGS)) delete flags[flagName];
+  if (engine && RENDER_ENGINE_FLAGS[engine]) flags[RENDER_ENGINE_FLAGS[engine]] = 'True';
+  try { await api.writeFFlags(flags); } catch {}
+  renderEngineUpdateUI(engine);
+  closeAllCdd();
+  toast('Rendering engine: ' + (RENDER_ENGINE_LABELS[engine] || 'Automatic') + ' (next launch)', 'ok');
+}
+
+// ── Roblox deployment channel (Settings > Roblox) ─────────────────────────
+const ROBLOX_CHANNEL_LABELS = { '': 'Production (LIVE)', zcanary: 'Canary', zintegration: 'Integration', znext: 'Next' };
+
+function robloxChannelUpdateUI(channel) {
+  const label = document.getElementById('cdd-channel-label');
+  if (label) label.textContent = ROBLOX_CHANNEL_LABELS[channel] || 'Production (LIVE)';
+  document.querySelectorAll('#cdd-channel-menu .cdd-option').forEach(o =>
+    o.classList.toggle('selected', o.dataset.value === channel));
+}
+
+function setRobloxChannel(channel) {
+  settings.robloxChannel = channel;
+  api.saveSettings({ robloxChannel: channel });
+  robloxChannelUpdateUI(channel);
+  closeAllCdd();
+  toast('Roblox channel: ' + (ROBLOX_CHANNEL_LABELS[channel] || 'Production (LIVE)') + (settings.lockChannel ? '' : ' (enable Lock channel to apply)'), 'ok');
+  if (settings.lockChannel) detectRobloxVersion();
 }
 
 // Smoothly fill the slider track up to the current value.

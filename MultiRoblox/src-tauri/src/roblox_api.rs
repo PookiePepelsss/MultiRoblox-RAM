@@ -79,17 +79,37 @@ pub async fn fetch_user_info(state: &AppState, cookie: &str) -> UserInfo {
 }
 
 // Err carries the failure reason so the caller can log why, not just fail.
-pub async fn get_roblox_version(state: &AppState) -> Result<String, String> {
+// channel: None (or empty) checks the default production/LIVE channel via
+// clientsettingscdn's JSON API. Some("zcanary") etc. checks that specific
+// deployment channel instead -- clientsettingscdn's own `?channel=` query
+// param is silently ignored (confirmed live: passing zcanary, zintegration,
+// or a made-up channel name all return identical production data), so named
+// channels go through setup.rbxcdn.com/channel/<name>/version instead,
+// which returns the version hash as a plain-text body rather than JSON.
+pub async fn get_roblox_version(state: &AppState, channel: Option<&str>) -> Result<String, String> {
+    let channel = channel.filter(|c| !c.is_empty());
+    let url = match channel {
+        Some(ch) => format!("https://setup.rbxcdn.com/channel/{}/version", urlencoding::encode(ch)),
+        None => "https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer".to_string(),
+    };
     let res = state
         .http
-        .get("https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer")
+        .get(&url)
         .header("User-Agent", UA)
         .send()
         .await
         .map_err(|e| format!("network error: {e}"))?;
     let status = res.status();
     if status != 200 {
-        return Err(format!("unexpected status {status}"));
+        return Err(format!("unexpected status {status} -- unknown or restricted channel"));
+    }
+    if channel.is_some() {
+        let text = res.text().await.map_err(|e| format!("bad response body: {e}"))?;
+        let text = text.trim();
+        if text.is_empty() || !text.starts_with("version-") {
+            return Err("response wasn't a version hash".to_string());
+        }
+        return Ok(text.to_string());
     }
     let json: Value = res.json().await.map_err(|e| format!("bad response body: {e}"))?;
     json.get("clientVersionUpload")

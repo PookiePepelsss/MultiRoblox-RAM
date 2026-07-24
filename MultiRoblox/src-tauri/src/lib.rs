@@ -57,14 +57,6 @@ pub fn run() {
                     native::start_antiafk(&handle3, &state).await;
                 });
             }
-            let block_crash = settings::load_settings()
-                .get("blockCrashHandler")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            if block_crash {
-                tauri::async_runtime::spawn(native::sweep_crash_handler());
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -99,6 +91,7 @@ pub fn run() {
             commands::roblox_watched_ids,
             commands::roblox_trim_memory,
             commands::roblox_trim_account_memory,
+            commands::roblox_set_account_priority,
             commands::roblox_get_game_name,
             commands::roblox_get_json,
             commands::altgen_generate,

@@ -37,7 +37,6 @@ pub fn settings_save(state: State<AppState>, data: Map<String, Value>) -> bool {
     let multi_instance = data.get("multiInstance").cloned();
     let antiafk = data.get("antiAfk").cloned();
     let antiafk_interval_changed = data.contains_key("antiAfkInterval");
-    let block_crash = data.get("blockCrashHandler").cloned();
     for (k, v) in data {
         s.insert(k, v);
     }
@@ -73,9 +72,6 @@ pub fn settings_save(state: State<AppState>, data: Map<String, Value>) -> bool {
             let st = app.state::<AppState>();
             crate::native::start_antiafk(&app, &st).await;
         });
-    }
-    if let Some(Value::Bool(true)) = block_crash {
-        tauri::async_runtime::spawn(crate::native::sweep_crash_handler());
     }
     true
 }
@@ -365,14 +361,18 @@ pub fn fps_write(cap: f64) -> Value {
 
 // ---- roblox process / launch ----
 #[tauri::command]
-pub async fn roblox_get_version(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>, ()> {
+pub async fn roblox_get_version(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    channel: Option<String>,
+) -> Result<Option<String>, ()> {
     // One retry -- covers a transient blip (CDN hiccup, brief DNS failure)
     // instead of leaving the badge stuck on "Not detected" until next launch.
-    match crate::roblox_api::get_roblox_version(&state).await {
+    match crate::roblox_api::get_roblox_version(&state, channel.as_deref()).await {
         Ok(v) => Ok(Some(v)),
         Err(_) => {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            match crate::roblox_api::get_roblox_version(&state).await {
+            match crate::roblox_api::get_roblox_version(&state, channel.as_deref()).await {
                 Ok(v) => Ok(Some(v)),
                 Err(e) => {
                     crate::native::emit_log(&app, "warn", "system", &format!("Could not fetch latest Roblox version: {e}"), None);
@@ -500,6 +500,11 @@ pub async fn roblox_trim_account_memory(
     id: String,
 ) -> Result<Value, ()> {
     Ok(crate::native::trim_account_memory(&app, &state, &id).await)
+}
+
+#[tauri::command]
+pub fn roblox_set_account_priority(state: State<AppState>, id: String, priority: String) -> Value {
+    crate::native::set_account_priority(&state, &id, &priority)
 }
 
 #[tauri::command]

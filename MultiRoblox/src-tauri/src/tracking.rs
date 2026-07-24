@@ -39,6 +39,10 @@ pub async fn capture_account_png(app: &AppHandle, state: &AppState, account_id: 
     }
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     hide_window(&mut cmd);
+    // Without this, a timeout below drops cmd.output()'s internal child
+    // without killing it -- the process leaks in the background instead of
+    // exiting, since nothing else ever holds a handle to it.
+    cmd.kill_on_drop(true);
 
     let output = tokio::time::timeout(Duration::from_secs(15), cmd.output())
         .await

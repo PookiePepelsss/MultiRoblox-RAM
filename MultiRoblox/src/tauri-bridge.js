@@ -33,6 +33,7 @@
     getWatchedIds: () => invoke('roblox_watched_ids'),
     trimRobloxMemory: () => invoke('roblox_trim_memory'),
     trimAccountMemory: (id) => invoke('roblox_trim_account_memory', { id }),
+    setAccountPriority: (id, priority) => invoke('roblox_set_account_priority', { id, priority }),
     onAllRobloxClosed: (cb) => listen('roblox:allClosed', () => cb()),
 
     launchRoblox: (id, cookie, target) => invoke('roblox_launch', { id, cookie, target }),
@@ -66,7 +67,7 @@
     onRobloxCount: (cb) => listen('roblox:count', (e) => cb(e.payload)),
     onLogEntry: (cb) => listen('log:entry', (e) => cb(e.payload)),
 
-    getRobloxVersion: () => invoke('roblox_get_version'),
+    getRobloxVersion: (channel) => invoke('roblox_get_version', { channel: channel || null }),
     getGameName: (placeId, cookie) => invoke('roblox_get_game_name', { placeIdOrTarget: placeId, cookie }),
     // *.roblox.com sends no CORS headers -- fetch() from the webview's real
     // https://tauri.localhost origin gets blocked (Electron's file:// origin was
