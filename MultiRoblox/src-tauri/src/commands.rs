@@ -388,6 +388,13 @@ pub fn fps_write(cap: f64) -> Value {
     if let Ok(meta) = std::fs::metadata(&p) {
         let mut perms = meta.permissions();
         if perms.readonly() {
+            // Clears FILE_ATTRIBUTE_READONLY on Windows, which is the whole
+            // point here. clippy flags this because on Unix the same call
+            // widens the mode to 0o666; this path is Windows-only (the file
+            // lives under %LOCALAPPDATA%\Roblox) and the file is rewritten
+            // immediately below, so there is no window where a laxer mode
+            // matters.
+            #[allow(clippy::permissions_set_readonly_false)]
             perms.set_readonly(false);
             let _ = std::fs::set_permissions(&p, perms);
         }

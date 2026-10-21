@@ -17,8 +17,8 @@ pub(crate) fn hide_window(cmd: &mut Command) {
 }
 
 // ---- native helper (RobloxNative.exe) resolution ----
-// Tauri's resource_dir() returns a \\?\-prefixed path on Windows that
-// csc.exe's argument parser chokes on, so it has to be stripped first.
+// Tauri's resource_dir() returns a \\?\-prefixed path on Windows, which not
+// every consumer of such a path handles, so it is stripped first.
 fn strip_verbatim_prefix(p: &Path) -> PathBuf {
     let s = p.to_string_lossy();
     if let Some(rest) = s.strip_prefix(r"\\?\") {
@@ -28,13 +28,6 @@ fn strip_verbatim_prefix(p: &Path) -> PathBuf {
     }
 }
 
-fn native_src_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().resource_dir().ok().map(|d| {
-        strip_verbatim_prefix(&d)
-            .join("resources")
-            .join("RobloxNative.cs")
-    })
-}
 fn bundled_native_exe_path(app: &AppHandle) -> Option<PathBuf> {
     app.path().resource_dir().ok().map(|d| {
         strip_verbatim_prefix(&d)
@@ -85,27 +78,6 @@ fn ensure_embedded_native_exe() -> Option<PathBuf> {
     Some(out)
 }
 
-fn find_csc() -> Option<PathBuf> {
-    let win = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".to_string());
-    for c in [
-        Path::new(&win)
-            .join("Microsoft.NET")
-            .join("Framework64")
-            .join("v4.0.30319")
-            .join("csc.exe"),
-        Path::new(&win)
-            .join("Microsoft.NET")
-            .join("Framework")
-            .join("v4.0.30319")
-            .join("csc.exe"),
-    ] {
-        if c.exists() {
-            return Some(c);
-        }
-    }
-    None
-}
-
 // Memoized for the app session: Some(Some(path)) = usable exe, Some(None) =
 // resolved-to-unavailable, None = not yet resolved.
 pub async fn ensure_native_helper(app: &AppHandle, state: &AppState) -> Option<PathBuf> {
@@ -141,57 +113,17 @@ async fn resolve_native_helper(app: &AppHandle) -> Option<PathBuf> {
     if let Some(p) = ensure_embedded_native_exe() {
         return Some(p);
     }
-    let src = native_src_path(app)?;
-    if !src.exists() {
-        return None;
-    }
-    let out_exe = app_data_dir().join("RobloxNative.exe");
-    if let (Ok(out_meta), Ok(src_meta)) = (std::fs::metadata(&out_exe), std::fs::metadata(&src)) {
-        if let (Ok(out_t), Ok(src_t)) = (out_meta.modified(), src_meta.modified()) {
-            if out_t >= src_t {
-                return Some(out_exe);
-            }
-        }
-    }
-    let csc = find_csc()?;
-    let mut cmd = Command::new(&csc);
-    cmd.args([
-        "/nologo",
-        "/optimize+",
-        "/platform:x64",
-        "/target:exe",
-        "/r:System.Drawing.dll",
-        &format!("/out:{}", out_exe.display()),
-        &src.to_string_lossy(),
-    ]);
-    hide_window(&mut cmd);
-    cmd.stdout(Stdio::null()).stderr(Stdio::piped());
-    // Same leak as the RobloxNative.exe timeout fixes elsewhere: without
-    // this, a timeout below drops output_timeout's internal child without
-    // killing it, leaking a stuck csc.exe.
-    cmd.kill_on_drop(true);
-    let ok = match cmd.output_timeout(Duration::from_secs(30)).await {
-        Some(Ok(output)) => output.status.success() && out_exe.exists(),
-        _ => out_exe.exists(),
-    };
-    if ok {
-        Some(out_exe)
-    } else {
-        None
-    }
-}
-
-// tokio's Child has no built-in output() timeout.
-trait OutputTimeout {
-    async fn output_timeout(self, dur: Duration) -> Option<std::io::Result<std::process::Output>>;
-}
-impl OutputTimeout for Command {
-    async fn output_timeout(
-        mut self,
-        dur: Duration,
-    ) -> Option<std::io::Result<std::process::Output>> {
-        tokio::time::timeout(dur, self.output()).await.ok()
-    }
+    // Deliberately no compile-from-source fallback. This used to shell out to
+    // the .NET Framework csc.exe and build RobloxNative.exe on the user's
+    // machine if both paths above failed. Producing an executable at runtime
+    // via a compiler is one of the strongest heuristics antivirus engines
+    // have, because that is exactly how droppers keep a payload out of a
+    // static scan, and it was contributing to false positives on a benign
+    // helper. It was also unreachable in practice: the branch above writes the
+    // copy embedded at compile time and only fails if the file cannot be
+    // written at all, in which case csc could not have written its output to
+    // that same folder either.
+    None
 }
 
 // Compiled once rather than per call. do_launch alone rebuilt three of these
@@ -1393,7 +1325,7 @@ pub async fn do_launch(
                             state,
                             place_id,
                             private_code,
-                            &cookie,
+                            cookie,
                             &csrf_token,
                         )
                         .await;
@@ -1415,7 +1347,7 @@ pub async fn do_launch(
                         let resolved = crate::roblox_api::resolve_share_link(
                             state,
                             &code,
-                            &cookie,
+                            cookie,
                             Some(&csrf_token),
                         )
                         .await;
@@ -1541,7 +1473,7 @@ pub async fn do_launch(
 
     apply_priority_policy(state, &launch_settings).await;
 
-    crate::roblox_api::invalidate_ticket(state, &cookie);
+    crate::roblox_api::invalidate_ticket(state, cookie);
 
     let mut accounts = crate::storage::load_accounts(state);
     let (username, user_id) = if let Some(idx) = accounts

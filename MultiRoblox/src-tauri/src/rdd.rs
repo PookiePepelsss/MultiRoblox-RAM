@@ -145,7 +145,7 @@ async fn install_packages(
         .collect();
     let total = wanted.len() + 1;
 
-    std::fs::create_dir_all(&dest)
+    std::fs::create_dir_all(dest)
         .map_err(|e| format!("could not create {}: {e}", dest.display()))?;
 
     for (i, (pkg, sub)) in wanted.iter().enumerate() {
@@ -240,7 +240,8 @@ pub fn list_versions() -> Vec<serde_json::Value> {
             serde_json::json!({ "version": name, "installedAt": installed }),
         ));
     }
-    out.sort_by(|a, b| b.0.cmp(&a.0));
+    // Newest first; Reverse keeps it a key comparison rather than a custom cmp.
+    out.sort_by_key(|(mtime, _)| std::cmp::Reverse(*mtime));
     out.into_iter().map(|(_, v)| v).collect()
 }
 

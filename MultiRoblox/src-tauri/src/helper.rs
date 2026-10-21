@@ -244,63 +244,59 @@ async fn spawn(app: &AppHandle, state: &AppState, exe: &Path) -> Option<Arc<Help
     let duplicate_r = duplicate.clone();
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
-        loop {
-            match lines.next_line().await {
-                Ok(Some(line)) => {
-                    let line = line.trim_end();
-                    if let Some(rest) = line.strip_prefix("R|") {
-                        // R|<id>|OK|<payload>: payload may contain anything
-                        // except a newline, so only split off the first three.
-                        let mut it = rest.splitn(3, '|');
-                        let id = it.next().and_then(|s| s.parse::<u64>().ok());
-                        let status = it.next().unwrap_or("");
-                        let payload = it.next().unwrap_or("");
-                        if let Some(id) = id {
-                            let slot = pending.lock().unwrap().remove(&id);
-                            if let Some(tx) = slot {
-                                let _ = tx.send(if status == "OK" {
-                                    Ok(payload.to_string())
-                                } else {
-                                    Err(payload.to_string())
-                                });
-                            }
-                        }
-                    } else if let Some(rest) = line.strip_prefix("E|") {
-                        let mut it = rest.splitn(2, '|');
-                        let name = it.next().unwrap_or("");
-                        let payload = it.next().unwrap_or("");
-                        match name {
-                            "READY" => {
-                                mutex_held.store(payload == "1", Ordering::SeqCst);
-                                if let Some(tx) = ready_tx.take() {
-                                    let _ = tx.send(payload == "1");
-                                }
-                            }
-                            "PIDS" => {
-                                let set: std::collections::HashSet<u32> = payload
-                                    .split(',')
-                                    .filter_map(|s| s.trim().parse::<u32>().ok())
-                                    .collect();
-                                let st = app_r.state::<AppState>();
-                                *st.watch_pid_cache.lock().unwrap() = Some(set);
-                            }
-                            "DUPLICATE" => {
-                                duplicate_r.store(true, Ordering::SeqCst);
-                            }
-                            "AFK" => {
-                                crate::native::emit_log(
-                                    &app_r,
-                                    "info",
-                                    "afk",
-                                    "Anti-AFK: tapped a Roblox window",
-                                    Some(serde_json::json!({ "pid": payload.parse::<u32>().ok() })),
-                                );
-                            }
-                            _ => {}
-                        }
+        // Ends on EOF or a read error; either way the daemon is gone.
+        while let Ok(Some(line)) = lines.next_line().await {
+            let line = line.trim_end();
+            if let Some(rest) = line.strip_prefix("R|") {
+                // R|<id>|OK|<payload>: payload may contain anything
+                // except a newline, so only split off the first three.
+                let mut it = rest.splitn(3, '|');
+                let id = it.next().and_then(|s| s.parse::<u64>().ok());
+                let status = it.next().unwrap_or("");
+                let payload = it.next().unwrap_or("");
+                if let Some(id) = id {
+                    let slot = pending.lock().unwrap().remove(&id);
+                    if let Some(tx) = slot {
+                        let _ = tx.send(if status == "OK" {
+                            Ok(payload.to_string())
+                        } else {
+                            Err(payload.to_string())
+                        });
                     }
                 }
-                _ => break, // EOF or read error: the daemon is gone
+            } else if let Some(rest) = line.strip_prefix("E|") {
+                let mut it = rest.splitn(2, '|');
+                let name = it.next().unwrap_or("");
+                let payload = it.next().unwrap_or("");
+                match name {
+                    "READY" => {
+                        mutex_held.store(payload == "1", Ordering::SeqCst);
+                        if let Some(tx) = ready_tx.take() {
+                            let _ = tx.send(payload == "1");
+                        }
+                    }
+                    "PIDS" => {
+                        let set: std::collections::HashSet<u32> = payload
+                            .split(',')
+                            .filter_map(|s| s.trim().parse::<u32>().ok())
+                            .collect();
+                        let st = app_r.state::<AppState>();
+                        *st.watch_pid_cache.lock().unwrap() = Some(set);
+                    }
+                    "DUPLICATE" => {
+                        duplicate_r.store(true, Ordering::SeqCst);
+                    }
+                    "AFK" => {
+                        crate::native::emit_log(
+                            &app_r,
+                            "info",
+                            "afk",
+                            "Anti-AFK: tapped a Roblox window",
+                            Some(serde_json::json!({ "pid": payload.parse::<u32>().ok() })),
+                        );
+                    }
+                    _ => {}
+                }
             }
         }
 

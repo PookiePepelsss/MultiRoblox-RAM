@@ -299,16 +299,22 @@ mod tests {
         }
     }
 
+    // Split per platform so each side asserts something real. The previous
+    // single test ended in `assert!(!cfg!(windows))`, which the compiler folds
+    // to a constant: on Windows it was `assert!(false)` reachable only via a
+    // DPAPI failure, and elsewhere it was `assert!(true)`, i.e. not a test.
     #[test]
-    fn safe2_round_trips_on_windows() {
-        // DPAPI is Windows-only; the stub returns None elsewhere.
-        match encrypt_safe2("cookie-value") {
-            Some(ct) => {
-                assert!(ct.starts_with("safe2:"));
-                assert_eq!(decrypt_safe2(&ct).as_deref(), Some("cookie-value"));
-            }
-            None => assert!(!cfg!(windows), "DPAPI should be available on Windows"),
-        }
+    #[cfg(windows)]
+    fn safe2_round_trips() {
+        let ct = encrypt_safe2("cookie-value").expect("DPAPI is available to a logged-in user");
+        assert!(ct.starts_with("safe2:"));
+        assert_eq!(decrypt_safe2(&ct).as_deref(), Some("cookie-value"));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn safe2_is_unavailable_without_dpapi() {
+        assert!(encrypt_safe2("cookie-value").is_none(), "the non-Windows stub returns None");
     }
 
     #[test]

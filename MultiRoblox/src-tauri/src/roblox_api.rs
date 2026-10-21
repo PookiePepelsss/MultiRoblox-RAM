@@ -214,9 +214,9 @@ pub async fn get_auth_ticket(
     let delays = [0u64, 2000, 5000];
     let mut last_status: u16 = 0;
 
-    for attempt in 0..3 {
-        if delays[attempt] > 0 {
-            tokio::time::sleep(Duration::from_millis(delays[attempt])).await;
+    for &delay_ms in &delays {
+        if delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
         }
         let mut req = state
             .http
@@ -634,76 +634,6 @@ pub async fn get_json_public(state: &AppState, url: &str) -> Result<Value, Strin
     Ok(serde_json::json!({ "ok": ok, "status": status, "data": data }))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn place_id_from_a_bare_id() {
-        assert_eq!(extract_place_id("1818"), Some("1818".into()));
-        assert_eq!(extract_place_id("  1818  "), Some("1818".into()));
-    }
-
-    #[test]
-    fn place_id_from_game_urls() {
-        for input in [
-            "https://www.roblox.com/games/1818/Classic-Crossroads",
-            "www.roblox.com/games/1818/Classic-Crossroads",
-            "https://www.roblox.com/games/1818",
-        ] {
-            assert_eq!(extract_place_id(input), Some("1818".into()), "failed for {}", input);
-        }
-    }
-
-    #[test]
-    fn place_id_from_a_query_parameter() {
-        assert_eq!(
-            extract_place_id("https://www.roblox.com/games/start?placeId=1818"),
-            Some("1818".into())
-        );
-    }
-
-    #[test]
-    fn place_id_rejects_non_numeric_and_junk() {
-        assert_eq!(extract_place_id(""), None);
-        assert_eq!(extract_place_id("not a link"), None);
-        assert_eq!(extract_place_id("https://www.roblox.com/games/abc/Name"), None);
-        assert_eq!(extract_place_id("https://www.roblox.com/users/1818/profile"), None);
-    }
-
-    #[test]
-    fn roblox_errors_use_the_human_message() {
-        assert_eq!(
-            extract_roblox_error(r#"{"errors":[{"code":0,"message":"Token Validation Failed"}]}"#),
-            "Token Validation Failed"
-        );
-        assert_eq!(extract_roblox_error(r#"{"message":"Too many requests"}"#), "Too many requests");
-    }
-
-    #[test]
-    fn non_json_errors_fall_back_to_a_truncated_body() {
-        assert_eq!(extract_roblox_error("<html>502</html>"), "<html>502</html>");
-        let long = "x".repeat(500);
-        assert_eq!(extract_roblox_error(&long).len(), 200, "body is capped");
-    }
-
-    #[test]
-    fn share_link_extraction_needs_both_ids() {
-        let body = r#"{"placeId":1818,"linkCode":"abc-DEF_123"}"#;
-        assert_eq!(extract_place_link(body), Some(("1818".into(), "abc-DEF_123".into())));
-        assert_eq!(extract_place_link(r#"{"placeId":1818}"#), None, "no link code");
-        assert_eq!(extract_place_link(r#"{"linkCode":"abc"}"#), None, "no place id");
-    }
-
-    #[test]
-    fn share_link_accepts_the_other_code_field_names() {
-        for field in ["privateServerLinkCode", "accessCode", "linkcode"] {
-            let body = format!(r#"{{"placeId":7,"{}":"zzz"}}"#, field);
-            assert_eq!(extract_place_link(&body), Some(("7".into(), "zzz".into())), "failed for {}", field);
-        }
-    }
-}
-
 // Same CORS gap as roblox.com above; see altgen.me/docs/generate-accounts.
 pub async fn altgen_generate(
     state: &AppState,
@@ -822,5 +752,75 @@ pub async fn follow_user_target(
             "{} is in a game, but their server isn't joinable (their privacy settings may hide it)",
             real_name
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn place_id_from_a_bare_id() {
+        assert_eq!(extract_place_id("1818"), Some("1818".into()));
+        assert_eq!(extract_place_id("  1818  "), Some("1818".into()));
+    }
+
+    #[test]
+    fn place_id_from_game_urls() {
+        for input in [
+            "https://www.roblox.com/games/1818/Classic-Crossroads",
+            "www.roblox.com/games/1818/Classic-Crossroads",
+            "https://www.roblox.com/games/1818",
+        ] {
+            assert_eq!(extract_place_id(input), Some("1818".into()), "failed for {}", input);
+        }
+    }
+
+    #[test]
+    fn place_id_from_a_query_parameter() {
+        assert_eq!(
+            extract_place_id("https://www.roblox.com/games/start?placeId=1818"),
+            Some("1818".into())
+        );
+    }
+
+    #[test]
+    fn place_id_rejects_non_numeric_and_junk() {
+        assert_eq!(extract_place_id(""), None);
+        assert_eq!(extract_place_id("not a link"), None);
+        assert_eq!(extract_place_id("https://www.roblox.com/games/abc/Name"), None);
+        assert_eq!(extract_place_id("https://www.roblox.com/users/1818/profile"), None);
+    }
+
+    #[test]
+    fn roblox_errors_use_the_human_message() {
+        assert_eq!(
+            extract_roblox_error(r#"{"errors":[{"code":0,"message":"Token Validation Failed"}]}"#),
+            "Token Validation Failed"
+        );
+        assert_eq!(extract_roblox_error(r#"{"message":"Too many requests"}"#), "Too many requests");
+    }
+
+    #[test]
+    fn non_json_errors_fall_back_to_a_truncated_body() {
+        assert_eq!(extract_roblox_error("<html>502</html>"), "<html>502</html>");
+        let long = "x".repeat(500);
+        assert_eq!(extract_roblox_error(&long).len(), 200, "body is capped");
+    }
+
+    #[test]
+    fn share_link_extraction_needs_both_ids() {
+        let body = r#"{"placeId":1818,"linkCode":"abc-DEF_123"}"#;
+        assert_eq!(extract_place_link(body), Some(("1818".into(), "abc-DEF_123".into())));
+        assert_eq!(extract_place_link(r#"{"placeId":1818}"#), None, "no link code");
+        assert_eq!(extract_place_link(r#"{"linkCode":"abc"}"#), None, "no place id");
+    }
+
+    #[test]
+    fn share_link_accepts_the_other_code_field_names() {
+        for field in ["privateServerLinkCode", "accessCode", "linkcode"] {
+            let body = format!(r#"{{"placeId":7,"{}":"zzz"}}"#, field);
+            assert_eq!(extract_place_link(&body), Some(("7".into(), "zzz".into())), "failed for {}", field);
+        }
     }
 }
