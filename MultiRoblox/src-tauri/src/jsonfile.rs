@@ -22,13 +22,58 @@ use std::sync::Mutex;
 
 static UNREADABLE: Lazy<Mutex<HashSet<PathBuf>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+/// Subset of UNREADABLE whose last read failed at the I/O level (the file
+/// could not be opened at all), as opposed to opening fine but not parsing.
+static READ_FAILED: Lazy<Mutex<HashSet<PathBuf>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+
+fn read_failed_set() -> std::sync::MutexGuard<'static, HashSet<PathBuf>> {
+    READ_FAILED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// True when the last read of `path` could not open the file at all. Unlike a
+/// parse failure, nothing about its contents is known, so a writer must not
+/// replace it with what it believes the contents to be.
+pub fn read_failed(path: &Path) -> bool {
+    read_failed_set().contains(path)
+}
+
+fn flags() -> std::sync::MutexGuard<'static, HashSet<PathBuf>> {
+    UNREADABLE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+enum Text {
+    Missing,
+    Present(String),
+    /// The file is there but could not be read (a sharing violation from an
+    /// antivirus scan or a sync client, for instance). Must not be mistaken
+    /// for "missing": an empty list read that way would be saved straight
+    /// back over the real file.
+    Failed,
+}
 
 /// File contents minus a leading UTF-8 BOM. serde rejects the BOM outright,
 /// which would make a perfectly good file look corrupt; and plenty of
-/// Windows editors write one by default.
-fn read_text(path: &Path) -> Option<String> {
-    let s = std::fs::read_to_string(path).ok()?;
-    Some(s.trim_start_matches('\u{feff}').to_string())
+/// Windows editors write one by default. Transient read failures get a few
+/// short retries before the file is given up on for this read.
+fn read_text(path: &Path) -> Text {
+    for attempt in 0..5 {
+        match std::fs::read_to_string(path) {
+            Ok(s) => return Text::Present(s.trim_start_matches('\u{feff}').to_string()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Text::Missing,
+            Err(e) => {
+                if attempt == 4 {
+                    eprintln!("[storage] could not read {}: {}", path.display(), e);
+                } else {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+    }
+    Text::Failed
 }
 
 /// Keeps the unparseable bytes around under a sibling name so nothing the
@@ -36,7 +81,7 @@ fn read_text(path: &Path) -> Option<String> {
 /// Only backs up once; a second pass must not overwrite the first (good)
 /// copy with a later, emptier one.
 fn note_corrupt(path: &Path) {
-    UNREADABLE.lock().unwrap().insert(path.to_path_buf());
+    flags().insert(path.to_path_buf());
     let backup = path.with_extension("corrupt-backup.json");
     if !backup.exists() {
         match std::fs::copy(path, &backup) {
@@ -45,48 +90,66 @@ fn note_corrupt(path: &Path) {
                 path.display(),
                 backup.display()
             ),
-            Err(e) => eprintln!("[storage] {} could not be parsed, and the backup failed: {}", path.display(), e),
+            Err(e) => eprintln!(
+                "[storage] {} could not be parsed, and the backup failed: {}",
+                path.display(),
+                e
+            ),
         }
     }
 }
 
 /// True when this path exists but failed to parse during this run.
 pub fn is_unreadable(path: &Path) -> bool {
-    UNREADABLE.lock().unwrap().contains(path)
+    flags().contains(path)
+}
+
+/// Forgets every corruption flag. Only for after the app-data folder has been
+/// wiped, when none of the flagged files exist any more.
+pub fn forget_unreadable() {
+    flags().clear();
+    read_failed_set().clear();
 }
 
 /// Missing file means "nothing saved yet" and reads as empty. A file that is
-/// present but unparseable reads as empty *and* is flagged.
-pub fn read_array(path: &Path) -> Vec<Value> {
-    let Some(text) = read_text(path) else {
-        return Vec::new();
+/// present but unparseable (or unreadable) reads as empty *and* is flagged.
+fn read_parsed<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
+    let text = match read_text(path) {
+        Text::Present(text) => {
+            read_failed_set().remove(path);
+            text
+        }
+        Text::Missing => {
+            // Whatever was flagged is gone, so there is nothing left to protect.
+            flags().remove(path);
+            read_failed_set().remove(path);
+            return T::default();
+        }
+        Text::Failed => {
+            // No backup copy: the copy would hit the same lock.
+            flags().insert(path.to_path_buf());
+            read_failed_set().insert(path.to_path_buf());
+            return T::default();
+        }
     };
-    match serde_json::from_str::<Vec<Value>>(&text) {
+    match serde_json::from_str::<T>(&text) {
         Ok(v) => {
-            UNREADABLE.lock().unwrap().remove(path);
+            flags().remove(path);
             v
         }
         Err(_) => {
             note_corrupt(path);
-            Vec::new()
+            T::default()
         }
     }
 }
 
+pub fn read_array(path: &Path) -> Vec<Value> {
+    read_parsed(path)
+}
+
 pub fn read_object(path: &Path) -> Map<String, Value> {
-    let Some(text) = read_text(path) else {
-        return Map::new();
-    };
-    match serde_json::from_str::<Map<String, Value>>(&text) {
-        Ok(m) => {
-            UNREADABLE.lock().unwrap().remove(path);
-            m
-        }
-        Err(_) => {
-            note_corrupt(path);
-            Map::new()
-        }
-    }
+    read_parsed(path)
 }
 
 /// Writes to a unique temp file, flushes it to disk, then renames over the
@@ -127,9 +190,11 @@ mod tests {
     /// One directory per call: cargo runs these in parallel, so a shared
     /// directory would let one test observe another's in-flight temp file.
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir()
-            .join("mr-jsonfile-tests")
-            .join(format!("{}-{}", name, TMP_SEQ.fetch_add(1, Ordering::Relaxed)));
+        let dir = std::env::temp_dir().join("mr-jsonfile-tests").join(format!(
+            "{}-{}",
+            name,
+            TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("data.json")
@@ -140,7 +205,10 @@ mod tests {
         let p = scratch("missing");
         assert!(read_array(&p).is_empty());
         assert!(read_object(&p).is_empty());
-        assert!(!is_unreadable(&p), "a file that was never created is not corrupt");
+        assert!(
+            !is_unreadable(&p),
+            "a file that was never created is not corrupt"
+        );
     }
 
     #[test]
@@ -163,7 +231,11 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .filter(|n| n.contains(".tmp"))
             .collect();
-        assert!(leftovers.is_empty(), "temp files left behind: {:?}", leftovers);
+        assert!(
+            leftovers.is_empty(),
+            "temp files left behind: {:?}",
+            leftovers
+        );
     }
 
     #[test]
@@ -172,7 +244,11 @@ mod tests {
         write_atomic(&p, r#"[{"id":"first"},{"id":"second"}]"#).unwrap();
         write_atomic(&p, r#"[{"id":"only"}]"#).unwrap();
         let v = read_array(&p);
-        assert_eq!(v.len(), 1, "a shorter write must not leave a tail of the old file");
+        assert_eq!(
+            v.len(),
+            1,
+            "a shorter write must not leave a tail of the old file"
+        );
         assert_eq!(v[0]["id"], "only");
     }
 
@@ -180,7 +256,11 @@ mod tests {
     fn utf8_bom_is_tolerated() {
         let p = scratch("bom");
         std::fs::write(&p, "\u{feff}[{\"id\":\"a\"}]").unwrap();
-        assert_eq!(read_array(&p).len(), 1, "a BOM must not make a good file look corrupt");
+        assert_eq!(
+            read_array(&p).len(),
+            1,
+            "a BOM must not make a good file look corrupt"
+        );
         assert!(!is_unreadable(&p));
     }
 
@@ -190,10 +270,16 @@ mod tests {
         // Exactly what a crash mid-write used to leave behind.
         std::fs::write(&p, r#"[{"id":"a"},{"id":"#).unwrap();
         assert!(read_array(&p).is_empty());
-        assert!(is_unreadable(&p), "corrupt file must be flagged so writes can be refused");
+        assert!(
+            is_unreadable(&p),
+            "corrupt file must be flagged so writes can be refused"
+        );
         let backup = p.with_extension("corrupt-backup.json");
         assert!(backup.exists(), "original bytes must be preserved");
-        assert_eq!(std::fs::read_to_string(&backup).unwrap(), r#"[{"id":"a"},{"id":"#);
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            r#"[{"id":"a"},{"id":"#
+        );
     }
 
     #[test]

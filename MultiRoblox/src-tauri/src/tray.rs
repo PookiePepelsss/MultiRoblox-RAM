@@ -21,10 +21,7 @@ pub const TRAY_ID: &str = "main-tray";
 /// app did before this existed, and silently minimising to tray instead is the
 /// kind of surprise that gets an app labelled malware.
 pub fn hide_to_tray_enabled() -> bool {
-    crate::settings::load_settings()
-        .get("hideToTray")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+    crate::settings::get_bool("hideToTray", false)
 }
 
 pub fn show_main_window(app: &AppHandle) {

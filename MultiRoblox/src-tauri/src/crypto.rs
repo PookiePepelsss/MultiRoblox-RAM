@@ -224,14 +224,22 @@ mod tests {
     #[test]
     fn gcm_round_trips() {
         let ct = encrypt_gcm("_|WARNING:-DO-NOT-SHARE-THIS", &KEY, "gs");
-        assert_eq!(decrypt_gcm(&ct, &KEY, "gs").as_deref(), Some("_|WARNING:-DO-NOT-SHARE-THIS"));
+        assert_eq!(
+            decrypt_gcm(&ct, &KEY, "gs").as_deref(),
+            Some("_|WARNING:-DO-NOT-SHARE-THIS")
+        );
     }
 
     #[test]
     fn gcm_round_trips_unicode_and_empty() {
         for plain in ["", "ünïcödé ✓ 🎮", "a"] {
             let ct = encrypt_gcm(plain, &KEY, "gs");
-            assert_eq!(decrypt_gcm(&ct, &KEY, "gs").as_deref(), Some(plain), "failed for {:?}", plain);
+            assert_eq!(
+                decrypt_gcm(&ct, &KEY, "gs").as_deref(),
+                Some(plain),
+                "failed for {:?}",
+                plain
+            );
         }
     }
 
@@ -244,8 +252,16 @@ mod tests {
         assert_eq!(parts.len(), 4);
         assert_eq!(parts[0], "gs");
         assert_eq!(B64.decode(parts[1]).unwrap().len(), 12, "12-byte nonce");
-        assert_eq!(B64.decode(parts[2]).unwrap().len(), 16, "16-byte auth tag, stored separately");
-        assert_eq!(B64.decode(parts[3]).unwrap().len(), "hello".len(), "ciphertext without the tag");
+        assert_eq!(
+            B64.decode(parts[2]).unwrap().len(),
+            16,
+            "16-byte auth tag, stored separately"
+        );
+        assert_eq!(
+            B64.decode(parts[3]).unwrap().len(),
+            "hello".len(),
+            "ciphertext without the tag"
+        );
     }
 
     #[test]
@@ -268,18 +284,29 @@ mod tests {
         let mut data = B64.decode(&parts[3]).unwrap();
         data[0] ^= 0xff;
         parts[3] = B64.encode(&data);
-        assert!(decrypt_gcm(&parts.join(":"), &KEY, "gs").is_none(), "authentication must catch this");
+        assert!(
+            decrypt_gcm(&parts.join(":"), &KEY, "gs").is_none(),
+            "authentication must catch this"
+        );
     }
 
     #[test]
     fn gcm_requires_the_matching_tag_prefix() {
         let ct = encrypt_gcm("secret", &KEY, "gs");
-        assert!(decrypt_gcm(&ct, &KEY, "gcm").is_none(), "gs: must not be read as gcm:");
+        assert!(
+            decrypt_gcm(&ct, &KEY, "gcm").is_none(),
+            "gs: must not be read as gcm:"
+        );
     }
 
     #[test]
     fn gcm_rejects_malformed_input() {
-        for bad in ["gs:", "gs:only:two", "gs:!!!:!!!:!!!", "not-encrypted-at-all"] {
+        for bad in [
+            "gs:",
+            "gs:only:two",
+            "gs:!!!:!!!:!!!",
+            "not-encrypted-at-all",
+        ] {
             assert!(decrypt_gcm(bad, &KEY, "gs").is_none(), "accepted {:?}", bad);
         }
     }
@@ -314,7 +341,10 @@ mod tests {
     #[test]
     #[cfg(not(windows))]
     fn safe2_is_unavailable_without_dpapi() {
-        assert!(encrypt_safe2("cookie-value").is_none(), "the non-Windows stub returns None");
+        assert!(
+            encrypt_safe2("cookie-value").is_none(),
+            "the non-Windows stub returns None"
+        );
     }
 
     #[test]

@@ -159,7 +159,7 @@ pub fn ensure<'a>(
         if now_ms() < *state.helper_next_attempt.lock().unwrap() {
             return None;
         }
-        let exe = crate::native::ensure_native_helper(app, state).await?;
+        let exe = crate::native::ensure_native_helper(app, state)?;
         let helper = spawn(app, state, &exe).await?;
         *guard = Some(helper.clone());
         Some(helper)
@@ -202,7 +202,7 @@ async fn spawn(app: &AppHandle, state: &AppState, exe: &Path) -> Option<Arc<Help
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    crate::native::hide_window(&mut cmd);
+    crate::native::no_window(&mut cmd);
     // Last-resort backstop: if this Child handle is ever dropped without an
     // explicit kill, take the daemon down with it rather than orphan it.
     cmd.kill_on_drop(true);
@@ -218,6 +218,7 @@ async fn spawn(app: &AppHandle, state: &AppState, exe: &Path) -> Option<Arc<Help
     let stdin = child.stdin.take()?;
     let stdout = child.stdout.take()?;
     let stderr = child.stderr.take();
+    let child_pid = child.id();
 
     let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
     let alive = Arc::new(AtomicBool::new(true));
@@ -295,6 +296,15 @@ async fn spawn(app: &AppHandle, state: &AppState, exe: &Path) -> Option<Arc<Help
                             Some(serde_json::json!({ "pid": payload.parse::<u32>().ok() })),
                         );
                     }
+                    "AFKFAIL" => {
+                        crate::native::emit_log(
+                            &app_r,
+                            "warn",
+                            "afk",
+                            "Anti-AFK could not reach a Roblox window (is the PC locked, or a full-screen app in the way?). It will keep trying.",
+                            Some(serde_json::json!({ "pid": payload.parse::<u32>().ok() })),
+                        );
+                    }
                     _ => {}
                 }
             }
@@ -360,16 +370,25 @@ async fn spawn(app: &AppHandle, state: &AppState, exe: &Path) -> Option<Arc<Help
         );
         {
             let mut g = st.helper.lock().await;
-            if g.as_ref().map(|h| !h.alive()).unwrap_or(false) {
+            if g.as_ref().is_some_and(|h| !h.alive()) {
                 *g = None;
             }
         }
-        if let Some(mut c) = st.helper_child.lock().unwrap().take() {
-            let _ = c.start_kill();
+        // Only reap our own child. Any request arriving after `alive` went
+        // false above may already have started a replacement through
+        // ensure(), and helper_child then holds *that* process; killing it
+        // here would cascade into another restart and burn the budget.
+        {
+            let mut slot = st.helper_child.lock().unwrap();
+            if slot.as_ref().is_some_and(|c| c.id() == child_pid) {
+                if let Some(mut c) = slot.take() {
+                    let _ = c.start_kill();
+                }
+            }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
         if let Some(h) = ensure(&app_r, &st).await {
-            reapply_state(&app_r, &st, &h).await;
+            reapply_state(&st, &h).await;
         }
     });
 
@@ -410,53 +429,34 @@ async fn spawn(app: &AppHandle, state: &AppState, exe: &Path) -> Option<Arc<Help
 /// Re-arms whatever the daemon was doing before it died. The mutex is
 /// re-acquired by the new daemon on its own at startup; anti-AFK and the PID
 /// watcher live in its memory, so they have to be told again.
-async fn reapply_state(app: &AppHandle, state: &AppState, helper: &Arc<Helper>) {
-    let settings = crate::settings::load_settings();
+async fn reapply_state(state: &AppState, helper: &Arc<Helper>) {
     // The daemon holds the mutex from startup (multi-instance on by default).
     // Only send mutex|off if the user explicitly turned multi-instance off;
     // without this, a daemon crash would silently re-enable multi-instance.
-    let multi_instance = settings.get("multiInstance").and_then(|v| v.as_bool()).unwrap_or(true);
-    if !multi_instance {
+    if !crate::settings::get_bool("multiInstance", true) {
         let _ = helper.request("mutex|off", DEFAULT_TIMEOUT).await;
     }
-    if settings
-        .get("antiAfk")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
-        let mut deadline = settings
-            .get("antiAfkInterval")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        if deadline < 60 {
-            deadline = 19 * 60;
+    if crate::settings::get_bool("antiAfk", false) {
+        let (cmd, _) = crate::native::antiafk_command();
+        let _ = helper.request(&cmd, DEFAULT_TIMEOUT).await;
+    }
+    let watching = !state.watched_accounts.lock().unwrap().is_empty();
+    if watching {
+        let cmd = format!("watch|{}", crate::native::POLL_INTERVAL.as_millis());
+        let _ = helper.request(&cmd, DEFAULT_TIMEOUT).await;
+        if crate::settings::get_bool("protectSignIn", true)
+            && crate::settings::get_bool("multiInstance", true)
+        {
+            let _ = helper.request("signin|on", DEFAULT_TIMEOUT).await;
         }
-        let _ = helper
-            .request(&format!("antiafk|{}|0", deadline), DEFAULT_TIMEOUT)
-            .await;
     }
-    if !state.watched_accounts.lock().unwrap().is_empty() {
-        let _ = helper
-            .request(
-                &format!("watch|{}", crate::native::POLL_INTERVAL.as_millis()),
-                DEFAULT_TIMEOUT,
-            )
-            .await;
-    }
-    let _ = app;
 }
 
 /// Kills helper processes left over from a previous session. Only ever our
 /// own executable name, and only before we start ours.
 async fn sweep_stray_helpers() {
-    if !cfg!(windows) {
-        return;
-    }
-    let mut cmd = Command::new("cmd");
-    cmd.args(["/c", "taskkill /F /IM RobloxNative.exe /T"]);
-    crate::native::hide_window(&mut cmd);
-    cmd.kill_on_drop(true);
-    let _ = tokio::time::timeout(Duration::from_secs(5), cmd.output()).await;
+    let selectors = ["/IM".to_string(), "RobloxNative.exe".to_string()];
+    crate::native::taskkill(&selectors, Duration::from_secs(5)).await;
 }
 
 /// Stops the daemon and prevents anything from starting another one. Used at
@@ -536,12 +536,20 @@ pub fn shutdown_blocking(state: &AppState) {
     // crash): nothing else will release the mutex once we exit.
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "RobloxNative.exe", "/T"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
+        let mut cmd = std::process::Command::new(crate::native::system_tool("taskkill.exe"));
+        cmd.args(["/F", "/IM", "RobloxNative.exe", "/T"]);
+        crate::native::no_window_std(&mut cmd);
+        let _ = cmd.status();
+    }
+}
+
+/// Records the mutex state a `mutex|on/off/rehold` reply reported. READY
+/// only covers startup; without this the Settings status kept showing that
+/// startup value after the user switched multi-instance off or a re-hold
+/// failed.
+pub async fn note_mutex_held(state: &AppState, held: bool) {
+    if let Some(h) = state.helper.lock().await.as_ref() {
+        h.mutex_held.store(held, Ordering::SeqCst);
     }
 }
 

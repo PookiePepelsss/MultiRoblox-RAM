@@ -2,7 +2,7 @@ use crate::state::AppState;
 use serde_json::Value;
 use std::time::Duration;
 
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+pub(crate) const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -11,7 +11,7 @@ fn now_ms() -> i64 {
 // Roblox errors come back as {"errors":[{"code":N,"message":"..."}]} (or,
 // on some endpoints, a flat {"message":"..."}); pull just the human
 // message out instead of showing the raw JSON in the UI.
-fn extract_roblox_error(body: &str) -> String {
+pub(crate) fn extract_roblox_error(body: &str) -> String {
     if let Ok(v) = serde_json::from_str::<Value>(body) {
         if let Some(msg) = v
             .get("errors")
@@ -29,6 +29,9 @@ fn extract_roblox_error(body: &str) -> String {
     body.chars().take(200).collect()
 }
 
+/// Also the reply of roblox_validate_cookie, hence the camelCase field names.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserInfo {
     pub ok: bool,
     pub username: Option<String>,
@@ -52,7 +55,21 @@ pub async fn fetch_user_info(state: &AppState, cookie: &str) -> UserInfo {
         .await;
     match res {
         Ok(resp) => {
+            let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
+            // Only a 401 (or 403) is Roblox saying the cookie is bad. A 429
+            // from checking many accounts at once, or a 5xx/HTML outage page,
+            // says nothing about the cookie; treating those as a verdict
+            // marked healthy accounts EXPIRED and threw away fresh logins.
+            if status != 200 && status != 401 && status != 403 {
+                return UserInfo {
+                    ok: false,
+                    reachable: false,
+                    username: None,
+                    user_id: None,
+                    reason: Some(format!("Roblox returned HTTP {status}")),
+                };
+            }
             match serde_json::from_str::<Value>(&body) {
                 Ok(d) if d.get("id").is_some() => UserInfo {
                     ok: true,
@@ -88,44 +105,6 @@ pub async fn fetch_user_info(state: &AppState, cookie: &str) -> UserInfo {
             reason: Some(e.to_string()),
         },
     }
-}
-
-// Fetches the Windows version hash from WEAO's tracker.
-// channel: "current" (default), "future", or "past".
-pub async fn get_roblox_version(state: &AppState, channel: Option<&str>) -> Result<String, String> {
-    let sel = channel.filter(|c| !c.is_empty()).unwrap_or("current");
-    // "custom" isn't a WEAO endpoint: the hash comes straight from the
-    // customVersion setting the user pasted in, so there's nothing to fetch.
-    if sel == "custom" {
-        let h = crate::settings::load_settings()
-            .get("customVersion")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if h.is_empty() {
-            return Err("no custom version hash set".into());
-        }
-        return Ok(h);
-    }
-    // Only the live build is tracked now; Custom is handled above.
-    let _ = sel;
-    let url = "https://weao.xyz/api/versions/current".to_string();
-    let res = state
-        .http
-        .get(&url)
-        .header("User-Agent", "WEAO-3PService")
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-        .map_err(|e| format!("network error: {e}"))?;
-    if res.status() != 200 {
-        return Err(format!("WEAO returned {}", res.status()));
-    }
-    let json: Value = res.json().await.map_err(|e| format!("bad response body: {e}"))?;
-    json.get("Windows")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| "response missing Windows field".to_string())
 }
 
 async fn csrf_from_endpoint(state: &AppState, cookie: &str, endpoint: &str) -> Option<String> {
@@ -187,27 +166,19 @@ pub async fn get_auth_ticket(
     cookie: &str,
     csrf_token: Option<String>,
 ) -> TicketResult {
-    let now = now_ms();
-    let cached = {
-        state
-            .ticket_cache
-            .lock()
-            .unwrap()
-            .get(cookie)
-            .map(|(t, ts)| (t.clone(), *ts))
-    };
-    if let Some((ticket, ts)) = cached {
-        if now - ts < 25_000 {
-            return TicketResult {
-                ok: true,
-                ticket: Some(ticket),
-                error: None,
-            };
-        }
-        if now - ts < 8_000 {
-            let wait = 8_000 - (now - ts);
-            tokio::time::sleep(Duration::from_millis(wait as u64)).await;
-        }
+    let cached = state
+        .ticket_cache
+        .lock()
+        .unwrap()
+        .get(cookie)
+        .filter(|(_, ts)| now_ms() - ts < 25_000)
+        .map(|(t, _)| t.clone());
+    if let Some(ticket) = cached {
+        return TicketResult {
+            ok: true,
+            ticket: Some(ticket),
+            error: None,
+        };
     }
 
     let mut token = csrf_token;
@@ -305,7 +276,9 @@ pub async fn get_auth_ticket(
         ok: false,
         ticket: None,
         error: Some(
-            "Still rate limited after 3 attempts. Please wait 30 seconds and try again.".into(),
+            // Only reached when no attempt got any HTTP response at all.
+            "Could not reach Roblox to get an auth ticket. Check your connection and try again."
+                .into(),
         ),
     }
 }
@@ -314,7 +287,7 @@ pub fn invalidate_ticket(state: &AppState, cookie: &str) {
     state.ticket_cache.lock().unwrap().remove(cookie);
 }
 
-fn extract_place_id(place_id_or_target: &str) -> Option<String> {
+pub(crate) fn extract_place_id(place_id_or_target: &str) -> Option<String> {
     let t = place_id_or_target.trim();
     if t.chars().all(|c| c.is_ascii_digit()) && !t.is_empty() {
         return Some(t.to_string());
@@ -345,38 +318,45 @@ fn extract_place_id(place_id_or_target: &str) -> Option<String> {
     None
 }
 
-async fn get_json(state: &AppState, url: &str, cookie: &str) -> Option<Value> {
-    let res = state
+/// GET returning JSON; sends the cookie only when one is given.
+async fn get_json(state: &AppState, url: &str, cookie: Option<&str>) -> Option<Value> {
+    let mut req = state
         .http
         .get(url)
-        .header("Cookie", format!(".ROBLOSECURITY={}", cookie))
         .header("Accept", "application/json")
         .header("User-Agent", UA)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await
-        .ok()?;
+        .timeout(Duration::from_secs(5));
+    if let Some(cookie) = cookie {
+        req = req.header("Cookie", format!(".ROBLOSECURITY={}", cookie));
+    }
+    let res = req.send().await.ok()?.error_for_status().ok()?;
     res.json::<Value>().await.ok()
 }
 
+/// A place's name. multiget-place-details needs an authenticated session
+/// (it answers 9002 without one), so it is only tried with a cookie; the
+/// place -> universe -> game lookup needs no auth and covers both the
+/// cookieless case and a failed authenticated call.
 pub async fn get_game_name(
     state: &AppState,
     place_id_or_target: &str,
     cookie: &str,
 ) -> Option<String> {
     let place_id = extract_place_id(place_id_or_target)?;
-    let url = format!(
-        "https://games.roblox.com/v1/games/multiget-place-details?placeIds={}",
-        place_id
-    );
-    if let Some(d) = get_json(state, &url, cookie).await {
-        if let Some(name) = d
-            .as_array()
-            .and_then(|a| a.first())
-            .and_then(|v| v.get("name"))
-            .and_then(|v| v.as_str())
-        {
-            return Some(name.to_string());
+    if !cookie.is_empty() {
+        let url = format!(
+            "https://games.roblox.com/v1/games/multiget-place-details?placeIds={}",
+            place_id
+        );
+        let name = get_json(state, &url, Some(cookie)).await.and_then(|d| {
+            d.as_array()?
+                .first()?
+                .get("name")?
+                .as_str()
+                .map(str::to_owned)
+        });
+        if name.is_some() {
+            return name;
         }
     }
     let uni = get_json(
@@ -385,17 +365,17 @@ pub async fn get_game_name(
             "https://apis.roblox.com/universes/v1/places/{}/universe",
             place_id
         ),
-        cookie,
+        None,
     )
     .await?;
-    let universe_id = uni.get("universeId")?;
+    let universe_id = uni.get("universeId")?.as_u64()?;
     let games = get_json(
         state,
         &format!(
             "https://games.roblox.com/v1/games?universeIds={}",
             universe_id
         ),
-        cookie,
+        None,
     )
     .await?;
     games
@@ -404,7 +384,7 @@ pub async fn get_game_name(
         .first()?
         .get("name")?
         .as_str()
-        .map(|s| s.to_string())
+        .map(str::to_owned)
 }
 
 pub async fn follow_redirect(state: &AppState, url: &str) -> String {
@@ -510,8 +490,16 @@ static ACCESS_CODE_QUERY_RE: once_cell::sync::Lazy<regex::Regex> =
     once_cell::sync::Lazy::new(|| regex::Regex::new(r"[?&]accessCode=([^&]+)").unwrap());
 
 fn extract_place_link(body: &str) -> Option<(String, String)> {
-    let pid = PLACE_ID_JSON_RE.captures(body)?.get(1)?.as_str().to_string();
-    let lc = LINK_CODE_JSON_RE.captures(body)?.get(1)?.as_str().to_string();
+    let pid = PLACE_ID_JSON_RE
+        .captures(body)?
+        .get(1)?
+        .as_str()
+        .to_string();
+    let lc = LINK_CODE_JSON_RE
+        .captures(body)?
+        .get(1)?
+        .as_str()
+        .to_string();
     Some((pid, lc))
 }
 
@@ -544,49 +532,16 @@ async fn post_raw(
     }
 }
 
+/// Access code for a privateServerLinkCode link, scraped from the redirect
+/// the game page answers with. The sharelinks/v1/resolve endpoint this used
+/// to try first now returns 404, so it only cost every private-server
+/// launch a wasted round trip.
 pub async fn get_access_code(
     state: &AppState,
     place_id: &str,
     link_code: &str,
     cookie: &str,
-    csrf_token: &str,
 ) -> Option<String> {
-    let body = serde_json::json!({ "shareCode": link_code, "shareType": "Server" }).to_string();
-    let res = state
-        .http
-        .post("https://apis.roblox.com/sharelinks/v1/resolve")
-        .header("Cookie", format!(".ROBLOSECURITY={}", cookie))
-        .header("X-CSRF-TOKEN", csrf_token)
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json")
-        .header("Origin", "https://www.roblox.com")
-        .header("Referer", "https://www.roblox.com")
-        .header("User-Agent", UA)
-        .timeout(Duration::from_secs(8))
-        .body(body)
-        .send()
-        .await;
-    if let Ok(r) = res {
-        if let Ok(d) = r.json::<Value>().await {
-            let code = d
-                .get("privateServerInviteData")
-                .or_else(|| {
-                    d.get("resolvedShareData")
-                        .and_then(|v| v.get("privateServerInviteData"))
-                })
-                .or_else(|| {
-                    d.get("experienceInviteData")
-                        .and_then(|v| v.get("privateServerInviteData"))
-                })
-                .and_then(|v| v.get("accessCode"))
-                .and_then(|v| v.as_str());
-            if let Some(code) = code {
-                return Some(code.to_string());
-            }
-        }
-    }
-
-    // Fallback: redirect scrape.
     let url = format!(
         "https://www.roblox.com/games/{}?privateServerLinkCode={}",
         place_id, link_code
@@ -734,7 +689,10 @@ pub async fn follow_user_target(
         .ok_or_else(|| "Unexpected presence response".to_string())?;
 
     // 0 Offline, 1 Online (site/app, not in a game), 2 InGame, 3 InStudio.
-    let ptype = p.get("userPresenceType").and_then(|v| v.as_i64()).unwrap_or(0);
+    let ptype = p
+        .get("userPresenceType")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     if ptype != 2 {
         return Err(format!("{} is not in a game right now", real_name));
     }
@@ -772,7 +730,12 @@ mod tests {
             "www.roblox.com/games/1818/Classic-Crossroads",
             "https://www.roblox.com/games/1818",
         ] {
-            assert_eq!(extract_place_id(input), Some("1818".into()), "failed for {}", input);
+            assert_eq!(
+                extract_place_id(input),
+                Some("1818".into()),
+                "failed for {}",
+                input
+            );
         }
     }
 
@@ -788,8 +751,14 @@ mod tests {
     fn place_id_rejects_non_numeric_and_junk() {
         assert_eq!(extract_place_id(""), None);
         assert_eq!(extract_place_id("not a link"), None);
-        assert_eq!(extract_place_id("https://www.roblox.com/games/abc/Name"), None);
-        assert_eq!(extract_place_id("https://www.roblox.com/users/1818/profile"), None);
+        assert_eq!(
+            extract_place_id("https://www.roblox.com/games/abc/Name"),
+            None
+        );
+        assert_eq!(
+            extract_place_id("https://www.roblox.com/users/1818/profile"),
+            None
+        );
     }
 
     #[test]
@@ -798,7 +767,10 @@ mod tests {
             extract_roblox_error(r#"{"errors":[{"code":0,"message":"Token Validation Failed"}]}"#),
             "Token Validation Failed"
         );
-        assert_eq!(extract_roblox_error(r#"{"message":"Too many requests"}"#), "Too many requests");
+        assert_eq!(
+            extract_roblox_error(r#"{"message":"Too many requests"}"#),
+            "Too many requests"
+        );
     }
 
     #[test]
@@ -811,16 +783,132 @@ mod tests {
     #[test]
     fn share_link_extraction_needs_both_ids() {
         let body = r#"{"placeId":1818,"linkCode":"abc-DEF_123"}"#;
-        assert_eq!(extract_place_link(body), Some(("1818".into(), "abc-DEF_123".into())));
-        assert_eq!(extract_place_link(r#"{"placeId":1818}"#), None, "no link code");
-        assert_eq!(extract_place_link(r#"{"linkCode":"abc"}"#), None, "no place id");
+        assert_eq!(
+            extract_place_link(body),
+            Some(("1818".into(), "abc-DEF_123".into()))
+        );
+        assert_eq!(
+            extract_place_link(r#"{"placeId":1818}"#),
+            None,
+            "no link code"
+        );
+        assert_eq!(
+            extract_place_link(r#"{"linkCode":"abc"}"#),
+            None,
+            "no place id"
+        );
     }
 
     #[test]
     fn share_link_accepts_the_other_code_field_names() {
         for field in ["privateServerLinkCode", "accessCode", "linkcode"] {
             let body = format!(r#"{{"placeId":7,"{}":"zzz"}}"#, field);
-            assert_eq!(extract_place_link(&body), Some(("7".into(), "zzz".into())), "failed for {}", field);
+            assert_eq!(
+                extract_place_link(&body),
+                Some(("7".into(), "zzz".into())),
+                "failed for {}",
+                field
+            );
         }
+    }
+}
+/// Public server lists only include their players' tokens when the request is
+/// signed in, so this one read goes out as the account. It accepts nothing but
+/// that endpoint, so the cookie can't be sent anywhere else through it.
+pub async fn public_servers_as(state: &AppState, cookie: &str, url: &str) -> Result<Value, String> {
+    if !is_public_servers_url(url) {
+        return Err("URL not allowed".into());
+    }
+    let data = get_json(state, url, Some(cookie)).await;
+    Ok(serde_json::json!({ "ok": data.is_some(), "data": data.unwrap_or(Value::Null) }))
+}
+
+fn is_public_servers_url(url: &str) -> bool {
+    let Ok(u) = url::Url::parse(url) else {
+        return false;
+    };
+    let segments: Vec<&str> = u.path_segments().map(Iterator::collect).unwrap_or_default();
+    u.scheme() == "https"
+        && u.host_str() == Some("games.roblox.com")
+        && matches!(segments.as_slice(), ["v1", "games", place, "servers", "Public"]
+            if !place.is_empty() && place.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Request items for Roblox's thumbnail batch, at most 100. Tokens are opaque
+/// hex strings; anything else is dropped rather than forwarded.
+fn headshot_batch_body(tokens: &[String]) -> Vec<Value> {
+    tokens
+        .iter()
+        .filter(|t| !t.is_empty() && t.len() <= 64 && t.chars().all(|c| c.is_ascii_alphanumeric()))
+        .take(100)
+        .map(|t| {
+            serde_json::json!({
+                "requestId": t, "token": t, "type": "AvatarHeadShot",
+                "size": "48x48", "format": "Png", "isCircular": true,
+            })
+        })
+        .collect()
+}
+
+/// { token: imageUrl } for the given player tokens. The batch endpoint is a
+/// POST, which the read-only proxy above doesn't do.
+pub async fn headshots_for_tokens(state: &AppState, tokens: &[String]) -> Result<Value, String> {
+    let body = headshot_batch_body(tokens);
+    let mut out = serde_json::Map::new();
+    if body.is_empty() {
+        return Ok(Value::Object(out));
+    }
+    let res = state
+        .http
+        .post("https://thumbnails.roblox.com/v1/batch")
+        .header("Accept", "application/json")
+        .header("User-Agent", UA)
+        .timeout(Duration::from_secs(10))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("HTTP {}", res.status().as_u16()));
+    }
+    let data: Value = res.json().await.map_err(|e| e.to_string())?;
+    for item in data.get("data").and_then(Value::as_array).into_iter().flatten() {
+        if item.get("state").and_then(Value::as_str) != Some("Completed") {
+            continue;
+        }
+        if let (Some(id), Some(url)) = (
+            item.get("requestId").and_then(Value::as_str),
+            item.get("imageUrl").and_then(Value::as_str),
+        ) {
+            out.insert(id.to_string(), Value::String(url.to_string()));
+        }
+    }
+    Ok(Value::Object(out))
+}
+
+#[cfg(test)]
+mod server_face_tests {
+    use super::*;
+
+    #[test]
+    fn only_public_server_lists_are_read_signed_in() {
+        assert!(is_public_servers_url("https://games.roblox.com/v1/games/606849621/servers/Public?limit=100&cursor=x"));
+        assert!(!is_public_servers_url("http://games.roblox.com/v1/games/1/servers/Public"));
+        assert!(!is_public_servers_url("https://games.roblox.com/v1/games/1/servers/VIP"));
+        assert!(!is_public_servers_url("https://games.roblox.com/v1/games/abc/servers/Public"));
+        assert!(!is_public_servers_url("https://evil.example/v1/games/1/servers/Public"));
+        assert!(!is_public_servers_url("https://games.roblox.com.evil.example/v1/games/1/servers/Public"));
+        assert!(!is_public_servers_url("https://economy.roblox.com/v1/games/1/servers/Public"));
+    }
+
+    #[test]
+    fn headshot_requests_keep_only_plain_tokens() {
+        let tokens: Vec<String> = ["A1B2", "", "bad token", "x\"y"].iter().map(|s| s.to_string()).collect();
+        let body = headshot_batch_body(&tokens);
+        assert_eq!(body.len(), 1);
+        assert_eq!(body[0]["token"], "A1B2");
+        assert_eq!(body[0]["type"], "AvatarHeadShot");
+        let many: Vec<String> = (0..250).map(|i| format!("T{i}")).collect();
+        assert_eq!(headshot_batch_body(&many).len(), 100);
     }
 }

@@ -12,8 +12,9 @@ set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if not exist "%CSC%" set "CSC=%WINDIR%\Microsoft.NET\Framework\v4.0.30319\csc.exe"
 if exist "%CSC%" (
   "%CSC%" /nologo /optimize+ /platform:x64 /target:exe /r:System.Drawing.dll /out:src-tauri\resources\RobloxNative.exe src-tauri\resources\RobloxNative.cs
+  if errorlevel 1 (echo Native helper failed to compile & pause & exit /b 1)
 ) else (
-  echo csc.exe not found - native helper will compile on first launch instead
+  echo csc.exe not found - building with the existing src-tauri\resources\RobloxNative.exe, which may be out of date
 )
 
 cargo build --release --manifest-path src-tauri\Cargo.toml --bin MultiRoblox

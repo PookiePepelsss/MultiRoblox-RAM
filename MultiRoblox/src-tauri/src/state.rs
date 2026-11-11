@@ -39,7 +39,7 @@ pub struct AppState {
     pub last_launch_ts: Mutex<i64>,
     pub launch_lock: tokio::sync::Mutex<()>,
     /// account id -> flag the UI can set to abandon an in-flight launch.
-    pub launch_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    pub launch_cancel: Mutex<HashMap<String, Vec<Arc<AtomicBool>>>>,
 
     pub login_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 

@@ -6,7 +6,12 @@
 use crate::state::AppState;
 use tauri::AppHandle;
 
-pub async fn capture_account_png(app: &AppHandle, state: &AppState, account_id: &str, region: Option<(f64, f64, f64, f64)>) -> Result<Vec<u8>, String> {
+pub async fn capture_account_png(
+    app: &AppHandle,
+    state: &AppState,
+    account_id: &str,
+    region: Option<(f64, f64, f64, f64)>,
+) -> Result<Vec<u8>, String> {
     let pid = state
         .account_pids
         .lock()
@@ -29,7 +34,11 @@ pub async fn capture_account_png(app: &AppHandle, state: &AppState, account_id: 
         .map_err(|e| e.to_string())
 }
 
-pub async fn capture_preview_b64(app: &AppHandle, state: &AppState, account_id: &str) -> Result<String, String> {
+pub async fn capture_preview_b64(
+    app: &AppHandle,
+    state: &AppState,
+    account_id: &str,
+) -> Result<String, String> {
     let png = capture_account_png(app, state, account_id, None).await?;
     use base64::Engine;
     Ok(base64::engine::general_purpose::STANDARD.encode(&png))
@@ -49,8 +58,9 @@ const DISCORD_WEBHOOK_HOSTS: [&str; 6] = [
 ];
 
 pub fn validate_webhook_url(url: &str) -> Result<(), String> {
-    let parsed = url::Url::parse(url.trim())
-        .map_err(|_| "That doesn't look like a URL. Paste the full Discord webhook URL.".to_string())?;
+    let parsed = url::Url::parse(url.trim()).map_err(|_| {
+        "That doesn't look like a URL. Paste the full Discord webhook URL.".to_string()
+    })?;
     if parsed.scheme() != "https" {
         return Err("The webhook URL must start with https://".to_string());
     }
@@ -70,7 +80,12 @@ pub fn validate_webhook_url(url: &str) -> Result<(), String> {
 // Discord's multi-attachment webhook format: each file gets its own part
 // named files[0], files[1], etc, all in one POST; one message per capture
 // pass instead of spamming a separate message per outlined spot.
-pub async fn send_to_discord_webhook(state: &AppState, webhook_url: &str, images: Vec<Vec<u8>>, content: &str) -> Result<(), String> {
+pub async fn send_to_discord_webhook(
+    state: &AppState,
+    webhook_url: &str,
+    images: Vec<Vec<u8>>,
+    content: &str,
+) -> Result<(), String> {
     let mut form = reqwest::multipart::Form::new().text("content", content.to_string());
     for (i, image) in images.into_iter().enumerate() {
         let part = reqwest::multipart::Part::bytes(image)
@@ -79,13 +94,23 @@ pub async fn send_to_discord_webhook(state: &AppState, webhook_url: &str, images
             .map_err(|e| e.to_string())?;
         form = form.part(format!("files[{}]", i), part);
     }
-    let resp = state.http.post(webhook_url).multipart(form).send().await.map_err(|e| e.to_string())?;
+    let resp = state
+        .http
+        .post(webhook_url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if resp.status().is_success() {
         Ok(())
     } else {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        Err(format!("Webhook returned {}: {}", status, body.chars().take(300).collect::<String>()))
+        Err(format!(
+            "Webhook returned {}: {}",
+            status,
+            body.chars().take(300).collect::<String>()
+        ))
     }
 }
 
@@ -108,7 +133,11 @@ pub async fn capture_and_send(
             images.push(capture_account_png(app, state, account_id, Some(region)).await?);
         }
     }
-    let content = format!("**{}** \u{2014} {}", username, chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
+    let content = format!(
+        "**{}** \u{2014} {}",
+        username,
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    );
     send_to_discord_webhook(state, webhook_url, images, &content).await
 }
 

@@ -1,13 +1,14 @@
 mod commands;
 mod crypto;
 mod encryption;
+mod fps;
 mod helper;
 mod jsonfile;
 mod login;
 mod native;
 mod paths;
-mod rdd;
 mod roblox_api;
+mod servers;
 mod settings;
 mod state;
 mod storage;
@@ -32,6 +33,10 @@ pub fn run() {
             }
             encryption::prewarm_key(&handle);
 
+            // Restores the user's FPS cap whenever Roblox (which rewrites
+            // GlobalBasicSettings_13.xml on exit) or another tool overwrites it.
+            fps::start_guard(&handle);
+
             // Best-effort cleanup of orphaned login-profile temp dirs from a
             // crash or force-kill mid-login (see sweep_stale_login_profiles).
             // Blocking I/O, kept off the async runtime's worker threads.
@@ -51,19 +56,10 @@ pub fn run() {
             // guaranteed held before any instance launches.
             if cfg!(windows) {
                 let handle2 = handle.clone();
-                let startup_settings = settings::load_settings();
-                let auto_afk = startup_settings
-                    .get("antiAfk")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                let auto_afk = settings::get_bool("antiAfk", false);
                 // Defaults on, matching the previous unconditional hold. Only
-                // an explicit false releases it; until now the setting was
-                // read solely when toggled, so a saved `false` came back on at
-                // every restart.
-                let multi_instance = startup_settings
-                    .get("multiInstance")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
+                // an explicit false releases it.
+                let multi_instance = settings::get_bool("multiInstance", true);
                 tauri::async_runtime::spawn(async move {
                     let state = handle2.state::<AppState>();
                     native::start_mutex_holder(&handle2, &state).await;
@@ -170,14 +166,18 @@ pub fn run() {
             commands::genhistory_read,
             commands::genhistory_write,
             commands::genhistory_clear,
+            commands::gen_key_load,
+            commands::gen_key_save,
             commands::fflag_read,
             commands::fflag_write,
+            commands::roblox_list_installs,
+            commands::roblox_set_account_ram_limit,
+            commands::roblox_memory_usage,
+            commands::system_stats,
+            commands::roblox_layout,
+            commands::roblox_previews,
             commands::fps_read,
             commands::fps_write,
-            commands::roblox_get_version,
-            commands::rdd_install,
-            commands::rdd_list_versions,
-            commands::rdd_delete_version,
             commands::roblox_validate_cookie,
             commands::roblox_set_volume,
             commands::roblox_kill_all,
@@ -189,9 +189,17 @@ pub fn run() {
             commands::roblox_set_account_priority,
             commands::roblox_get_game_name,
             commands::roblox_get_json,
+            commands::roblox_public_servers_as,
+            commands::roblox_headshots,
             commands::roblox_follow_user,
             commands::altgen_generate,
             commands::roblox_launch,
+            commands::servers_list,
+            commands::servers_price,
+            commands::servers_buy,
+            commands::servers_update,
+            commands::servers_renewal,
+            commands::servers_plan,
             commands::roblox_launch_cancel,
             commands::roblox_open_login,
             commands::roblox_login_with_credentials,

@@ -1,4 +1,4 @@
-let accounts = [], launchAcc = null, editAcc = null, toastTimer;
+let accounts = [], editAcc = null, toastTimer;
 let packages = [], editingPackageId = null;
 const _launchedIds = new Set();
 
@@ -38,20 +38,70 @@ function _logLine(e) {
   return `<div class="log-row log-row-${esc(e.level)}"><span class="lg-ts">${esc(ts)}</span><span class="lg-cat">${esc(cat)}</span><span class="lg-msg">${esc(e.message)}${meta}</span></div>`;
 }
 
+let _logFilter = 'all';
+function _logVisible(e) {
+  if (_logFilter === 'all') return true;
+  if (_logFilter === 'err') return e.level === 'err' || e.category === 'crash';
+  return e.category === _logFilter;
+}
+
+function setLogFilter(f) {
+  _logFilter = f;
+  document.querySelectorAll('#log-filter button').forEach(b => b.classList.toggle('active', b.dataset.f === f));
+  syncSeg(document.getElementById('log-filter'));
+  renderLogs();
+  const el = document.getElementById('logs-list');
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+function logsCopy() {
+  const rows = _logs.filter(_logVisible);
+  if (!rows.length) { toast('Nothing to copy', 'err'); return; }
+  const text = rows.map(e => {
+    const time = new Date(e.ts).toLocaleTimeString('en-GB', { hour12: false });
+    const meta = Object.keys(e.meta || {}).filter(k => e.meta[k] !== null && e.meta[k] !== undefined).map(k => `${k}=${e.meta[k]}`).join(' ');
+    return `${time} ${String(e.category || '').toUpperCase()} ${e.message}${meta ? ' ' + meta : ''}`;
+  }).join('\n');
+  navigator.clipboard.writeText(text).then(() => toast(`Copied ${rows.length} line${rows.length !== 1 ? 's' : ''}`, 'ok')).catch(() => toast('Could not copy the log', 'err'));
+}
+
+function logsClear() {
+  _logs.length = 0;
+  renderLogs();
+}
+
 function renderLogs() {
   const el = document.getElementById('logs-list');
   if (!el) return;
-  if (!_logs.length) { el.innerHTML = '<div class="logs-empty"><span class="material-icons-round">terminal</span>No log entries yet.</div>'; return; }
+  if (!_logs.length) { el.innerHTML = '<div class="logs-empty"><span class="material-icons-round">terminal</span>No log entries yet.<span class="logs-empty-sub">Launches, closes and errors appear here as they happen.</span></div>'; return; }
+  const rows = _logs.filter(_logVisible);
+  if (!rows.length) { el.innerHTML = `<div class="logs-empty"><span class="material-icons-round">filter_list_off</span>Nothing matches this filter.<button class="btn btn-ghost" onclick="setLogFilter('all')">Show all</button></div>`; return; }
   // Tail behaviour: only auto-scroll to the newest line if already near the end.
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  el.innerHTML = _logs.map(_logLine).join('');
+  // The newest lines first; earlier ones load as you scroll up to them.
+  el.innerHTML = rows.slice(-LOG_PAGE).map(_logLine).join('');
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
+
+// Adds the next batch of earlier lines above the ones showing (all of them with
+// `all`), keeping the lines you're looking at where they are.
+const LOG_PAGE = 200;
+function _loadEarlierLogs(all) {
+  const el = document.getElementById('logs-list');
+  if (!el) return;
+  const rows = _logs.filter(_logVisible);
+  const hidden = rows.length - el.querySelectorAll('.log-row').length;
+  if (hidden <= 0) return;
+  const before = el.scrollHeight;
+  el.insertAdjacentHTML('afterbegin', rows.slice(all ? 0 : Math.max(0, hidden - LOG_PAGE), hidden).map(_logLine).join(''));
+  el.scrollTop += el.scrollHeight - before;
+}
+document.getElementById('logs-list')?.addEventListener('scroll', e => { if (e.target.scrollTop < 120) _loadEarlierLogs(); }, { passive: true });
 
 // Appends one row instead of rejoining/replacing the whole log list.
 function _appendLogRow(entry) {
   const el = document.getElementById('logs-list');
-  if (!el) return;
+  if (!el || !_logVisible(entry)) return;
   if (el.querySelector('.logs-empty')) el.innerHTML = '';
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   el.insertAdjacentHTML('beforeend', _logLine(entry));
@@ -66,6 +116,7 @@ function openLogFind() {
   const inp = document.getElementById('log-find-input');
   if (!bar || !inp) return;
   bar.style.display = 'flex';
+  _loadEarlierLogs(true); // find searches what's on the page, so put every line there
   inp.focus(); inp.select();
 }
 function closeLogFind() {
@@ -119,10 +170,15 @@ async function submitEnc() {
   const inp = document.getElementById('enc-input');
   const action = document.getElementById('enc-action');
   const val = inp ? inp.value : '';
+  // The input's Enter handler calls this directly, bypassing the disabled
+  // button; a second Enter mid-unlock would otherwise run continueInit twice.
+  if (action && action.disabled) return;
   if (action) action.disabled = true;
   try {
     if (_encMode === 'setup') {
-      if (!val) { _encErr('Please enter an encryption key.'); action.disabled = false; return; }
+      // trim(): the backend trims too, and a blank key there means "no
+      // passphrase", so a whitespace-only entry would silently set none.
+      if (!val.trim()) { _encErr('Please enter an encryption key.'); action.disabled = false; return; }
       const r = await api.encSetKey(val);
       if (!r || !r.ok) {
         const reason = r && r.error === 'decrypt failed'
@@ -175,7 +231,14 @@ async function init() {
   try {
     const st = await api.encStatus();
     if (st && st.mode === 'locked') { showEncModal('locked'); return; }
-    if (st && st.mode === 'setup') { showEncModal('setup'); return; }
+    if (st && st.mode === 'setup') {
+      // enc_status says 'setup' whenever no passphrase is set, which includes
+      // users who already chose to run without one; encSetupDone is what
+      // records that choice, so only a genuinely fresh install gets prompted.
+      let s = null;
+      try { s = await api.loadSettings(); } catch {}
+      if (!(s && s.encSetupDone)) { showEncModal('setup'); return; }
+    }
   } catch {}
   await continueInit();
 }
@@ -191,7 +254,12 @@ function flagInvalidCookies(list) {
   }
 }
 
+// Everything below registers backend listeners and starts loops, so it must
+// only ever run once per page load, however the unlock flow reaches it.
+let _initStarted = false;
 async function continueInit() {
+  if (_initStarted) return;
+  _initStarted = true;
   [accounts, settings, packages] = await Promise.all([api.loadAccounts(), api.loadSettings(), api.loadPackages()]);
   logEntry('info', 'system', `Loaded ${accounts.length} account${accounts.length === 1 ? '' : 's'} from storage`);
   flagInvalidCookies(accounts);
@@ -200,26 +268,26 @@ async function continueInit() {
   // put the toolbar back to the saved view + filter
   document.getElementById('vt-grid').classList.toggle('active', _acctView === 'grid');
   document.getElementById('vt-list').classList.toggle('active', _acctView === 'list');
+  syncSeg(document.getElementById('acct-view'));
   document.querySelectorAll('#filter-menu button').forEach(b => b.classList.toggle('active', b.dataset.f === _acctFilter));
   document.getElementById('filter-btn').classList.toggle('on', _acctFilter !== 'all');
   renderPackages();
   applySettings();
   refreshMultiStatus();
-  positionNavSlider(); // covers landing on the default page without a goTo() call
-  detectRobloxVersion();
   showAppVersion();
   startStatusPoll();
   if (settings.autoTrim) startAutoTrimLoop();
   startTrackingLoop();
   logEntry('info', 'system', 'MultiRoblox started', { version: 'v1', accounts: accounts.length, platform: navigator.platform });
-  try { const k = localStorage.getItem('bloxgen_apikey'); if (k) { const el = document.getElementById('gen-apikey'); if (el) el.value = k; } } catch {}
-  genOnKeyInput();
+  loadGenKey();
   try {
     const t = GEN_TYPES.find(x => x.value === localStorage.getItem('bloxgen_type'));
     if (t) genSetType(t.value, t.label, t.desc);
   } catch {}
-  try { const afkStat = await api.antiAfkStatus(); if (afkStat && afkStat.enabled) logEntry('info', 'afk', `Anti-AFK is enabled on startup (active: ${afkStat.active})`, { enabled: afkStat.enabled, active: afkStat.active }); } catch {}
-  try { _genHistory = (await api.readGenHistory()) || []; genRenderHistory(); } catch {}
+
+  // Backend listeners go up before the awaits below: anything the backend
+  // emitted while those round-trips were pending (a launch finishing, an
+  // instance closing, a log line) used to be dropped on the floor.
 
   // Forward main-process log events into the renderer log
   api.onLogEntry(data => logEntry(data.level, data.category, data.message, data.meta));
@@ -230,12 +298,13 @@ async function continueInit() {
   // Fires the moment the process actually exists (see native.rs do_launch),
   // instead of waiting on the whole launch call: CSRF fetch, auth ticket,
   // inter-launch stagger, trailing bookkeeping; to resolve back to the
-  // caller. markLaunched() is idempotent, so the doLaunch() success path
+  // caller. markLaunched() is idempotent, so the startAccount() success path
   // below calling it again once its own await resolves is harmless.
   api.onRobloxStarted(id => markLaunched(id));
 
   api.onRobloxClosed(id => {
     _launchedIds.delete(id);
+    syncRunTimes();
     const closedAcct = accounts.find(a => a.id === id);
     logEntry('info', 'close', `Roblox closed for ${closedAcct ? closedAcct.username : id}`, { accountId: id, username: closedAcct?.username || null, userId: closedAcct?.userId || null });
     const card = document.querySelector(`.card[data-id="${id}"]`);
@@ -273,6 +342,9 @@ async function continueInit() {
       waitDiv.style.display = '';
     }
   });
+
+  try { const afkStat = await api.antiAfkStatus(); if (afkStat && afkStat.enabled) logEntry('info', 'afk', `Anti-AFK is enabled on startup (active: ${afkStat.active})`, { enabled: afkStat.enabled, active: afkStat.active }); } catch {}
+  try { _genHistory = (await api.readGenHistory()) || []; genRenderHistory(); } catch {}
 }
 init();
 
@@ -326,43 +398,33 @@ function openDiscord() {
   setTheme(t || DEFAULT_THEME);
 })();
 
-// ── BloxGen API key persistence ────────────────────────────────────────────
-(function() {
-  try {
-    const saved = localStorage.getItem('bloxgen_apikey');
-    if (saved) {
-      const el = document.getElementById('gen-apikey');
-      if (el) el.value = saved;
-    }
-  } catch {}
-})();
-document.addEventListener('DOMContentLoaded', () => {
-  const el = document.getElementById('gen-apikey');
-  if (el) el.addEventListener('input', () => {
-    try { localStorage.setItem('bloxgen_apikey', el.value); } catch {}
-  });
-});
-
-
-async function detectRobloxVersion() {
-  try {
-    const ver = await api.getRobloxVersion(settings.lockChannel ? (settings.robloxChannel || 'current') : 'current');
-    if (ver) {
-      // Show full hash in titlebar badge, also update settings stat
-      document.getElementById('tb-roblox-ver').textContent = ver;
-      const el = document.getElementById('stat-rblx-ver');
-      if (el) el.textContent = ver;
-    } else {
-      document.getElementById('tb-roblox-ver').textContent = '-';
-      const el = document.getElementById('stat-rblx-ver');
-      if (el) el.textContent = 'Not detected';
-    }
-  } catch {
-    document.getElementById('tb-roblox-ver').textContent = '-';
-    const el = document.getElementById('stat-rblx-ver');
-    if (el) el.textContent = 'Not detected';
+// ── Generator API key persistence ──────────────────────────────────────────
+// Encrypted by the backend like the cookies. It used to sit in localStorage in
+// plain text, so a key found there is moved across once and then removed.
+async function loadGenKey() {
+  let key = '';
+  try { key = (await api.loadGenKey()) || ''; } catch {}
+  let legacy = null;
+  try { legacy = localStorage.getItem('bloxgen_apikey'); } catch {}
+  if (legacy !== null) {
+    try {
+      if (!key && legacy) { await api.saveGenKey(legacy); key = legacy; }
+      localStorage.removeItem('bloxgen_apikey');
+    } catch {} // not saved: leave the old copy for the next start to retry
   }
+  const el = document.getElementById('gen-apikey');
+  if (el && !el.value && typeof key === 'string') el.value = key;
+  genOnKeyInput();
 }
+let _genKeySaveTimer = null;
+function saveGenKeySoon() {
+  clearTimeout(_genKeySaveTimer);
+  _genKeySaveTimer = setTimeout(() => {
+    const el = document.getElementById('gen-apikey');
+    if (el) api.saveGenKey(el.value).catch(() => {});
+  }, 400);
+}
+
 
 async function showAppVersion() {
   let v;
@@ -391,12 +453,17 @@ function applySettings() {
   if (afkSb) afkSb.checked = !!settings.antiAfk;
   const afkIv = document.getElementById('set-antiafk-interval');
   if (afkIv) {
-    const mins = Math.round((settings.antiAfkInterval || 19 * 60) / 60);
+    const mins = Math.round(Math.min(settings.antiAfkInterval || 17 * 60, 17 * 60) / 60);
     afkIv.value = mins;
     updateSliderFill(afkIv);
     const afkIvVal = document.getElementById('set-antiafk-interval-val');
     if (afkIvVal) afkIvVal.textContent = mins + ' min';
   }
+  paintAntiAfkKey();
+  layoutCfgLoad();
+  const pv = document.getElementById('set-preview');
+  if (pv) pv.checked = !!settings.profilePreview;
+  startPreviewPoll();
   const trim = document.getElementById('set-autotrim');
   if (trim) trim.checked = !!settings.autoTrim;
   const trimIv = document.getElementById('set-autotrim-interval');
@@ -407,34 +474,34 @@ function applySettings() {
     const trimIvVal = document.getElementById('set-autotrim-interval-val');
     if (trimIvVal) trimIvVal.textContent = mins + ' min';
   }
+  const ramIv = document.getElementById('set-ramlimit');
+  if (ramIv) {
+    ramIv.value = Number(settings.ramLimitMb) || 0;
+    updateSliderFill(ramIv);
+    const ramVal = document.getElementById('set-ramlimit-val');
+    if (ramVal) ramVal.textContent = ramLimitLabel(settings.ramLimitMb);
+  }
   const relaunch = document.getElementById('set-autorelaunch');
   if (relaunch) relaunch.checked = !!settings.autoRelaunch;
   const lowPriority = document.getElementById('set-lowpriority');
-  if (lowPriority) lowPriority.checked = settings.lowPriorityMultiInstance !== false;
+  if (lowPriority) lowPriority.checked = settings.lowPriorityMultiInstance === true;
+  const protectSignIn = document.getElementById('set-protectsignin');
+  if (protectSignIn) protectSignIn.checked = settings.protectSignIn !== false;
   // Off by default: quitting on close is the long-standing behaviour, and
   // silently vanishing into the tray instead is a surprise worth opting into.
   const hideTray = document.getElementById('set-hidetotray');
   if (hideTray) hideTray.checked = !!settings.hideToTray;
-  const lockChannel = document.getElementById('set-lockchannel');
-  if (lockChannel) lockChannel.checked = !!settings.lockChannel;
-  robloxChannelUpdateUI(['current','custom'].includes(settings.robloxChannel) ? settings.robloxChannel : 'current');
-  const vh = document.getElementById('set-verhash');
-  if (vh) vh.value = settings.customVersion || '';
-  rddRowUpdate();
-  rddRenderList();
-  api.onRddProgress(p => {
-    const bar = document.getElementById('rdd-bar');
-    if (bar && p.total) bar.style.width = Math.round((p.done / p.total) * 100) + '%';
-    rddSetStatus(p.message === 'Done' ? 'Finishing...' : ('Downloading ' + p.message + ' (' + (p.done + 1) + '/' + p.total + ')'), '');
-  });
 }
 
+// Registered once from continueInit. It used to live in applySettings, which
+// also runs after every encryption-key save, so each save stacked another
+// listener and every progress event was handled several times over.
 let _acctQuery = '', _acctFilter = (() => { try { const f = localStorage.getItem('mr-acct-filter'); return (f && f !== 'running' && f !== 'idle') ? f : 'all'; } catch { return 'all'; } })(), _acctView = (() => { try { return localStorage.getItem('mr-acct-view') === 'list' ? 'list' : 'grid'; } catch { return 'grid'; } })();
 function visibleAccounts() {
   let list = [...accounts];
   if (_acctQuery) {
     const q = _acctQuery;
-    list = list.filter(a => (a.nickname || a.username || '').toLowerCase().includes(q) || String(a.userId || '').includes(q));
+    list = list.filter(a => (a.nickname || a.username || '').toLowerCase().includes(q) || String(a.userId || '').includes(q) || String(a.tag || '').toLowerCase().includes(q));
   }
   if (_acctFilter === 'running') list = list.filter(a => _launchedIds.has(a.id));
   else if (_acctFilter === 'idle') list = list.filter(a => !_launchedIds.has(a.id));
@@ -458,6 +525,7 @@ function toggleFilterMenu(e) { if (e) e.stopPropagation(); document.getElementBy
 function setAcctFilter(f) {
   _acctFilter = f;
   try { localStorage.setItem('mr-acct-filter', (f === 'running' || f === 'idle') ? 'all' : f); } catch {}
+  _gridAnimate = true;
   document.querySelectorAll('#filter-menu button').forEach(b => b.classList.toggle('active', b.dataset.f === f));
   document.getElementById('filter-menu').classList.remove('open');
   document.getElementById('filter-btn').classList.toggle('on', f !== 'all');
@@ -466,14 +534,28 @@ function setAcctFilter(f) {
 function setAcctView(v) {
   _acctView = v;
   try { localStorage.setItem('mr-acct-view', v); } catch {}
+  _gridAnimate = true;
   document.getElementById('vt-grid').classList.toggle('active', v === 'grid');
   document.getElementById('vt-list').classList.toggle('active', v === 'list');
+  syncSeg(document.getElementById('acct-view'));
   render();
 }
 document.addEventListener('click', e => {
   const fm = document.getElementById('filter-menu');
   if (fm && fm.classList.contains('open') && !e.target.closest('.filter-wrap')) fm.classList.remove('open');
 });
+
+function paintWelcome() {
+  const on = !!document.getElementById('sb-antiafk')?.checked;
+  const btn = document.getElementById('welcome-afk');
+  if (!btn) return;
+  btn.textContent = on ? 'Turned on' : 'Turn on';
+  btn.disabled = on;
+}
+function welcomeAntiAfk() {
+  document.getElementById('sb-antiafk').checked = true;
+  toggleAntiAfk('sb');
+}
 
 function toggleAntiAfk(src) {
   const el = document.getElementById(src === 'sb' ? 'sb-antiafk' : 'set-antiafk');
@@ -483,6 +565,232 @@ function toggleAntiAfk(src) {
   const a = document.getElementById('set-antiafk'); if (a) a.checked = on;
   const b = document.getElementById('sb-antiafk'); if (b) b.checked = on;
   toast(on ? 'Anti-AFK on, accounts stay connected' : 'Anti-AFK off', on ? 'ok' : 'err');
+  paintWelcome();
+}
+
+// ── Anti-AFK key ──
+// keyCode is the Windows virtual-key code the helper presses, as the page reports it.
+const VK_NAMES = { 8: 'Backspace', 9: 'Tab', 13: 'Enter', 16: 'Shift', 17: 'Ctrl', 18: 'Alt', 19: 'Pause', 20: 'Caps Lock', 27: 'Esc', 32: 'Space', 33: 'Page Up', 34: 'Page Down', 35: 'End', 36: 'Home', 37: 'Left', 38: 'Up', 39: 'Right', 40: 'Down', 44: 'Print Screen', 45: 'Insert', 46: 'Delete', 144: 'Num Lock', 145: 'Scroll Lock', 186: ';', 187: '=', 188: ',', 189: '-', 190: '.', 191: '/', 192: '`', 219: '[', 220: '\\', 221: ']', 222: "'" };
+function vkName(vk) {
+  if (VK_NAMES[vk]) return VK_NAMES[vk];
+  if ((vk >= 48 && vk <= 57) || (vk >= 65 && vk <= 90)) return String.fromCharCode(vk);
+  if (vk >= 112 && vk <= 135) return 'F' + (vk - 111);
+  if (vk >= 96 && vk <= 105) return 'Num ' + (vk - 96);
+  return 'Key ' + vk;
+}
+function antiAfkKeyOf() { const k = parseInt(settings.antiAfkKey, 10); return k >= 1 && k <= 255 ? k : 16; }
+function paintAntiAfkKey() {
+  const btn = document.getElementById('set-antiafk-key');
+  if (!btn) return;
+  btn.textContent = vkName(antiAfkKeyOf());
+  btn.classList.remove('listening');
+  const reset = document.getElementById('set-antiafk-key-reset');
+  if (reset) reset.style.visibility = antiAfkKeyOf() === 16 ? 'hidden' : '';
+}
+function setAntiAfkKey(vk) {
+  settings.antiAfkKey = vk;
+  api.saveSettings({ antiAfkKey: vk });
+  paintAntiAfkKey();
+  toast('Anti-AFK will press ' + vkName(vk === 0 ? 16 : vk), 'ok');
+}
+let _keyPicking = false;
+function antiAfkPickKey() {
+  const btn = document.getElementById('set-antiafk-key');
+  if (!btn || _keyPicking) return;
+  _keyPicking = true;
+  btn.textContent = 'Press a key…';
+  btn.classList.add('listening');
+  const done = vk => {
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('mousedown', onAway, true);
+    _keyPicking = false;
+    if (vk) setAntiAfkKey(vk); else paintAntiAfkKey();
+  };
+  const onKey = e => {
+    e.preventDefault(); e.stopPropagation();
+    if (e.key === 'Escape') { done(0); return; }
+    const vk = e.keyCode;
+    // The Windows and menu keys open things outside the game; 229 is an input method's.
+    if (!vk || vk === 229 || vk === 91 || vk === 92 || vk === 93) { toast("That key can't be used", 'err'); return; }
+    done(vk);
+  };
+  const onAway = e => { if (!e.target.closest('#set-antiafk-key')) done(0); };
+  document.addEventListener('keydown', onKey, true);
+  setTimeout(() => document.addEventListener('mousedown', onAway, true), 0);
+}
+function antiAfkResetKey() { setAntiAfkKey(0); }
+
+// ── Game previews on running tiles ──
+// A 160-pixel JPEG of each running window every 30 seconds, only while the app is in
+// view, laid over the account's profile picture (which stays underneath).
+const PREVIEW_MS = 30000;
+let _previews = {}, _previewTimer = null, _previewBusy = false;
+function startPreviewPoll() {
+  clearInterval(_previewTimer);
+  _previewTimer = null;
+  if (!settings.profilePreview) { paintPreviews(); return; }
+  pollPreviews();
+  _previewTimer = setInterval(pollPreviews, PREVIEW_MS);
+}
+async function pollPreviews() {
+  if (_previewBusy || !settings.profilePreview || _appAway || document.hidden || !_launchedIds.size) return;
+  _previewBusy = true;
+  try { Object.assign(_previews, (await api.windowPreviews()) || {}); paintPreviews(); }
+  catch {} finally { _previewBusy = false; }
+}
+function paintPreviews() {
+  document.querySelectorAll('#grid .card[data-id]').forEach(card => {
+    const id = card.dataset.id, av = card.querySelector('.card-av');
+    if (!av) return;
+    if (!_launchedIds.has(id)) delete _previews[id];
+    const url = settings.profilePreview ? _previews[id] : null;
+    let img = av.querySelector(':scope > .av-live');
+    if (!url) { if (img) img.remove(); return; }
+    if (!img) { img = document.createElement('img'); img.className = 'av-live'; img.alt = ''; av.appendChild(img); }
+    if (img._url !== url) { img._url = url; img.src = url; }
+  });
+}
+function togglePreview() {
+  const on = !!document.getElementById('set-preview').checked;
+  settings.profilePreview = on;
+  api.saveSettings({ profilePreview: on });
+  startPreviewPoll();
+  toast(on ? 'Game previews on, refreshed every 30 seconds' : 'Game previews off', on ? 'ok' : 'err');
+}
+
+// ── Auto layout ──
+// The button opens a dialog to set the layout up, then lines the running windows up as
+// asked; it reads "Layout on" while it's in place, and the dialog can put the windows back.
+// Windows started while it's on join the rows.
+const LAYOUT_SIZES = { tiny: [320, 180], small: [480, 270], medium: [640, 360], large: [960, 540] };
+let _layoutCfg = { size: 'tiny', w: 320, h: 180, corner: 0, gap: 0 };
+let _layoutOn = false, _layoutUsed = null, _relayoutTimer = null;
+const _layoutPending = new Set(); // accounts that opened since the layout and haven't got a cell yet
+function layoutCfgLoad() {
+  const c = settings.layoutConfig;
+  if (c && typeof c === 'object') _layoutCfg = { ..._layoutCfg, ...c };
+}
+function paintLayoutBtn() {
+  const btn = document.getElementById('layout-btn');
+  if (!btn) return;
+  btn.setAttribute('aria-pressed', String(_layoutOn));
+  btn.title = _layoutOn ? 'Windows are lined up. Open to change or undo it' : 'Line up your running windows on this screen';
+  document.getElementById('layout-icon').textContent = _layoutOn ? 'grid_on' : 'grid_view';
+  document.getElementById('layout-label').textContent = _layoutOn ? 'Layout on' : 'Auto layout';
+}
+function layPaint() {
+  const c = _layoutCfg;
+  document.querySelectorAll('#m-layout .lay-opt').forEach(b => {
+    const v = b.dataset.v, cur = c[b.dataset.g];
+    b.classList.toggle('active', String(cur) === v);
+  });
+  document.getElementById('lay-custom').classList.toggle('show', c.size === 'custom');
+  const w = document.getElementById('lay-w'), h = document.getElementById('lay-h');
+  if (document.activeElement !== w) w.value = c.w;
+  if (document.activeElement !== h) h.value = c.h;
+}
+function layPick(group, value) {
+  _layoutCfg[group] = value;
+  if (group === 'size' && LAYOUT_SIZES[value]) [_layoutCfg.w, _layoutCfg.h] = LAYOUT_SIZES[value];
+  layPaint();
+  layFit();
+}
+function layCustom() {
+  _layoutCfg.w = parseInt(document.getElementById('lay-w').value, 10) || 0;
+  _layoutCfg.h = parseInt(document.getElementById('lay-h').value, 10) || 0;
+  layFit();
+}
+// A rough count of how many windows fit, with a title bar and thin edges around each.
+function layFit() {
+  const el = document.getElementById('lay-fit');
+  const c = _layoutCfg, k = devicePixelRatio || 1;
+  const w = Math.min(1280, Math.max(160, c.w || 0)), h = Math.min(720, Math.max(90, c.h || 0));
+  const cols = Math.max(1, Math.floor((screen.availWidth * k + c.gap) / (w + 2 + c.gap)));
+  const rows = Math.max(1, Math.floor((screen.availHeight * k + c.gap) / (h + 32 + c.gap)));
+  const chosen = document.querySelectorAll('#lay-accts input:checked').length;
+  const fits = cols * rows;
+  el.textContent = `About ${fits} window${fits === 1 ? '' : 's'} fit${fits === 1 ? 's' : ''} on this screen at this size.` +
+    (chosen > fits ? ' The rest start over from the corner and sit on top of the first ones.' : '');
+}
+function openAutoLayout() {
+  if (!_launchedIds.size && !_layoutOn) { toast('Start an account first, then line the windows up'); return; }
+  layoutCfgLoad();
+  document.getElementById('lay-accts').innerHTML = accounts.filter(a => _launchedIds.has(a.id)).map(a => `
+    <label class="lay-acct"><span>${esc(a.nickname || a.username || 'Unknown')}</span>
+      <span class="toggle sm"><input type="checkbox" value="${esc(a.id)}" checked onchange="layFit()"/><span class="toggle-trk"></span></span>
+    </label>`).join('');
+  document.getElementById('lay-undo').style.display = _layoutOn ? '' : 'none';
+  document.getElementById('lay-go').textContent = _layoutOn ? 'Line up again' : 'Line up';
+  layPaint();
+  layFit();
+  openModal('m-layout');
+}
+async function layoutApply() {
+  const go = document.getElementById('lay-go');
+  if (go.disabled) return;
+  const ids = [...document.querySelectorAll('#lay-accts input:checked')].map(i => i.value);
+  if (!ids.length) { toast('Pick at least one account'); return; }
+  const c = _layoutCfg;
+  if (!(c.w >= 160 && c.w <= 1280 && c.h >= 90 && c.h <= 720)) { toast('Size must be 160 × 90 up to 1280 × 720', 'err'); return; }
+  // Every account ticked means "all running", so one that starts later is lined up too.
+  const opts = { w: c.w, h: c.h, corner: Number(c.corner) || 0, gap: Number(c.gap) || 0, ids: ids.length === _launchedIds.size ? [] : ids };
+  go.disabled = true;
+  try {
+    const r = await api.layoutWindows(true, opts);
+    if (!r || !r.ok) { toast((r && r.error) || 'Could not line the windows up', 'err'); return; }
+    if (!r.count) { toast('No windows to line up. Minimized ones are skipped', 'err'); return; }
+    _layoutOn = true;
+    // `skip`: the running accounts left out, which stay out when others join.
+    _layoutUsed = { ...opts, skip: accounts.filter(a => _launchedIds.has(a.id) && !ids.includes(a.id)).map(a => a.id) };
+    _layoutPending.clear();
+    settings.layoutConfig = { size: c.size, w: c.w, h: c.h, corner: c.corner, gap: c.gap };
+    api.saveSettings({ layoutConfig: settings.layoutConfig });
+    paintLayoutBtn();
+    closeModal('m-layout');
+    const s = r.count === 1 ? '' : 's';
+    toast(`Lined up ${r.count} window${s}`, 'ok');
+    logEntry('info', 'system', `Auto layout: ${r.count} window${s} lined up at ${c.w} × ${c.h}`);
+  } catch (e) { toast('Could not line the windows up: ' + (e?.message || e), 'err'); }
+  finally { go.disabled = false; }
+}
+async function layoutUndo() {
+  try {
+    const r = await api.layoutWindows(false);
+    if (!r || !r.ok) { toast((r && r.error) || 'Could not put the windows back', 'err'); return; }
+    _layoutOn = false;
+    _layoutUsed = null;
+    _layoutPending.clear();
+    paintLayoutBtn();
+    closeModal('m-layout');
+    const s = r.count === 1 ? '' : 's';
+    toast(`Put ${r.count} window${s} back`, 'ok');
+    logEntry('info', 'system', `Auto layout undone: ${r.count} window${s} put back`);
+  } catch (e) { toast('Could not put the windows back: ' + (e?.message || e), 'err'); }
+}
+// A client that opens while the layout is on takes the next free cell by itself. Its window
+// takes a while to appear, so this looks again every few seconds for about 40 seconds. The
+// helper leaves windows that are already lined up where they are, even ones you moved.
+function relayoutSoon(id) {
+  if (!_layoutOn || !_layoutUsed || _layoutUsed.skip.includes(id) || _layoutPending.has(id)) return;
+  _layoutPending.add(id);
+  clearTimeout(_relayoutTimer);
+  _relayoutTimer = setTimeout(() => relayoutTick(0), 3000);
+}
+async function relayoutTick(tries) {
+  _relayoutTimer = null;
+  for (const id of [..._layoutPending]) if (!_launchedIds.has(id)) _layoutPending.delete(id); // closed meanwhile
+  if (!_layoutOn || !_layoutUsed || !_layoutPending.size) { _layoutPending.clear(); return; }
+  const u = _layoutUsed;
+  const ids = [..._launchedIds].filter(id => !u.skip.includes(id));
+  let placed = 0;
+  try {
+    const r = await api.layoutWindows(true, { w: u.w, h: u.h, corner: u.corner, gap: u.gap, ids, append: true });
+    if (r && r.ok) placed = r.count;
+  } catch {}
+  for (const id of [..._layoutPending].slice(0, placed)) _layoutPending.delete(id);
+  if (placed) logEntry('info', 'system', `Auto layout: ${placed} new window${placed === 1 ? '' : 's'} lined up`);
+  if (_layoutPending.size && tries < 10) _relayoutTimer = setTimeout(() => relayoutTick(tries + 1), 4000);
+  else _layoutPending.clear();
 }
 
 function antiAfkIntervalInput(v) {
@@ -537,6 +845,12 @@ async function toggleMultiInstance() {
   }
   await refreshMultiStatus();
 }
+function toggleProtectSignIn() {
+  const on = document.getElementById('set-protectsignin').checked;
+  settings.protectSignIn = on;
+  api.saveSettings({ protectSignIn: on });
+  toast(on ? 'Sign-in protection on' : 'Sign-in protection off', on ? 'ok' : 'err');
+}
 function toggleLowPriority() {
   const el = document.getElementById('set-lowpriority');
   const on = el.checked;
@@ -553,14 +867,6 @@ function toggleHideToTray() {
   // setting on every close, and apply_setting only creates/removes the icon.
   api.setHideToTray(on);
   toast(on ? 'Closing will hide to the system tray' : 'Closing will quit MultiRoblox', on ? 'ok' : 'err');
-}
-function toggleLockChannel() {
-  const el = document.getElementById('set-lockchannel');
-  const on = el.checked;
-  settings.lockChannel = on;
-  api.saveSettings({ lockChannel: on });
-  toast(on ? 'Channel locked' : 'Channel unlocked', on ? 'ok' : 'err');
-  detectRobloxVersion();
 }
 function toggleAutoTrim() {
   const el = document.getElementById('set-autotrim');
@@ -582,12 +888,86 @@ function autoTrimIntervalCommit() {
   toast('Auto trim interval: ' + mins + ' min', 'ok');
 }
 
+// ── RAM limiter (Settings > Performance) ─────────────────────────────────
+// 0 = off. The backend floors any real cap at 512 MB, so the slider's first
+// step past Off is the smallest value that actually takes effect.
+function ramLimitLabel(mb) {
+  mb = parseInt(mb, 10) || 0;
+  return mb > 0 ? formatMb(Math.max(512, mb)) : 'Off';
+}
+function ramLimitInput(v) {
+  document.getElementById('set-ramlimit-val').textContent = ramLimitLabel(v);
+  updateSliderFill(document.getElementById('set-ramlimit'));
+}
+async function ramLimitCommit() {
+  let mb = parseInt(document.getElementById('set-ramlimit').value, 10) || 0;
+  if (mb > 0 && mb < 512) mb = 512;
+  // Keep the thumb on the value that was actually saved (256 rounds up).
+  const ramSl = document.getElementById('set-ramlimit');
+  if (parseInt(ramSl.value, 10) !== mb) { ramSl.value = mb; ramLimitInput(mb); }
+  settings.ramLimitMb = mb;
+  let saved = false;
+  try { saved = await api.saveSettings({ ramLimitMb: mb }); } catch {}
+  if (!saved) { toast('Could not save the RAM limit', 'err'); return; }
+  logEntry('info', 'system', mb ? `RAM limit per instance set to ${mb} MB` : 'RAM limit per instance turned off', { limitMb: mb });
+  toast(mb ? 'RAM limit: ' + formatMb(mb) + ' per instance' : 'RAM limit off', 'ok');
+  pollMemoryUsage();
+}
+
+// ── Roblox install picker (Settings > Roblox) ─────────────────────────────
+let _installs = [];
+async function installsInit() {
+  try { _installs = (await api.listInstalls()) || []; } catch { _installs = []; }
+  const menu = document.getElementById('cdd-install-menu');
+  if (!menu) return;
+  const opt = (value, name, desc) =>
+    `<div class="cdd-option" data-value="${esc(value)}" onclick="setRobloxInstall(${jsArg(value)})" role="button" tabindex="0">
+      <div class="cdd-opt-left"><div class="cdd-opt-name">${esc(name)}</div><div class="cdd-opt-desc">${esc(desc)}</div></div>
+      <span class="material-icons-round cdd-check">check</span>
+    </div>`;
+  const auto = _installs.find(i => i.autoPick) || _installs.find(i => i.active);
+  menu.innerHTML = opt('', 'Auto', auto ? 'Currently ' + auto.name + (auto.latest ? ' (' + auto.latest + ')' : '') : 'Newest installed build')
+    + _installs.map(i => opt(i.path, i.name,
+        (i.kind === 'vanilla' ? 'Vanilla Roblox' : 'Bootstrapper')
+        + (i.isDefault ? ' · default for Roblox links' : '')
+        + (i.latest ? ' · ' + i.latest : '')
+        + ' · ' + i.versions.length + ' build' + (i.versions.length === 1 ? '' : 's'))).join('');
+  installUpdateUI(settings.robloxInstall || '');
+  const desc = document.getElementById('install-desc');
+  if (desc && !_installs.length) desc.textContent = 'No Roblox installation found. Install Roblox (or a bootstrapper) and reopen this tab.';
+}
+function installUpdateUI(path) {
+  const found = _installs.find(i => i.path.toLowerCase() === String(path || '').toLowerCase());
+  const label = document.getElementById('cdd-install-label');
+  if (label) label.textContent = found ? found.name : 'Auto';
+  document.querySelectorAll('#cdd-install-menu .cdd-option').forEach(o =>
+    o.classList.toggle('selected', (o.dataset.value || '').toLowerCase() === (found ? found.path.toLowerCase() : '')));
+}
+async function setRobloxInstall(path) {
+  closeAllCdd();
+  settings.robloxInstall = path;
+  let saved = false;
+  try { saved = await api.saveSettings({ robloxInstall: path }); } catch {}
+  if (!saved) { toast('Could not save the install choice', 'err'); return; }
+  const found = _installs.find(i => i.path === path);
+  installUpdateUI(path);
+  logEntry('info', 'system', 'Roblox install set to ' + (found ? found.name + ' (' + found.path + ')' : 'Auto'));
+  toast('Launches will use ' + (found ? found.name : 'the newest install'), 'ok');
+  installsInit();
+}
+
 function toggleCdd(name) {
   const trigger = document.getElementById('cdd-' + name + '-trigger');
   const menu = document.getElementById('cdd-' + name + '-menu');
   const open = menu.classList.contains('open');
   closeAllCdd();
-  if (!open) { trigger.classList.add('open'); menu.classList.add('open'); }
+  if (open) return;
+  // Open upward when the list would run past the bottom of the window.
+  const box = trigger.getBoundingClientRect();
+  const height = menu.offsetHeight + 16;
+  menu.classList.toggle('up', box.bottom + height > window.innerHeight && box.top - height > 68);
+  trigger.classList.add('open');
+  menu.classList.add('open');
 }
 function closeAllCdd() {
   document.querySelectorAll('.cdd-trigger.open').forEach(t => t.classList.remove('open'));
@@ -604,6 +984,100 @@ function refreshAllSliderFills() {
 // real pixels from the active button's own rect rather than assumed from
 // index; this is also what lets one CSS rule work for both tab bars
 // (Settings' 6 segments and Charts' 3) without hardcoding either count.
+// Moves a selector pill to `to`. When it changes option it stretches across both
+// options, then settles on the one it lands on.
+// Same-option moves (window resizes) jump straight there.
+const _reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+function movePill(pill, to, from, glide = true) {
+  if (!from) {
+    const cs = getComputedStyle(pill); // mid-move this is where it is right now
+    from = { left: parseFloat(cs.left), top: parseFloat(cs.top), width: parseFloat(cs.width) };
+  }
+  const running = pill.getAnimations().filter(a => a.id === 'pill-move' && a.playState === 'running');
+  const t = pill._to;
+  if (running.length && t && Math.abs(t.left - to.left) < 1 && Math.abs(t.width - to.width) < 1 && (to.top == null || t.top == null || Math.abs(t.top - to.top) < 1)) return; // already heading there
+  running.forEach(a => a.cancel());
+  pill._to = to;
+  pill.style.left = to.left + 'px';
+  pill.style.width = to.width + 'px';
+  if (to.top != null) pill.style.top = to.top + 'px';
+  if (to.height != null) pill.style.height = to.height + 'px';
+  const still = Math.abs(from.left - to.left) < 1 && Math.abs(from.width - to.width) < 1;
+  if (!glide || still || _reduceMotion.matches || !to.width || ![from.left, from.width].every(Number.isFinite)) return;
+  // The pill stretches out toward the new option, then its trailing edge catches up.
+  const spanL = Math.min(from.left, to.left);
+  const spanW = Math.max(from.left + from.width, to.left + to.width) - spanL;
+  const frames = [
+    { left: from.left + 'px', width: from.width + 'px' },
+    { offset: 0.4, left: spanL + 'px', width: spanW + 'px' },
+    { left: to.left + 'px', width: to.width + 'px' },
+  ];
+  if (to.top != null && Number.isFinite(from.top) && Math.abs(from.top - to.top) >= 1) {
+    [from.top, (from.top + to.top) / 2, to.top].forEach((t, i) => { frames[i].top = t + 'px'; });
+  }
+  pill.animate(frames, { id: 'pill-move', duration: 360, easing: 'cubic-bezier(.32,.72,.2,1)' });
+}
+
+// ── Tab motion (after RoALT, MIT; see THIRD_PARTY_NOTICES.md) ──
+// A press on a tab-style selector leaves ink where it landed. The look is in styles.css;
+// this only places the ink.
+const INK_HOSTS = '.nav-item, .vt, .tab-btn, .gv-seg button';
+// Where the pointer is inside `el`, in the element's own pixels (a pressed option is scaled).
+function localPoint(el, e) {
+  const r = el.getBoundingClientRect();
+  const s = el.offsetWidth ? r.width / el.offsetWidth : 1;
+  return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s };
+}
+function inkAt(el, e) {
+  const p = localPoint(el, e);
+  let box = el.querySelector(':scope > .lq-ink');
+  if (!box) {
+    if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+    box = document.createElement('span');
+    box.className = 'lq-ink';
+    box.setAttribute('aria-hidden', 'true');
+    el.append(box);
+  }
+  const drop = document.createElement('span');
+  drop.className = 'lq-ripple';
+  drop.style.left = p.x + 'px';
+  drop.style.top = p.y + 'px';
+  box.append(drop);
+  drop.addEventListener('animationend', () => drop.remove(), { once: true });
+  setTimeout(() => drop.remove(), 900); // if nothing animates, nothing would end it
+}
+document.addEventListener('pointerdown', e => {
+  return; // press ripple retired; the pill stretch is the tab motion now
+  if (e.button !== 0 || !(e.target instanceof Element) || _reduceMotion.matches) return;
+  const hit = e.target.closest(INK_HOSTS);
+  if (hit && !hit.matches(':disabled, [aria-disabled=true]')) inkAt(hit, e);
+}, true);
+
+// White pill that slides between a selector's options. The game page rebuilds its
+// selectors on every change, so the last spot is remembered to slide from it.
+const _segLast = {};
+function syncSeg(seg, key = seg?.id) {
+  const active = seg?.querySelector(':scope > button.active');
+  if (!active || !active.offsetWidth) return;
+  let pill = seg.querySelector(':scope > .seg-pill');
+  const isNew = !pill;
+  if (isNew) {
+    pill = document.createElement('span');
+    pill.className = 'seg-pill';
+    seg.prepend(pill);
+  }
+  const to = { left: active.offsetLeft, top: active.offsetTop, width: active.offsetWidth, height: active.offsetHeight };
+  if (isNew) movePill(pill, to, _segLast[key] || to);
+  else movePill(pill, to, null, pill._on !== active);
+  pill._on = active;
+  _segLast[key] = to;
+}
+function syncStaticSegs() {
+  ['log-filter', 'edit-tabs', 'login-tabs', 'acct-view'].forEach(id => syncSeg(document.getElementById(id)));
+}
+document.fonts?.ready.then(syncStaticSegs);
+window.addEventListener('resize', syncStaticSegs);
+
 function positionTabSlider(barEl) {
   if (!barEl) return;
   let slider = barEl.querySelector('.tab-slider');
@@ -615,7 +1089,6 @@ function positionTabSlider(barEl) {
   }
   const active = barEl.querySelector('.tab-btn.active');
   if (!active) { slider.style.opacity = '0'; return; }
-  if (isNew) slider.style.transition = 'none';
   // offsetLeft/offsetWidth, not getBoundingClientRect: they're relative to
   // the padding edge of the nearest positioned ancestor (here, barEl itself,
   // since both are its direct children); exactly what CSS `left` on an
@@ -623,45 +1096,17 @@ function positionTabSlider(barEl) {
   // instead gives the border-box's outer edge, so subtracting two of those
   // was off by the bar's own border-width in every direction: a small,
   // constant, one-sided-looking gap.
-  slider.style.left = active.offsetLeft + 'px';
-  slider.style.width = active.offsetWidth + 'px';
+  movePill(slider, { left: active.offsetLeft, width: active.offsetWidth }, null, !isNew && slider._on !== active);
+  slider._on = active;
   slider.style.opacity = '1';
-  if (isNew) {
-    void slider.offsetWidth; // force layout so the disabled transition applies before restoring it
-    slider.style.transition = '';
-  }
 }
 // Same technique as positionTabSlider, vertical instead of horizontal; nav
 // items are flex-stacked with gaps rather than a fixed row height, so top/
 // height come from the active item's measured rect, not an assumed index.
-function positionNavSlider() {
-  const bar = document.getElementById('sidebar');
-  if (!bar) return;
-  let slider = bar.querySelector('.nav-slider');
-  const isNew = !slider;
-  if (isNew) {
-    slider = document.createElement('div');
-    slider.className = 'nav-slider';
-    bar.insertBefore(slider, bar.firstChild);
-  }
-  const active = bar.querySelector('.nav-item.active');
-  if (!active) { slider.style.opacity = '0'; return; }
-  if (isNew) slider.style.transition = 'none';
-  // See positionTabSlider's comment; offsetTop/offsetHeight, not
-  // getBoundingClientRect, for the same padding-edge-vs-border-edge reason.
-  slider.style.top = active.offsetTop + 'px';
-  slider.style.height = active.offsetHeight + 'px';
-  slider.style.opacity = '1';
-  if (isNew) {
-    void slider.offsetWidth;
-    slider.style.transition = '';
-  }
-}
 window.addEventListener('resize', () => {
   document.querySelectorAll('.tab-bar').forEach(bar => {
     if (bar.querySelector('.tab-btn.active')) positionTabSlider(bar);
   });
-  positionNavSlider();
 });
 
 function settingsTab(tab) {
@@ -672,17 +1117,20 @@ function settingsTab(tab) {
     if (btn) btn.classList.toggle('active', t === tab);
   });
   if (tab === 'performance') renderEngineInit();
+  if (tab === 'roblox') installsInit();
   refreshAllSliderFills();
   positionTabSlider(document.getElementById('stab-general')?.closest('.tab-bar'));
 }
 
 function goTo(p) {
   if (p === 'themes') { goTo('settings'); settingsTab(p); return; }
+  closeGameView();
   document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
   document.getElementById('page-' + p).classList.add('active');
-  document.getElementById('nav-' + p).classList.add('active');
-  positionNavSlider();
+  const navItem = document.getElementById('nav-' + p);
+  navItem.classList.add('active');
+  placeNavPill(navItem);
   if (p === 'settings') {
     document.getElementById('stat-count').textContent = accounts.length;
     refreshMultiStatus();
@@ -690,7 +1138,7 @@ function goTo(p) {
     // tab still needs the pill positioned under it at least once.
     positionTabSlider(document.getElementById('stab-general')?.closest('.tab-bar'));
   }
-  if (p === 'logs') renderLogs();
+  if (p === 'logs') { renderLogs(); syncStaticSegs(); }
   if (p === 'charts') {
     chartsOnEnter();
     if (!chartsLoaded) loadCharts();
@@ -701,14 +1149,79 @@ function goTo(p) {
     chartsOnLeave();
   }
   if (p === 'packages') renderPackages();
+  if (p === 'accounts') pollSystemStats();
   if (p === 'mixer') mixInit();
   if (p === 'tracking') renderTrackingPage();
   // generator page
   refreshAllSliderFills();
 }
 
+// One tooltip shared by the whole nav bar. It fades in under the first icon you
+// reach and then glides between icons while the pointer stays on the bar.
+(function initNavTip() {
+  const nav = document.getElementById('topnav'), tip = document.getElementById('nav-tip');
+  let showTimer = null;
+  const hide = () => { clearTimeout(showTimer); tip.classList.remove('show'); };
+  const placeOver = item => {
+    tip.textContent = item.querySelector('.nav-label').textContent;
+    tip.style.setProperty('--x', Math.round(item.offsetLeft + (item.offsetWidth - tip.offsetWidth) / 2) + 'px');
+  };
+  function showFor(item) {
+    clearTimeout(showTimer);
+    if (tip.classList.contains('show')) { placeOver(item); return; }
+    showTimer = setTimeout(() => {
+      tip.style.transition = 'none'; // start under this icon, not sliding in from the last one
+      placeOver(item);
+      void tip.offsetWidth;
+      tip.style.transition = '';
+      tip.classList.add('show');
+    }, 120);
+  }
+  nav.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('mouseenter', () => showFor(item));
+    item.addEventListener('click', hide);
+    item.addEventListener('focus', () => { if (item.matches(':focus-visible')) showFor(item); });
+    item.addEventListener('blur', hide);
+  });
+  nav.addEventListener('mouseleave', hide);
+})();
+
+// Wide windows show every page's name, so the pill takes the active item's width too.
+function placeNavPill(item = document.querySelector('#topnav .nav-item.active')) {
+  if (!item) return;
+  const pill = document.getElementById('nav-pill');
+  movePill(pill, { left: item.offsetLeft, width: item.offsetWidth }, null, !!pill._on && pill._on !== item);
+  pill._on = item;
+}
+placeNavPill();
+window.addEventListener('resize', () => placeNavPill());
+document.fonts?.ready.then(() => placeNavPill());
+
+// When each running account started, kept across app restarts so the timer on a
+// client that is still open doesn't reset to zero.
+let _liveSince = {};
+try { _liveSince = JSON.parse(localStorage.getItem('live-since')) || {}; } catch {}
+
+function syncRunTimes() {
+  let changed = false;
+  _launchedIds.forEach(id => { if (!_liveSince[id]) { _liveSince[id] = Date.now(); changed = true; } });
+  Object.keys(_liveSince).forEach(id => { if (!_launchedIds.has(id)) { delete _liveSince[id]; changed = true; } });
+  if (changed) { try { localStorage.setItem('live-since', JSON.stringify(_liveSince)); } catch {} }
+  paintRunTimes();
+}
+
+function paintRunTimes() {
+  document.querySelectorAll('.card.is-live .card-av').forEach(av => {
+    const since = _liveSince[av.closest('.card').dataset.id];
+    const mins = since ? Math.floor((Date.now() - since) / 60000) : 0;
+    av.dataset.run = mins < 1 ? 'Running' : mins < 60 ? `Running ${mins}m` : `Running ${Math.floor(mins / 60)}h ${mins % 60}m`;
+  });
+}
+
 function markLaunched(id) {
+  if (!_launchedIds.has(id)) relayoutSoon(id);
   _launchedIds.add(id);
+  syncRunTimes();
   const card = document.querySelector(`.card[data-id="${id}"]`);
   if (card) {
     card.classList.add('is-live');
@@ -722,7 +1235,8 @@ function markLaunched(id) {
 async function killOne(id) {
   const a = accounts.find(x => x.id === id);
   logEntry('warn', 'kill', `Killing Roblox instance for ${a ? a.username : id}...`, { accountId: id, username: a?.username, userId: a?.userId });
-  const res = await api.killOneRoblox(id);
+  let res;
+  try { res = await api.killOneRoblox(id); } catch (e) { res = { ok: false, error: e?.message || String(e) }; }
   if (!res || !res.ok) toast(res?.error || 'Could not kill that instance', 'err');
   else logEntry('ok', 'kill', `Killed instance for ${a ? a.username : id}`, { accountId: id });
 }
@@ -739,25 +1253,26 @@ function showCardMenu(id, x, y) {
   menu.className = 'ctx-menu';
   menu.innerHTML = `
     <div class="ctx-header">${esc(a ? (a.nickname || a.username || 'Unknown') : id)}</div>
-    ${isLive ? `<button class="ctx-item ctx-danger" onclick="ctxKill('${id}')"><span class="material-icons-round">power_settings_new</span>Kill instance</button>` : ''}
-    ${isLive ? `<button class="ctx-item" onclick="ctxTrim('${id}')"><span class="material-icons-round">memory</span>Trim memory</button>` : ''}
+    ${isLive ? `<button class="ctx-item ctx-danger" onclick="ctxKill(${jsArg(id)})"><span class="material-icons-round">power_settings_new</span>Kill instance</button>` : ''}
+    ${isLive ? `<button class="ctx-item" onclick="ctxTrim(${jsArg(id)})"><span class="material-icons-round">memory</span>Trim memory</button>` : ''}
     ${isLive ? `
     <div class="ctx-item ctx-has-sub">
       <span class="material-icons-round">speed</span>Set priority
       <span class="material-icons-round ctx-sub-arrow">chevron_right</span>
       <div class="ctx-submenu">
         ${['realtime', 'high', 'abovenormal', 'normal', 'belownormal', 'low'].map(p =>
-          `<button class="ctx-item${_accountPriority[id] === p ? ' ctx-active' : ''}" onclick="ctxSetPriority('${id}','${p}')">${PRIORITY_LABELS[p]}</button>`
+          `<button class="ctx-item${_accountPriority[id] === p ? ' ctx-active' : ''}" onclick="ctxSetPriority(${jsArg(id)},'${p}')">${PRIORITY_LABELS[p]}</button>`
         ).join('')}
       </div>
     </div>` : ''}
-    <button class="ctx-item" onclick="ctxLaunch('${id}')"><span class="material-icons-round">rocket_launch</span>${isLive ? 'Relaunch' : 'Launch'}</button>
-    <button class="ctx-item" onclick="ctxEdit('${id}')"><span class="material-icons-round">edit</span>Edit account</button>
+    ${isLive ? '' : `<button class="ctx-item" onclick="ctxLaunch(${jsArg(id)})"><span class="material-icons-round">rocket_launch</span>Launch</button>`}
+    <button class="ctx-item" onclick="ctxEdit(${jsArg(id)})"><span class="material-icons-round">edit</span>Edit account</button>
+    <button class="ctx-item" onclick="ctxToggleMain(${jsArg(id)})"><span class="material-icons-round">star</span>${a && a.tag === 'MAIN' ? 'Remove MAIN tag' : 'Mark as MAIN'}</button>
     <div class="ctx-sep"></div>
-    <button class="ctx-item" onclick="ctxCopyId('${id}')"><span class="material-icons-round">tag</span>Copy user ID</button>
-    <button class="ctx-item" onclick="ctxCopyUser('${id}')"><span class="material-icons-round">person</span>Copy username</button>
-    <button class="ctx-item" onclick="ctxCopyCookie('${id}')"><span class="material-icons-round">cookie</span>Copy cookie</button>
-    <button class="ctx-item" onclick="ctxOpenBrowser('${id}')"><span class="material-icons-round">open_in_browser</span>Open in browser</button>
+    <button class="ctx-item" onclick="ctxCopyId(${jsArg(id)})"><span class="material-icons-round">tag</span>Copy user ID</button>
+    <button class="ctx-item" onclick="ctxCopyUser(${jsArg(id)})"><span class="material-icons-round">person</span>Copy username</button>
+    <button class="ctx-item" onclick="ctxCopyCookie(${jsArg(id)})"><span class="material-icons-round">cookie</span>Copy cookie</button>
+    <button class="ctx-item" onclick="ctxOpenBrowser(${jsArg(id)})"><span class="material-icons-round">open_in_browser</span>Open in browser</button>
   `;
   document.body.appendChild(menu);
   positionCardMenu(menu, x, y);
@@ -845,8 +1360,18 @@ async function ctxSetPriority(id, priority) {
   }
 }
 
-function ctxLaunch(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a) { launchAcc = a; openModal('m-launch'); } }
-function ctxEdit(id) { closeCardMenu(); editAccount(id); }
+function ctxLaunch(id) { closeCardMenu(); startAccount(id); }
+async function ctxToggleMain(id) {
+  closeCardMenu();
+  const a = accounts.find(x => x.id === id);
+  if (!a) return;
+  let updated;
+  try { updated = await api.updateAccount(id, { tag: a.tag === 'MAIN' ? '' : 'MAIN' }); }
+  catch (e) { toast('Could not save the tag: ' + (e?.message || e), 'err'); return; }
+  const idx = accounts.findIndex(x => x.id === id);
+  if (updated && idx !== -1) { accounts[idx] = updated; render(); }
+}
+function ctxEdit(id) { closeCardMenu(); openEdit(id); }
 function ctxCopyId(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a?.userId) navigator.clipboard.writeText(a.userId).then(() => toast('User ID copied', 'ok')); else toast('No user ID', 'err'); }
 function ctxCopyUser(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a?.username) navigator.clipboard.writeText(a.username).then(() => toast('Username copied', 'ok')); else toast('No username', 'err'); }
 function ctxCopyCookie(id) { closeCardMenu(); const a = accounts.find(x => x.id === id); if (a?.cookie) navigator.clipboard.writeText(a.cookie).then(() => toast('Cookie copied', 'ok')); else toast('No cookie saved for this account', 'err'); }
@@ -872,55 +1397,124 @@ function refreshPkgAvatarStatus() {
     const anyRunning = (p.accountIds || []).some(id => _launchedIds.has(id));
     btn.disabled = !anyRunning;
   });
+  packages.forEach(p => {
+    const card = document.querySelector('.pkg-card[data-id="' + p.id + '"]');
+    if (!card) return;
+    const ids = (p.accountIds || []).filter(id => accounts.some(a => a.id === id));
+    const running = ids.filter(id => _launchedIds.has(id)).length;
+    const meta = card.querySelector('.pkg-meta');
+    meta.textContent = ids.length ? `${running}/${ids.length} running` : 'No accounts';
+    meta.classList.toggle('live', running > 0);
+    card.querySelector('.pkg-run-bar span').style.width = ids.length ? (running / ids.length * 100) + '%' : '0';
+  });
 }
 
+let _gridAnimate = true; // first paint, and when the view or filter changes
 function render() {
-  const grid = document.getElementById('grid'), empty = document.getElementById('empty'), sub = document.getElementById('acct-sub');
-  sub.textContent = accounts.length ? accounts.length + ' account' + (accounts.length !== 1 ? 's' : '') + ' saved' : 'No accounts saved';
-  const savedCount = document.getElementById('sb-saved-count');
-  if (savedCount) savedCount.textContent = accounts.length ? accounts.length + ' account' + (accounts.length !== 1 ? 's' : '') + ' saved' : 'No accounts saved';
-  const savedTime = document.getElementById('sb-saved-time'); if (savedTime) savedTime.textContent = 'Last saved just now';
-  if (!accounts.length) { grid.innerHTML = ''; empty.style.display = 'flex'; return; }
+  const grid = document.getElementById('grid'), empty = document.getElementById('empty');
+  paintAcctSub();
+  if (!accounts.length) { grid.innerHTML = ''; empty.style.display = 'flex'; paintWelcome(); return; }
   empty.style.display = 'none';
   const list = visibleAccounts();
   grid.classList.toggle('list-view', _acctView === 'list');
+  const animate = _gridAnimate;
+  grid.classList.toggle('animate', animate);
+  _gridAnimate = false;
   if (!list.length) {
     grid.classList.remove('list-view');
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--t3);font-size:12.5px;padding:40px 0">No accounts match your search or filter.</div>';
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--t3);font-size:var(--fs-sm);padding:40px 0">No accounts match your search or filter.</div>';
     return;
   }
-  grid.innerHTML = list.map((a, i) => `
-    <div class="card${_launchedIds.has(a.id) ? ' is-live' : ''}${_cookieStatus[a.id] === 'dead' ? ' cookie-dead' : ''}" data-id="${a.id}" style="animation-delay:${i * 18}ms">
+  // Each card's markup doubles as its fingerprint. A card whose fingerprint hasn't
+  // changed stays on screen as it is (avatar, readouts, a half-typed username), so
+  // a change to one account redraws one card instead of all of them. The avatar's
+  // loading state and the typed username are left out of the fingerprint: both
+  // change on their own without the card needing a redraw.
+  const AV_MARK = '', DRAFT_MARK = '';
+  const cards = list.map(a => {
+    const key = cardMarkup(a, AV_MARK, DRAFT_MARK);
+    return { a, key, html: key.replace(AV_MARK, a.userId && !_avatarCache[a.userId] ? ' av-loading' : '').replace(DRAFT_MARK, esc(_followDraft[a.id] || '')) };
+  });
+  const addHtml = `<div class="card-add" onclick="openLogin()"><span class="material-icons-round card-add-icon">add</span><span class="card-add-label">Add account</span></div>`;
+  const onScreen = new Map([...grid.querySelectorAll(':scope > .card[data-id]')].map(c => [c.dataset.id, c]));
+  let fresh;
+  if (animate || !onScreen.size) {
+    grid.innerHTML = cards.map((c, i) => c.html.replace('<div class="card', `<div style="animation-delay:${Math.min(i, 14) * 24}ms" class="card`)).join('') + addHtml;
+    fresh = [...grid.querySelectorAll(':scope > .card[data-id]')];
+    fresh.forEach((el, i) => { el._key = cards[i].key; });
+  } else {
+    fresh = [];
+    const nodes = cards.map(c => {
+      const kept = onScreen.get(c.a.id);
+      if (kept && kept._key === c.key) { onScreen.delete(c.a.id); return kept; }
+      const tpl = document.createElement('template');
+      tpl.innerHTML = c.html.trim();
+      const el = tpl.content.firstElementChild;
+      el._key = c.key;
+      fresh.push(el);
+      return el;
+    });
+    onScreen.forEach(el => el.remove()); // gone, or about to be replaced
+    let addEl = grid.querySelector(':scope > .card-add');
+    if (!addEl) { const tpl = document.createElement('template'); tpl.innerHTML = addHtml; addEl = tpl.content.firstElementChild; }
+    // Only move what is out of place: moving a card would drop focus from its box.
+    let cursor = grid.firstElementChild;
+    for (const el of [...nodes, addEl]) {
+      if (el === cursor) { cursor = cursor.nextElementSibling; continue; }
+      grid.insertBefore(el, cursor);
+    }
+    while (cursor) { const next = cursor.nextElementSibling; cursor.remove(); cursor = next; }
+  }
+  loadAvatarsBatch(list.filter(a => !document.querySelector(`#av-${CSS.escape(a.id)} img`)));
+  list.forEach(a => { if (a.gameTarget && !_gameNameCache[a.id]) fetchGameName(a.id, a.gameTarget); });
+  checkCookieHealth(list);
+  fresh.forEach(card => {
+    card.addEventListener('contextmenu', e => { e.preventDefault(); showCardMenu(card.dataset.id, e.clientX, e.clientY); });
+  });
+  initDrag(fresh);
+  paintMemUsage(); // new cards start with empty readouts
+  paintPreviews();
+  // A picture that never arrives falls back to the account's letter.
+  setTimeout(() => document.querySelectorAll('.card-av.av-loading').forEach(av => av.classList.remove('av-loading')), 8000);
+}
+
+function cardMarkup(a, avMark, draftMark) {
+  return `
+    <div class="card${_launchedIds.has(a.id) ? ' is-live' : ''}${_launchingIds.has(a.id) ? ' is-launching' : ''}${_cookieStatus[a.id] === 'dead' ? ' cookie-dead' : ''}" data-id="${a.id}">
       <div class="card-dot${_launchedIds.has(a.id) ? ' launched' : ''}" title="${_launchedIds.has(a.id) ? 'Launched' : 'Not launched'}"></div>
       <span class="material-icons-round drag-handle">drag_indicator</span>
-      <div class="card-av" id="av-${a.id}">${esc((a.username || '?')[0].toUpperCase())}</div>
+      <div class="card-av${avMark}" id="av-${a.id}" data-run="Running">${esc((a.username || '?')[0].toUpperCase())}</div>
       <div class="card-id">
         <div class="card-name-row">
           <div class="card-name">${esc(a.nickname || a.username || 'Unknown')}</div>
+          ${a.tag ? `<span class="card-tag${a.tag === 'MAIN' ? ' main' : ''}">${esc(a.tag)}</span>` : ''}
           <span class="card-expired" title="This account's cookie is no longer valid. Re-add the account to refresh it."><span class="material-icons-round">error_outline</span>Expired</span>
         </div>
-        <div class="card-uid">${a.userId ? 'ID ' + a.userId : 'No ID'}</div>
+        <div class="card-uid">${a.userId ? 'ID ' + esc(a.userId) : 'No ID'}</div>
       </div>
-      <div class="card-game ${a.gameTarget ? 'visible' : ''}" id="gt-${a.id}" title="${esc(a.gameTarget || '')}">${a.gameTarget ? esc(truncate(_gameNameCache[a.id] || extractTargetLabel(a.gameTarget), 22)) : ''}</div>
+      <div class="card-game visible${a.gameTarget ? '' : ' none'}" id="gt-${a.id}" title="${esc(a.gameTarget || 'No game set. Edit the account to pick one')}">${a.gameTarget ? esc(truncate(_gameNameCache[a.id] || extractTargetLabel(a.gameTarget), 22)) : 'No game set'}</div>
+      <div class="card-mem" id="mem-${esc(a.id)}"></div>
+      <div class="card-idle-note">Not running</div>
+      <div class="card-follow">
+        <label class="card-follow-label" for="follow-${esc(a.id)}">Username</label>
+        <input class="card-follow-input" id="follow-${esc(a.id)}" type="text" spellcheck="false" autocomplete="off" aria-label="Username to follow"
+          value="${draftMark}" oninput="_followDraft[${jsArg(a.id)}]=this.value"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();followFromRow(${jsArg(a.id)});}"/>
+        <button class="btn btn-ghost card-follow-btn" onclick="followFromRow(${jsArg(a.id)})" title="Join the server this user is in">Follow</button>
+        <span class="card-follow-sep"></span>
+      </div>
       <div class="card-row">
-        <button class="btn btn-launch" onclick="openLaunch('${a.id}')">
-          Start
+        <button class="btn btn-launch" onclick="cardPrimaryAction(${jsArg(a.id)})">
+          <span class="lbl-start">Start</span><span class="lbl-stop">Stop</span><span class="lbl-wait"><span class="spin"></span>Starting</span>
         </button>
-        <button class="btn btn-edit" onclick="openEdit('${a.id}')" aria-label="Edit account">
+        <button class="btn btn-edit" onclick="openEdit(${jsArg(a.id)})" aria-label="Edit account">
           <span class="material-icons-round">edit</span>
         </button>
-        <button class="btn btn-del" onclick="removeAcc('${a.id}')" aria-label="Remove account">
+        <button class="btn btn-del" onclick="removeAcc(${jsArg(a.id)})" aria-label="Remove account">
           <span class="material-icons-round">delete_outline</span>
         </button>
       </div>
-    </div>`).join('') + `<div class="card-add" onclick="openLogin()"><span class="material-icons-round card-add-icon">add</span><span class="card-add-label">Add account</span></div>`;
-  loadAvatarsBatch(list);
-  list.forEach(a => { if (a.gameTarget && !_gameNameCache[a.id]) fetchGameName(a.id, a.gameTarget); });
-  checkCookieHealth(list);
-  document.querySelectorAll('.card[data-id]').forEach(card => {
-    card.addEventListener('contextmenu', e => { e.preventDefault(); showCardMenu(card.dataset.id, e.clientX, e.clientY); });
-  });
-  initDrag();
+    </div>`;
 }
 
 const _cookieStatus = {}; // id -> 'checking' | 'ok' | 'dead' | 'unknown'
@@ -929,14 +1523,30 @@ function applyCookieStatus(id) {
   if (card) card.classList.toggle('cookie-dead', _cookieStatus[id] === 'dead');
 }
 // Surfaces a likely-expired cookie right after a launch auth failure, without
-// waiting for the periodic health check. Only genuine auth/cookie errors
-// flip the badge, not rate-limits or transient HTTP errors.
+// waiting for the periodic health check. The error text alone only says it's
+// worth checking: a launch can fail on a network blip or a rate limit with a
+// message that mentions the cookie, and that used to mark healthy accounts
+// EXPIRED. Roblox's own answer decides the badge.
 function _flagCookieMaybeDead(id, error) {
-  if (id && error && /cookie|expired|\b403\b/i.test(error)) {
-    _cookieStatus[id] = 'dead';
-    applyCookieStatus(id);
-  }
+  if (!id || !error || !/cookie|expired|\b403\b/i.test(error)) return;
+  const acc = accounts.find(a => a.id === id);
+  if (!acc || !acc.cookie) return;
+  api.validateCookie(acc.cookie).then(res => {
+    if (res && !res.ok && res.reachable !== false) {
+      _cookieStatus[id] = 'dead';
+      applyCookieStatus(id);
+    }
+  }).catch(() => {});
 }
+
+// Strips what commonly travels with a cookie value: surrounding whitespace and
+// quotes, the name= prefix, and trailing attributes. Sent as it was, any of
+// these makes Roblox reject a perfectly good cookie as if it had expired.
+function normalizeCookie(raw) {
+  const unquote = s => s.trim().replace(/^["']|["']$/g, '').trim();
+  return unquote(unquote(String(raw || '')).replace(/^\.?ROBLOSECURITY=/, '').split(';')[0]);
+}
+
 // Runs `worker` over `items` with at most `limit` in flight at once.
 async function _runWithConcurrency(items, limit, worker) {
   let next = 0;
@@ -952,15 +1562,19 @@ async function _runWithConcurrency(items, limit, worker) {
 let _cookieCheckRunning = false;
 async function checkCookieHealth(list) {
   if (_cookieCheckRunning) return;
-  const todo = list.filter(a => a.cookie && _cookieStatus[a.id] === undefined);
+  // Never checked, or given a new cookie since the last check (re-added after expiring).
+  const due = a => a.cookie && (_cookieStatus[a.id] === undefined || (_cookieCheckedWith[a.id] !== undefined && _cookieCheckedWith[a.id] !== a.cookie));
+  const todo = list.filter(due);
   if (!todo.length) return;
   _cookieCheckRunning = true;
   try {
     await _runWithConcurrency(todo, 4, async (a) => {
-      if (_cookieStatus[a.id] !== undefined) return;
+      if (!due(a)) return;
       _cookieStatus[a.id] = 'checking';
       try {
         const res = await api.validateCookie(a.cookie);
+        _cookieCheckedAt[a.id] = Date.now();
+        _cookieCheckedWith[a.id] = a.cookie;
         // reachable:false means we never got an answer out of Roblox (DNS,
         // timeout, no connection), which says nothing about the cookie.
         // Marking those 'dead' turned any brief network drop into every
@@ -968,7 +1582,7 @@ async function checkCookieHealth(list) {
         // re-checks instead of accusing a good cookie.
         const st = (res && res.ok) ? 'ok' : (res && res.reachable === false ? 'unknown' : 'dead');
         _cookieStatus[a.id] = st;
-        if (st === 'dead') logEntry('warn', 'cookie', `Cookie invalid for ${a.username || a.id}`, { accountId: a.id, username: a.username || null, userId: a.userId || null });
+        if (st === 'dead') logEntry('warn', 'cookie', `Cookie invalid for ${a.username || a.id}${res && res.reason ? ': ' + res.reason : ''}`, { accountId: a.id, username: a.username || null, userId: a.userId || null });
         else if (st === 'unknown') logEntry('warn', 'cookie', `Could not reach Roblox to check ${a.username || a.id}`, { accountId: a.id, username: a.username || null, userId: a.userId || null });
         else logEntry('info', 'cookie', `Cookie valid for ${a.username || a.id}`, { accountId: a.id, username: a.username || null, userId: a.userId || null });
       } catch { _cookieStatus[a.id] = 'unknown'; logEntry('warn', 'cookie', `Cookie check failed for ${a.username || a.id}`, { accountId: a.id }); }
@@ -980,7 +1594,12 @@ async function checkCookieHealth(list) {
 // Recheck ALL cookies every 60s so status stays live
 let _recheckRunning = false;
 const _cookieCheckedAt = {};            // id -> last validation epoch ms
+const _cookieCheckedWith = {};          // id -> the cookie that check was for
 const OK_RECHECK_MS = 5 * 60 * 1000;    // re-check known-good cookies at most every 5 min
+// An expired cookie doesn't come back by itself, and asking Roblox about it every
+// minute only burns the rate limit the other checks need. A new cookie for the
+// account is checked straight away regardless.
+const DEAD_RECHECK_MS = 10 * 60 * 1000;
 async function recheckAllCookies(force) {
   if (_recheckRunning) return; // bail if a previous pass is still going
   _recheckRunning = true;
@@ -991,9 +1610,11 @@ async function recheckAllCookies(force) {
   const now = Date.now();
   const todo = accounts.filter(a => {
     if (!a.cookie) return false;
-    // Known-good cookies recheck every few minutes; dead/unknown ones every tick.
-    if (!force && _cookieStatus[a.id] === 'ok' && _cookieCheckedAt[a.id] && (now - _cookieCheckedAt[a.id]) < OK_RECHECK_MS) return false;
-    return true;
+    // Known-good cookies recheck every 5 minutes, expired ones every 10, and ones
+    // Roblox couldn't be reached for on every tick.
+    if (force || !_cookieCheckedAt[a.id] || _cookieCheckedWith[a.id] !== a.cookie) return true;
+    const wait = { ok: OK_RECHECK_MS, dead: DEAD_RECHECK_MS }[_cookieStatus[a.id]] || 0;
+    return now - _cookieCheckedAt[a.id] >= wait;
   });
   await _runWithConcurrency(todo, 4, async (a) => {
     const prev = _cookieStatus[a.id];
@@ -1001,6 +1622,7 @@ async function recheckAllCookies(force) {
     try {
       const res = await api.validateCookie(a.cookie);
       _cookieCheckedAt[a.id] = Date.now();
+      _cookieCheckedWith[a.id] = a.cookie;
       // Roblox unreachable tells us nothing about the cookie. This pass runs
       // every 60s, so treating a transport failure as 'dead' meant one blip
       // flipped every account to EXPIRED. Hold the previous verdict instead.
@@ -1013,7 +1635,7 @@ async function recheckAllCookies(force) {
         _cookieStatus[a.id] = next;
         applyCookieStatus(a.id); // toggles .cookie-dead on the card (badge + ring)
         changed = true;
-        if (next === 'dead') logEntry('warn', 'cookie', `Cookie expired for ${a.username || a.id}`, { accountId: a.id, username: a.username, userId: a.userId });
+        if (next === 'dead') logEntry('warn', 'cookie', `Cookie expired for ${a.username || a.id}${res && res.reason ? ': ' + res.reason : ''}`, { accountId: a.id, username: a.username, userId: a.userId });
         else if (prev === 'dead' && next === 'ok') logEntry('ok', 'cookie', `Cookie re-validated for ${a.username || a.id}`, { accountId: a.id, username: a.username, userId: a.userId });
       } else {
         _cookieStatus[a.id] = next;
@@ -1027,6 +1649,7 @@ setInterval(() => { if (accounts.length) recheckAllCookies(false); }, 60000);
 
 
 const _gameNameCache = {}; // accountId -> resolved game name
+const _gameNameInflight = new Set(); // accountId + target lookups still pending
 let _gameNamePersist = {}; // target -> resolved name, persisted to localStorage
 try { _gameNamePersist = JSON.parse(localStorage.getItem('mr-gamenames') || '{}'); } catch { _gameNamePersist = {}; }
 function _saveGameNames() { try { localStorage.setItem('mr-gamenames', JSON.stringify(_gameNamePersist)); } catch {} }
@@ -1040,7 +1663,7 @@ function extractTargetLabel(target) {
     const parts = u.pathname.split('/').filter(Boolean);
     // extract linkCode or share code for private servers
     const name = (parts[2] || parts[1] || '').replace(/-/g, ' ').trim();
-    return name || u.hostname;
+    return name || 'Server link';
   } catch { return truncate(target, 22); }
 }
 
@@ -1075,11 +1698,24 @@ async function fetchGameName(accountId, target) {
     updateGameLabel(accountId);
     return;
   }
-  // Fetch via main process (authenticated with cookie)
-  const name = await api.getGameName(placeId || t, cookie);
-  _gameNameCache[accountId] = name || extractTargetLabel(target);
+  // render() calls this for every card still missing a name, and search
+  // re-renders on each keystroke; without this every render fired another
+  // lookup for the same account while the first was still in flight.
+  const inflightKey = accountId + '\n' + t;
+  if (_gameNameInflight.has(inflightKey)) return;
+  _gameNameInflight.add(inflightKey);
+  let name = null;
+  try {
+    // Fetch via main process (authenticated with cookie)
+    name = await api.getGameName(placeId || t, cookie);
+  } catch {} finally { _gameNameInflight.delete(inflightKey); }
   // Persist only genuine resolved names (not the raw fallback label).
   if (name) { _gameNamePersist[t] = name; _saveGameNames(); }
+  // The target may have been edited (or the account removed) while this was
+  // in flight; writing the old game's name would then mislabel the card.
+  const cur = accounts.find(a => a.id === accountId);
+  if (!cur || (cur.gameTarget || '').trim() !== t) return;
+  _gameNameCache[accountId] = name || extractTargetLabel(target);
   updateGameLabel(accountId);
 }
 
@@ -1096,16 +1732,17 @@ function truncate(s, n) { return s.length > n ? s.slice(0, n) + '\u2026' : s; }
 let _dragSaveTimer = null;
 let _dragging = null, _dragClone = null, _dragOffX = 0, _dragOffY = 0, _dragOverId = null;
 
-function initDrag() {
+// Wires up the given cards only: cards kept from the last render already have it.
+function initDrag(cards) {
   const grid = document.getElementById('grid');
 
-  grid.querySelectorAll('.card').forEach(card => {
+  cards.forEach(card => {
     const handle = card.querySelector('.drag-handle');
     const startEl = handle || card;
 
     startEl.addEventListener('mousedown', e => {
       if (e.button !== 0) return;
-      if (e.target.closest('button')) return;
+      if (e.target.closest('button,input')) return;
       e.preventDefault();
 
       _dragging = card;
@@ -1203,7 +1840,7 @@ function loadAvatar(id, uid) {
     paintAccountAvatar(id, uid, _avatarCache[uid]);
     return;
   }
-  api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + uid + '&size=48x48&format=Png')
+  api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + uid + '&size=150x150&format=Png')
     .then(res => res.data).then(d => {
       const url = d?.data?.[0]?.imageUrl;
       if (url) {
@@ -1214,6 +1851,7 @@ function loadAvatar(id, uid) {
 }
 
 function paintAccountAvatar(id, uid, url) {
+  document.getElementById('av-' + id)?.classList.remove('av-loading');
   ['av-' + id, 'pkg-picker-av-' + id, 'tracking-av-' + id].forEach(elId => {
     const el = document.getElementById(elId);
     if (el && !el.querySelector('img')) el.innerHTML = '<img src="' + esc(url) + '" alt=""/>';
@@ -1236,7 +1874,7 @@ async function loadAvatarsBatch(list) {
   for (let i = 0; i < need.length; i += 100) {
     const chunk = need.slice(i, i + 100);
     try {
-      const res = await api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + chunk.join(',') + '&size=48x48&format=Png');
+      const res = await api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + chunk.join(',') + '&size=150x150&format=Png');
       const d = res.data;
       (d?.data || []).forEach(item => { if (item && item.targetId && item.imageUrl) _avatarCache[item.targetId] = item.imageUrl; });
       list.forEach(paint);
@@ -1254,7 +1892,7 @@ function loadPkgAvatar(pkgId, accountId, uid, attempt) {
     if (el) el.innerHTML = '<img src="' + esc(url) + '" alt=""/><span class="pkg-avatar-dot"></span>';
   };
   if (_avatarCache[uid]) { paint(_avatarCache[uid]); return; }
-  api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + uid + '&size=48x48&format=Png')
+  api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + uid + '&size=150x150&format=Png')
     .then(res => res.data).then(d => {
       const item = d?.data?.[0];
       if (item && item.imageUrl && item.state === 'Completed') { paint(item.imageUrl); return; }
@@ -1270,7 +1908,13 @@ const _userInfoCache = {};
 function loadUserInfo(uid, cb) {
   if (_userInfoCache[uid]) { cb(_userInfoCache[uid]); return; }
   api.robloxGet('https://users.roblox.com/v1/users/' + uid)
-    .then(res => res.data).then(d => { _userInfoCache[uid] = d; cb(d); })
+    .then(res => {
+      // A 429/404 comes back as { errors: [...] }; caching that pinned the
+      // tooltip to "Unknown" for this user for the rest of the session.
+      const d = res && res.ok ? res.data : null;
+      if (d && d.created) _userInfoCache[uid] = d;
+      cb(d);
+    })
     .catch(() => cb(null));
 }
 
@@ -1294,7 +1938,7 @@ function showAvTip(av) {
   document.getElementById('av-tip-name').textContent = nick && nick !== uname ? nick : (uname || 'Unknown');
   document.getElementById('av-tip-uname').textContent = uname ? '@' + uname : (uid ? 'ID ' + uid : '');
   const avEl = document.getElementById('av-tip-av');
-  avEl.innerHTML = _avatarCache[uid] ? '<img src="' + _avatarCache[uid] + '" alt=""/>' : (uname || '?')[0].toUpperCase();
+  avEl.innerHTML = _avatarCache[uid] ? '<img src="' + esc(_avatarCache[uid]) + '" alt=""/>' : esc((uname || '?')[0].toUpperCase());
   document.getElementById('av-tip-created').textContent = uid ? 'Loading\u2026' : 'Unknown';
   tip.classList.add('show');
   positionAvTip(av, tip);
@@ -1333,7 +1977,11 @@ function _showPanel(panel) {
   });
   document.getElementById('btn-cookie-add').style.display = panel === 'cookie' ? '' : 'none';
   document.getElementById('btn-creds-add').style.display = panel === 'creds' ? '' : 'none';
-  document.getElementById('btn-login-back').style.display = panel === 'choose' ? 'none' : '';
+  document.getElementById('btn-login-cancel').style.display = panel === 'browser' ? '' : 'none';
+  const tabs = document.getElementById('login-tabs');
+  tabs.style.display = panel === 'browser' ? 'none' : '';
+  tabs.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.panel === panel));
+  syncSeg(tabs);
   setStatus('login-status', 'hidden', '');
 }
 
@@ -1396,7 +2044,8 @@ async function startBrowserLogin() {
   document.getElementById('login-waiting').style.display = '';
   document.getElementById('dl-bar').style.width = '0%';
   document.getElementById('dl-pct').textContent = '0%';
-  const res = await api.openLogin();
+  let res;
+  try { res = await api.openLogin(); } catch (e) { res = { success: false, error: e?.message || String(e) || 'Login failed' }; }
   if (!document.getElementById('m-login').classList.contains('open')) return;
   if (!res || !res.success) {
     if (res && res.error && res.error !== 'Login window closed') {
@@ -1411,13 +2060,8 @@ async function startBrowserLogin() {
 }
 
 async function addByCookie() {
-  let cookie = document.getElementById('cookie-input').value.trim();
-  if (!cookie) return;
-  // Strip any prefix the user may have accidentally included
-  if (cookie.startsWith('.ROBLOSECURITY=')) cookie = cookie.slice('.ROBLOSECURITY='.length);
-  if (cookie.startsWith('ROBLOSECURITY=')) cookie = cookie.slice('ROBLOSECURITY='.length);
-  // Remove any surrounding quotes
-  cookie = cookie.replace(/^["']|["']$/g, '').trim();
+  if (!document.getElementById('cookie-input').value.trim()) return;
+  const cookie = normalizeCookie(document.getElementById('cookie-input').value);
   if (!cookie || cookie.length < 100) {
     setStatus('login-status', 'err', '<span class="material-icons-round">error_outline</span>Cookie looks too short - make sure you copied the full value');
     return;
@@ -1426,11 +2070,14 @@ async function addByCookie() {
   btn.disabled = true;
   btn.innerHTML = '<div class="spin"></div>Verifying';
   setStatus('login-status', 'load', '<div class="spin"></div>Verifying cookie…');
-  const res = await api.validateCookie(cookie);
+  // A rejected invoke used to leave the button stuck on "Verifying".
+  let res;
+  try { res = await api.validateCookie(cookie); } catch (e) { res = { ok: false, reason: e?.message || String(e) }; }
   btn.disabled = false;
   btn.innerHTML = '<span class="material-icons-round" style="font-size:15px">check</span>Add Account';
-  if (!res.ok) {
-    setStatus('login-status', 'err', '<span class="material-icons-round">error_outline</span>' + (res.reason || 'Invalid cookie: make sure you copied the full .ROBLOSECURITY value'));
+  if (!res || !res.ok) {
+    // reason can carry Roblox's own error text, so it's escaped like any other.
+    setStatus('login-status', 'err', '<span class="material-icons-round">error_outline</span>' + esc((res && res.reason) || 'Invalid cookie: make sure you copied the full .ROBLOSECURITY value'));
     return;
   }
   await finishLogin({ success: true, cookie, username: res.username, userId: res.userId });
@@ -1443,11 +2090,17 @@ function cancelLogin() {
 
 async function finishLogin(res) {
   setStatus('login-status', 'ok', '<span class="material-icons-round">check_circle</span>Signed in as ' + esc(res.username));
-  const a = await api.addAccount({ username: res.username, userId: res.userId, cookie: res.cookie, gameTarget: '' });
+  // accounts_add can fail (e.g. the store couldn't be written); say so instead
+  // of sitting on "Signed in as ..." with nothing added.
+  let a;
+  try { a = await api.addAccount({ username: res.username, userId: res.userId, cookie: res.cookie, gameTarget: '' }); }
+  catch (e) { a = null; setStatus('login-status', 'err', '<span class="material-icons-round">error_outline</span>' + esc('Could not save the account: ' + (e?.message || e))); }
+  if (!a) return;
   accounts.push(a); render();
   setTimeout(() => {
     closeModal('m-login');
-    toast('Added ' + esc(res.username), 'ok');
+    // toast() escapes its message itself.
+    toast('Added ' + res.username, 'ok');
     const grid = document.getElementById('grid');
     if (grid) grid.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, 800);
@@ -1455,7 +2108,7 @@ async function finishLogin(res) {
 
 function openEdit(id) {
   editAcc = accounts.find(a => a.id === id); if (!editAcc) return;
-  document.getElementById('edit-title').textContent = 'Edit account';
+  editTab('details');
   document.getElementById('edit-head-name').textContent = editAcc.username || 'Unknown';
   document.getElementById('edit-head-meta').textContent =
     (editAcc.username ? '@' + editAcc.username : '') +
@@ -1467,13 +2120,29 @@ function openEdit(id) {
     av.innerHTML = '<img src="' + esc(_avatarCache[editAcc.userId]) + '" alt=""/>';
   }
   document.getElementById('in-nickname').value = editAcc.nickname || '';
+  document.getElementById('in-tag').value = editAcc.tag || '';
   document.getElementById('in-description').value = editAcc.description || '';
   document.getElementById('in-target').value = editAcc.gameTarget || '';
+  document.getElementById('in-ramlimit').value = Number(editAcc.ramLimitMb) > 0 ? editAcc.ramLimitMb : '';
   // Reset follow field/status; it's a lookup tool, not a saved value.
   document.getElementById('in-follow').value = '';
   followSetStatus("Finds the server they're in and fills the target above.", '');
   openModal('m-edit');
   setTimeout(() => document.getElementById('in-nickname').focus(), 220);
+}
+
+function editTab(tab) {
+  ['details', 'launch'].forEach(t => {
+    document.getElementById('edit-panel-' + t).style.display = t === tab ? '' : 'none';
+  });
+  document.querySelectorAll('#edit-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  syncSeg(document.getElementById('edit-tabs'));
+}
+
+function normalizeTag(v) { return String(v || '').trim().slice(0, 12).toUpperCase(); }
+function setEditTag(tag) {
+  const el = document.getElementById('in-tag');
+  el.value = normalizeTag(el.value) === tag ? '' : tag;
 }
 
 function followSetStatus(msg, kind) {
@@ -1492,13 +2161,18 @@ async function followUserLookup() {
   const label = btn ? btn.querySelector('span:last-child') : null;
   const username = (input.value || '').trim();
   if (!username) { followSetStatus('Enter a username', 'err'); return; }
-  if (!editAcc || !editAcc.cookie) { followSetStatus('This account has no saved cookie', 'err'); return; }
+  // Read the live record, not the copy taken when the modal opened.
+  const acc = editAcc && accounts.find(a => a.id === editAcc.id);
+  if (!acc || !acc.cookie) { followSetStatus('This account has no saved cookie', 'err'); return; }
 
   if (btn) btn.disabled = true;
   if (label) label.textContent = 'Finding';
   followSetStatus('Looking up ' + username + '...', '');
   try {
-    const res = await api.followUser(editAcc.cookie, username);
+    const res = await api.followUser(acc.cookie, username);
+    // The edit modal may have been closed or reopened on another account
+    // while the lookup ran; don't write into a form that isn't this one's.
+    if (!editAcc || editAcc.id !== acc.id) return;
     document.getElementById('in-target').value = res.target;
     followSetStatus('Found ' + res.username + ": target set, click Save to keep it.", 'ok');
   } catch (e) {
@@ -1511,27 +2185,58 @@ async function followUserLookup() {
 
 async function saveEdit() {
   if (!editAcc) return;
+  // Captured up front: editAcc is module-level and is cleared if the account
+  // is removed while this save is awaiting the backend.
+  const id = editAcc.id;
   const target = document.getElementById('in-target').value.trim();
   const nickname = document.getElementById('in-nickname').value.trim();
   const description = document.getElementById('in-description').value.trim();
-  const updated = await api.updateAccount(editAcc.id, { gameTarget: target, nickname, description });
-  if (updated) {
-    const idx = accounts.findIndex(a => a.id === editAcc.id);
-    if (idx !== -1) {
-      accounts[idx] = updated;
-      delete _gameNameCache[editAcc.id]; // clear stale name
-      render();
-      if (target) fetchGameName(editAcc.id, target); // fetch new name immediately
-    } else { render(); }
+  const ramRaw = document.getElementById('in-ramlimit').value.trim();
+  let ramLimitMb = ramRaw === '' ? 0 : parseInt(ramRaw, 10);
+  if (!Number.isFinite(ramLimitMb) || ramLimitMb < 0) { toast('RAM limit must be a number of MB (or empty)', 'err'); return; }
+  if (ramLimitMb > 0 && ramLimitMb < 512) ramLimitMb = 512;
+  const ramChanged = (Number(editAcc.ramLimitMb) || 0) !== ramLimitMb;
+  let updated;
+  try { updated = await api.updateAccount(id, { gameTarget: target, nickname, description, tag: normalizeTag(document.getElementById('in-tag').value) }); }
+  catch (e) { toast('Save failed: ' + (e?.message || e), 'err'); return; }
+  // accounts_update answers null when the id no longer exists; claiming
+  // "Saved" there hid that the edit went nowhere.
+  if (!updated) { closeModal('m-edit'); editAcc = null; toast('This account no longer exists', 'err'); return; }
+  const idx = accounts.findIndex(a => a.id === id);
+  if (idx !== -1) {
+    accounts[idx] = updated;
+    delete _gameNameCache[id]; // clear stale name
   }
+  // Saved through its own command so a running instance gets the new cap
+  // immediately instead of on its next launch.
+  let savedMsg = 'Saved', ramError = null;
+  if (ramChanged) {
+    let r = null;
+    try { r = await api.setAccountRamLimit(id, ramLimitMb); } catch (e) { r = { ok: false, error: e?.message || String(e) }; }
+    // saved:true means the value is on disk even when applying it to the
+    // running instance failed, so the local copy must follow either way.
+    if (r && (r.ok || r.saved) && idx !== -1) accounts[idx].ramLimitMb = ramLimitMb;
+    if (r && r.ok) {
+      if (r.applied) savedMsg = r.limitMb ? 'Saved, RAM limit ' + formatMb(r.limitMb) + ' applied to the running instance' : 'Saved, RAM limit removed from the running instance';
+    } else {
+      savedMsg = null;
+      ramError = 'Saved, but the RAM limit was not applied: ' + ((r && r.error) || 'unknown error');
+    }
+  }
+  render();
+  if (idx !== -1 && target) fetchGameName(id, target); // fetch new name immediately (deduped against render's)
   closeModal('m-edit');
-  toast('Saved', 'ok');
+  // One toast at the end: the legacy toast is a single element, so an
+  // earlier one would just be overwritten by this.
+  if (ramError) toast(ramError, 'err');
+  else toast(savedMsg, 'ok');
 }
 
-function confirmAction(message, onConfirm) {
+function confirmAction(message, onConfirm, confirmLabel = 'Delete') {
   document.getElementById('m-confirm-delete-msg').textContent = message;
   const btn = document.getElementById('m-confirm-delete-btn');
   const newBtn = btn.cloneNode(true); // clone to remove old listeners
+  newBtn.textContent = confirmLabel;
   btn.parentNode.replaceChild(newBtn, btn);
   newBtn.addEventListener('click', () => { closeModal('m-confirm-delete'); onConfirm(); });
   // All overlays share the same z-index, so equal-z stacking falls back to
@@ -1556,18 +2261,21 @@ async function removeAcc(id) {
     : 'Remove "' + a.username + '"? This cannot be undone.';
   confirmAction(msg, async () => {
     if (wasRunning) { try { await api.killOneRoblox(id); } catch {} }
-    await api.removeAccount(id); accounts = accounts.filter(x => x.id !== id); render();
+    // accounts_remove can fail; dropping the card anyway made it reappear on
+    // the next launch with no word about why.
+    try { await api.removeAccount(id); }
+    catch (e) { toast('Could not remove ' + a.username + ': ' + (e?.message || e), 'err'); return; }
+    accounts = accounts.filter(x => x.id !== id); render();
     // Drop per-account UI bookkeeping so nothing keeps referring to it.
     _launchedIds.delete(id);
     delete _cookieStatus[id];
     delete _cookieCheckedAt[id];
+    delete _cookieCheckedWith[id];
     delete _gameNameCache[id];
-    // launchAcc is module-level and holds a full copy of the account incl. its
-    // cookie. Left dangling, the still-open launch modal would happily start
-    // the account that was just deleted.
-    if (launchAcc && launchAcc.id === id) { launchAcc = null; closeModal('m-launch'); }
-    if (packages.some(p => p.accountIds.includes(id))) {
-      packages.forEach(p => { p.accountIds = p.accountIds.filter(aid => aid !== id); });
+    // Same for editAcc: saving it would target an id that no longer exists.
+    if (editAcc && editAcc.id === id) { editAcc = null; closeModal('m-edit'); }
+    if (packages.some(p => (p.accountIds || []).includes(id))) {
+      packages.forEach(p => { p.accountIds = (p.accountIds || []).filter(aid => aid !== id); });
       api.savePackages(packages);
       renderPackages();
     }
@@ -1587,10 +2295,17 @@ async function clearAll() {
     + 'This cannot be undone.';
   confirmAction(msg, async () => {
     if (runningCount) { try { await api.killAllRoblox(); } catch {} }
-    for (const a of accounts) { await api.removeAccount(a.id); forgetTrackingAccount(a.id); }
-    accounts = []; render(); document.getElementById('stat-count').textContent = '0';
+    // One failed remove used to abort the loop mid-way and skip the rest of
+    // this handler, leaving the UI out of step with what was actually deleted.
+    const kept = [];
+    for (const a of accounts) {
+      try { await api.removeAccount(a.id); forgetTrackingAccount(a.id); }
+      catch { kept.push(a); }
+    }
+    const keptIds = new Set(kept.map(a => a.id));
+    accounts = kept; render(); document.getElementById('stat-count').textContent = String(kept.length);
     _launchedIds.clear();
-    packages.forEach(p => { p.accountIds = []; });
+    packages.forEach(p => { p.accountIds = (p.accountIds || []).filter(aid => keptIds.has(aid)); });
     api.savePackages(packages);
     renderPackages();
     // The generator history holds usernames, passwords and cookies of its own,
@@ -1602,105 +2317,100 @@ async function clearAll() {
       genRenderHistory();
       try { await api.clearGenHistory(); } catch {}
     }
-    toast('All accounts cleared', 'err');
+    toast(kept.length ? ('Could not remove ' + kept.length + ' account' + (kept.length === 1 ? '' : 's')) : 'All accounts cleared', 'err');
   });
 }
 
-function openLaunch(id) {
-  launchAcc = accounts.find(a => a.id === id); if (!launchAcc) return;
-  const target = launchAcc.gameTarget || '';
-  const gameName = _gameNameCache[launchAcc.id] || (target ? extractTargetLabel(target) : '');
-  const p = document.getElementById('launch-prev');
-  p.innerHTML = '<div class="prev-av" id="prev-av">' + esc((launchAcc.username || '?')[0].toUpperCase()) + '</div>' +
-    '<div><div class="prev-name">' + esc(launchAcc.username) + '</div>' +
-    '<div class="prev-uid">' + esc(gameName || 'Opens home screen') + '</div></div>';
-  // Avatar
-  if (launchAcc.userId) {
-    api.robloxGet('https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=' + launchAcc.userId + '&size=48x48&format=Png')
-      .then(res => res.data).then(d => {
-        const url = d?.data?.[0]?.imageUrl, el = document.getElementById('prev-av');
-        if (url && el) el.innerHTML = '<img src="' + esc(url) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>';
-      }).catch(() => {});
-  }
-
-  setStatus('launch-status', 'hidden', '');
-  _launchingId = null;
-  const btn = document.getElementById('btn-launch');
-  btn.disabled = false; btn.innerHTML = 'Start';
-  openModal('m-launch');
-}
-// The Cancel button doubles as "abandon the launch in progress": a launch can
-// take ~30s (stagger, ticket retries, spawn retries), so closing the modal
-// alone would leave it running with no way to stop it.
-let _launchingId = null;
-async function cancelLaunchOrClose() {
-  if (_launchingId) {
-    const id = _launchingId;
-    try { await api.cancelLaunch(id); } catch {}
-    logEntry('warn', 'launch', 'Launch cancelled', { accountId: id });
-  }
-  closeModal('m-launch');
+// Bumped each time the launch modal is (re)opened, so async work started for
+// an earlier opening (avatar fetch, a launch still resolving after the modal
+// was dismissed) can tell it no longer owns the modal's contents.
+// Accounts with a launch in progress. A launch can take ~30s (stagger, ticket
+// retries, spawn retries), so the card shows it and a second click cancels it.
+const _launchingIds = new Set();
+function setCardLaunching(id, on) {
+  if (on) _launchingIds.add(id); else _launchingIds.delete(id);
+  document.querySelector(`.card[data-id="${id}"]`)?.classList.toggle('is-launching', on);
 }
 
-async function doLaunch() {
-  if (!launchAcc) return;
-  const btn = document.getElementById('btn-launch');
-  if (btn.disabled) return;
-  _launchingId = launchAcc.id;
-  btn.disabled = true; btn.innerHTML = '<div class="spin"></div>Launching';
-  setStatus('launch-status', 'load', '<div class="spin"></div>Getting auth ticket\u2026');
-  // Flip to "Roblox is starting" the instant the process exists, which the
-  // backend emits well before the launch call itself resolves.
-  //
-  // listen() is async, so it can hand back its unlisten AFTER the launch has
-  // already finished and run the teardown below; `launchDone` is what makes
-  // the late arrival tear itself down instead of leaking a listener (and a
-  // stale setStatus write) on every single launch. The account id is captured
-  // by value because `launchAcc` is module-level and points at a different
-  // account as soon as the user opens another launch modal.
-  const startedForId = launchAcc.id;
-  let launchDone = false, unlistenStarted = null;
-  api.onRobloxStarted(id => {
-    if (!launchDone && id === startedForId) {
-      setStatus('launch-status', 'load', '<div class="spin"></div>Roblox is starting\u2026');
-    }
-  }).then(u => {
-    if (launchDone) { try { u(); } catch {} } else { unlistenStarted = u; }
-  }).catch(() => {});
-  logEntry('info', 'launch', `Launching Roblox for ${launchAcc.username || launchAcc.id}...`, { accountId: launchAcc.id, username: launchAcc.username, userId: launchAcc.userId, target: launchAcc.gameTarget || 'Roblox home' });
+function cardPrimaryAction(id) {
+  if (_launchedIds.has(id)) killOne(id);
+  else if (_launchingIds.has(id)) api.cancelLaunch(id).catch(() => {});
+  else startAccount(id);
+}
+
+// Text typed into each row's follow box, kept so a re-render doesn't wipe it.
+const _followDraft = {};
+
+// Finds the server a user is in and launches this account into it, for this
+// launch only: the account's saved game target is left alone.
+async function followFromRow(id) {
+  if (_launchedIds.has(id) || _launchingIds.has(id)) return;
+  const acc = accounts.find(a => a.id === id);
+  if (!acc) return;
+  const username = (_followDraft[id] || '').trim();
+  const rowBtn = () => document.querySelector(`.card[data-id="${id}"] .card-follow-btn`);
+  if (!username) {
+    document.getElementById('follow-' + id)?.focus();
+    toast('Enter a username to follow', 'err');
+    return;
+  }
+  if (!acc.cookie) { toast('This account has no saved cookie', 'err'); return; }
+  if (rowBtn()) { rowBtn().disabled = true; rowBtn().textContent = 'Finding'; }
+  let found;
+  try {
+    found = await api.followUser(acc.cookie, username);
+  } catch (e) {
+    toast(typeof e === 'string' ? e : (e?.message || 'Could not find that user'), 'err');
+    return;
+  } finally {
+    if (rowBtn()) { rowBtn().disabled = false; rowBtn().textContent = 'Follow'; }
+  }
+  startAccount(id, found.target);
+}
+
+async function startAccount(id, followTarget) {
+  if (_launchingIds.has(id)) return;
+  if (_launchedIds.has(id)) { toast('This account is already running', 'err'); return; }
+  const acc = accounts.find(a => a.id === id);
+  if (!acc) return;
+  setCardLaunching(id, true);
+  logEntry('info', 'launch', `Launching Roblox for ${acc.username || acc.id}...`, { accountId: acc.id, username: acc.username, userId: acc.userId, target: followTarget || acc.gameTarget || 'Roblox home' });
   let res;
   try {
-    res = await api.launchRoblox(launchAcc.id, launchAcc.cookie, launchAcc.gameTarget || null);
+    res = await api.launchRoblox(acc.id, acc.cookie, followTarget || acc.gameTarget || null, !followTarget);
   } catch (e) {
-    // Should never reject in practice (the backend command always resolves
-    // with {success:false,...} on failure), but if it ever does, the button
-    // must not stay stuck on "Launching..." forever with no way out.
     res = { success: false, error: e?.message || String(e) };
   }
-  _launchingId = null;
-  launchDone = true;
-  if (unlistenStarted) { try { unlistenStarted(); } catch {} }
-  if (res.cancelled) {
-    // The user already asked for this and the modal is closing - don't shout
-    // an error at them on the way out.
-    btn.disabled = false; btn.innerHTML = 'Start';
-    closeModal('m-launch');
-    return;
-  }
+  setCardLaunching(id, false);
+  if (!res) res = { success: false, error: 'Launch failed' };
+  if (res.cancelled) { logEntry('warn', 'launch', 'Launch cancelled', { accountId: acc.id }); return; }
   if (!res.success) {
-    logEntry('err', 'launch', `Launch failed for ${launchAcc.username || launchAcc.id}: ${res.error}`, { accountId: launchAcc.id });
-    setStatus('launch-status', 'err', '<span class="material-icons-round">error_outline</span>' + esc(res.error));
-    _flagCookieMaybeDead(launchAcc.id, res.error);
-    btn.disabled = false; btn.innerHTML = 'Start';
+    logEntry('err', 'launch', `Launch failed for ${acc.username || acc.id}: ${res.error}`, { accountId: acc.id });
+    _flagCookieMaybeDead(acc.id, res.error);
+    toast('Launch failed for ' + (acc.username || acc.id) + ': ' + res.error, 'err');
     return;
   }
-  setStatus('launch-status', 'ok', '<span class="material-icons-round">check_circle</span>Launched as ' + launchAcc.username);
-  logEntry('ok', 'launch', `Roblox launched successfully as ${launchAcc.username || launchAcc.id}`, { accountId: launchAcc.id, username: launchAcc.username, userId: launchAcc.userId });
-  markLaunched(launchAcc.id);
-  setTimeout(() => { closeModal('m-launch'); toast('Launched as ' + launchAcc.username, 'ok'); }, 700);
+  logEntry('ok', 'launch', `Roblox launched successfully as ${acc.username || acc.id}`, { accountId: acc.id, username: acc.username, userId: acc.userId });
+  markLaunched(acc.id);
+  toast('Launched as ' + acc.username, 'ok');
 }
 
 // ── Packages ──────────────────────────────────────────────────────────────
+const PKG_SERVER_MODES = {
+  same: { label: 'Same server', desc: 'Everyone joins the link above' },
+  random: { label: 'Random servers', desc: 'Each account in its own public server' },
+  closest: { label: 'Closest servers', desc: 'Own server each, lowest ping first' },
+  private: { label: 'Own private servers', desc: "Each account in its own private server" },
+};
+function setPackageMode(id, mode) {
+  const p = packages.find(x => x.id === id);
+  if (!p) return;
+  p.serverMode = mode;
+  api.savePackages(packages);
+  closeAllCdd();
+  renderPackages();
+}
+
 function renderPackages() {
   const list = document.getElementById('pkg-list'), empty = document.getElementById('pkg-empty');
   if (!list) return;
@@ -1710,7 +2420,7 @@ function renderPackages() {
     const members = (p.accountIds || []).map(id => accounts.find(a => a.id === id)).filter(Boolean);
     const shown = members.slice(0, 6);
     const extra = members.length - shown.length;
-    const avatarsHtml = shown.map(m => `<div class="pkg-avatar${_launchedIds.has(m.id) ? ' online' : ''}" id="pkg-av-${p.id}-${m.id}" data-acc-id="${m.id}" data-uid="${m.userId || ''}" data-uname="${esc(m.username || '')}" data-nick="${esc(m.nickname || '')}">${esc((m.username || '?')[0].toUpperCase())}<span class="pkg-avatar-dot"></span></div>`).join('')
+    const avatarsHtml = shown.map(m => `<div class="pkg-avatar${_launchedIds.has(m.id) ? ' online' : ''}" id="pkg-av-${p.id}-${m.id}" data-acc-id="${m.id}" data-uid="${esc(m.userId || '')}" data-uname="${esc(m.username || '')}" data-nick="${esc(m.nickname || '')}">${esc((m.username || '?')[0].toUpperCase())}<span class="pkg-avatar-dot"></span></div>`).join('')
       + (extra > 0 ? `<div class="pkg-avatar more">+${extra}</div>` : '');
     return `
     <div class="pkg-card" data-id="${p.id}" style="animation-delay:${i * 18}ms">
@@ -1718,14 +2428,15 @@ function renderPackages() {
         <div class="sr-icon"><span class="material-icons-round">groups</span></div>
         <div class="pkg-card-info">
           <div class="pkg-name">${esc(p.name)}</div>
-          <div class="pkg-meta">${members.length} account${members.length !== 1 ? 's' : ''}</div>
+          <div class="pkg-meta"></div>
+          <div class="pkg-run-bar"><span></span></div>
         </div>
         <div class="pkg-avatars">${avatarsHtml}</div>
         <div class="pkg-card-actions">
-          <button class="btn btn-edit" onclick="openEditPackage('${p.id}')" aria-label="Manage accounts">
+          <button class="btn btn-edit" onclick="openEditPackage(${jsArg(p.id)})" title="Manage accounts" aria-label="Manage accounts">
             <span class="material-icons-round">group</span>
           </button>
-          <button class="btn btn-del" onclick="deletePackage('${p.id}')" aria-label="Delete package">
+          <button class="btn btn-del" onclick="deletePackage(${jsArg(p.id)})" title="Delete group" aria-label="Delete group">
             <span class="material-icons-round">delete_outline</span>
           </button>
         </div>
@@ -1734,13 +2445,22 @@ function renderPackages() {
         <div class="pkg-link-field">
           <span class="material-icons-round pkg-link-icon">link</span>
           <input type="text" class="pkg-link-input" id="pkg-link-${p.id}" placeholder="Game ID or server link for everyone to join…"
-            value="${esc(p.link || '')}" onchange="setPackageLink('${p.id}', this.value)"
-            onkeydown="if(event.key==='Enter'){this.blur();launchPackage('${p.id}');}"/>
+            value="${esc(p.link || '')}" onchange="setPackageLink(${jsArg(p.id)}, this.value)"
+            onkeydown="if(event.key==='Enter'){this.blur();launchPackage(${jsArg(p.id)});}"/>
         </div>
-        <button class="btn btn-launch pkg-launch-btn" onclick="launchPackage('${p.id}')" ${members.length ? '' : 'disabled'}>
+        <div class="cdd pkg-mode" id="cdd-pkgmode-${p.id}">
+          <div class="cdd-trigger" id="cdd-pkgmode-${p.id}-trigger" onclick="toggleCdd('pkgmode-${p.id}')" role="button" tabindex="0" aria-label="Where accounts join">
+            <span class="cdd-label">${esc(PKG_SERVER_MODES[p.serverMode || 'same'].label)}</span>
+            <span class="material-icons-round cdd-arrow">expand_more</span>
+          </div>
+          <div class="cdd-menu" id="cdd-pkgmode-${p.id}-menu">
+            ${Object.entries(PKG_SERVER_MODES).map(([k, m]) => `<div class="cdd-option${(p.serverMode || 'same') === k ? ' selected' : ''}" onclick="setPackageMode(${jsArg(p.id)},'${k}')" role="button" tabindex="0"><div class="cdd-opt-left"><div class="cdd-opt-name">${m.label}</div><div class="cdd-opt-desc">${esc(m.desc)}</div></div></div>`).join('')}
+          </div>
+        </div>
+        <button class="btn btn-launch pkg-launch-btn" onclick="launchPackage(${jsArg(p.id)})" ${members.length ? '' : 'disabled'}>
           Start All
         </button>
-        <button class="btn btn-del pkg-kill-btn" onclick="killPackage('${p.id}')" ${members.some(m => _launchedIds.has(m.id)) ? '' : 'disabled'}>
+        <button class="btn btn-del pkg-kill-btn" onclick="killPackage(${jsArg(p.id)})" title="Stop this group's accounts" aria-label="Stop this group's accounts" ${members.some(m => _launchedIds.has(m.id)) ? '' : 'disabled'}>
           <span class="material-icons-round">power_settings_new</span>
         </button>
       </div>
@@ -1787,7 +2507,7 @@ function renderPackagePicker(selectedIds) {
       <span class="pm-av" id="pkg-picker-av-${a.id}">${esc((a.username || '?')[0].toUpperCase())}</span>
       <span class="pm-info">
         <span class="pm-name">${esc(a.nickname || a.username || 'Unknown')}</span>
-        <span class="pm-meta">${a.userId ? 'ID ' + a.userId : 'No ID'}</span>
+        <span class="pm-meta">${a.userId ? 'ID ' + esc(a.userId) : 'No ID'}</span>
       </span>
       <span class="pm-check"><span class="material-icons-round">check</span></span>
     </label>`).join('');
@@ -1857,28 +2577,75 @@ async function launchPackage(id) {
   }
 
   const link = (p.link || '').trim();
-  let okCount = 0;
+  let okCount = 0, skipped = 0, targetsChanged = false, firstError = null;
+  // A second client on the same account can get the first one disconnected,
+  // and the app would lose track of it, so Start All only starts what's stopped.
+  const markSkipped = (m) => {
+    skipped++;
+    const chip = document.getElementById('pkg-chip-' + id + '-' + m.id);
+    if (chip) {
+      chip.className = 'pkg-chip ok';
+      chip.title = 'Already running';
+      chip.innerHTML = '<span class="material-icons-round">check_circle</span>' + esc(m.nickname || m.username || '');
+    }
+  };
+  // "Different servers" modes get one target per account, chosen up front.
+  const serverMode = p.serverMode || 'same';
+  let plan = null, planError = null;
+  if (serverMode !== 'same') {
+    try {
+      if (!link) throw new Error('Add a game ID or link to this group first');
+      plan = await api.serversPlan(link, serverMode, members.filter(m => !_launchedIds.has(m.id)).map(m => m.id));
+    } catch (e) { planError = typeof e === 'string' ? e : (e.message || 'Could not pick servers'); }
+  }
   await Promise.all(members.map(async (m) => {
-    const target = link || m.gameTarget || null;
+    if (_launchedIds.has(m.id)) { markSkipped(m); return; }
+    const assigned = plan ? plan[m.id] : null;
+    const target = serverMode === 'same' ? (link || m.gameTarget || null) : (assigned && assigned.target) || null;
+    const planFailure = serverMode !== 'same' && !target ? (planError || (assigned && assigned.error) || 'No server found') : null;
     logEntry('info', 'launch', `Launching Roblox for ${m.username || m.id} (package)...`, { accountId: m.id, username: m.username || null, userId: m.userId || null, target: target || 'Roblox home' });
-    const res = await api.launchRoblox(m.id, m.cookie, target);
+    // One rejected invoke used to reject the whole Promise.all, skipping the
+    // reset below and leaving "Start All" disabled and busy for good.
+    let res;
+    if (planFailure) res = { success: false, error: planFailure };
+    else try { res = await api.launchRoblox(m.id, m.cookie, target, serverMode === 'same'); } catch (e) { res = { success: false, error: e?.message || String(e) }; }
+    if (!res) res = { success: false, error: 'Launch failed' };
+    if (res.alreadyRunning) { markSkipped(m); return; }
     const chip = document.getElementById('pkg-chip-' + id + '-' + m.id);
     if (res.success) {
       okCount++;
+      // The backend stores the target it launched into as the account's
+      // gameTarget; mirror that, or the card keeps the old target and the
+      // next Edit > Save writes the stale value back over it.
+      if (serverMode === 'same' && target && (m.gameTarget || '') !== target) {
+        const live = accounts.find(a => a.id === m.id);
+        if (live) { live.gameTarget = target; delete _gameNameCache[m.id]; targetsChanged = true; }
+      }
       logEntry('ok', 'launch', `Launched as ${m.username || m.id} (package)`, { accountId: m.id, username: m.username || null });
       markLaunched(m.id);
       if (chip) { chip.className = 'pkg-chip ok'; chip.innerHTML = '<span class="material-icons-round">check_circle</span>' + esc(m.nickname || m.username || ''); }
-    } else if (chip) {
-      chip.className = 'pkg-chip err';
-      chip.title = res.error || '';
-      chip.innerHTML = '<span class="material-icons-round">error_outline</span>' + esc(m.nickname || m.username || '');
-      _flagCookieMaybeDead(m.id, res.error);
+    } else {
+      // The reason used to live only in the chip's hover title, so a failed
+      // group launch just said "0/2" with nothing to act on.
+      if (!res.cancelled) {
+        if (!firstError) firstError = res.error || 'Launch failed';
+        logEntry('err', 'launch', `Launch failed for ${m.username || m.id} (package): ${res.error || 'unknown error'}`, { accountId: m.id });
+        _flagCookieMaybeDead(m.id, res.error);
+      }
+      if (chip) {
+        chip.className = 'pkg-chip err';
+        chip.title = res.error || '';
+        chip.innerHTML = '<span class="material-icons-round">error_outline</span>' + esc(m.nickname || m.username || '');
+      }
     }
   }));
 
+  if (targetsChanged) render();
   if (btn) { btn.disabled = false; btn.innerHTML = 'Start All'; delete btn.dataset.busy; }
   if (killBtn && killBtn.dataset.busy !== '1') killBtn.disabled = !members.some(m => _launchedIds.has(m.id));
-  toast('Launched ' + okCount + '/' + members.length + ' accounts in "' + p.name + '"', okCount === members.length ? 'ok' : 'err');
+  const wanted = members.length - skipped;
+  if (!wanted) { toast('All accounts in "' + p.name + '" are already running', 'ok'); return; }
+  toast('Launched ' + okCount + '/' + wanted + ' accounts in "' + p.name + '"' + (skipped ? ' (' + skipped + ' already running)' : '') + (firstError ? ': ' + firstError : ''), okCount === wanted ? 'ok' : 'err');
 }
 
 async function killPackage(id) {
@@ -1906,7 +2673,9 @@ async function killPackage(id) {
   let okCount = 0;
   await Promise.all(running.map(async (m) => {
     logEntry('warn', 'kill', `Killing Roblox instance for ${m.username || m.id} (package)...`, { accountId: m.id, username: m.username || null, userId: m.userId || null });
-    const res = await api.killOneRoblox(m.id);
+    // Same as launchPackage: a rejection must not strand the busy buttons.
+    let res;
+    try { res = await api.killOneRoblox(m.id); } catch (e) { res = { ok: false, error: e?.message || String(e) }; }
     const chip = document.getElementById('pkg-chip-' + id + '-' + m.id);
     if (res && res.ok) {
       okCount++;
@@ -1942,10 +2711,14 @@ async function saveKeySettings() {
   btn.disabled = true; btn.textContent = 'Saving';
   _saveKeyTimer = setTimeout(async () => {
     try {
+      // Checked before the call, not after it: enc_set_key treats an empty
+      // (or whitespace-only) value as "remove the passphrase", so checking
+      // afterwards reported a failure after the key had already been dropped
+      // and every account re-encrypted under DPAPI.
+      if (!keyVal.trim()) throw new Error('Encryption key cannot be empty.');
       // enc:setKey changes the key and re-encrypts accounts in one step.
       const r = await api.encSetKey(keyVal);
       if (!r || !r.ok) throw new Error(r && r.error ? r.error : 'could not update key');
-      if (!keyVal.trim()) throw new Error('Encryption key cannot be empty.');
       settings.keySet = true;
       document.getElementById('custom-key').value = '';
       // Reload accounts so the renderer holds cookies under the new key.
@@ -1953,7 +2726,8 @@ async function saveKeySettings() {
       toast('Encryption key updated', 'ok');
       applySettings();
     } catch (e) {
-      toast('Save failed: ' + e.message, 'err');
+      // invoke rejects with a plain string, which has no .message.
+      toast('Save failed: ' + (e?.message || e), 'err');
     } finally {
       btn.disabled = false; btn.textContent = 'Save';
     }
@@ -1964,6 +2738,11 @@ function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 function setStatus(id, type, html) { const el = document.getElementById(id); el.className = 'mst ' + type; el.innerHTML = html; }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// A string argument for an inline on*="..." handler. esc() alone isn't enough
+// there: the browser decodes &#39; back to ' before the JS is parsed, so a
+// quote in the value would still end the string literal. JSON-encode first
+// (a real JS string literal), then esc() it for the double-quoted attribute.
+function jsArg(s) { return esc(JSON.stringify(String(s))); }
 function toast(msg, type) {
   type = type || '';
   const el = document.getElementById('toast'), icon = type === 'ok' ? 'check_circle' : 'cancel';
@@ -2007,12 +2786,15 @@ document.addEventListener('keydown', e => {
     const editEl = document.getElementById('m-edit');
     if (editEl.classList.contains('open')) {
       // Escape shouldn't discard the modal out from under someone mid-typing.
-      const typing = ['in-target', 'in-nickname', 'in-description', 'in-follow']
+      const typing = ['in-target', 'in-nickname', 'in-description', 'in-follow', 'in-ramlimit']
         .some(f => document.activeElement === document.getElementById(f));
       if (!typing) closeModal('m-edit');
-    } else document.querySelectorAll('.overlay.open').forEach(m => m.classList.remove('open'));
+    // The encryption gate is not dismissable (data-backdrop-close="false"):
+    // escaping it skipped continueInit and left an empty, dead window.
+    } else document.querySelectorAll('.overlay.open').forEach(m => { if (m.id !== 'm-enc') m.classList.remove('open'); });
   }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); openLogin(); }
+  // Same gate: no adding accounts before storage has been unlocked.
+  if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); if (!document.getElementById('m-enc').classList.contains('open')) openLogin(); }
   // "/" focuses the account search (when not already typing in a field).
   if (e.key === '/' && document.getElementById('page-accounts')?.classList.contains('active')
       && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) {
@@ -2144,6 +2926,11 @@ function switchChartTab(tab) {
 // repopulating the data we just dropped.
 let _chartsLoadSeq = 0;
 
+document.getElementById('charts-loading').innerHTML = '<div class="charts-grid">'
+  + '<div class="chart-feature chart-skel"><div class="skel chart-feature-media"></div><div class="chart-feature-info"><div class="skel skel-line" style="width:30%;margin-bottom:14px"></div><div class="skel skel-line" style="height:22px;width:70%;margin-bottom:14px"></div><div class="skel skel-line short"></div></div></div>'
+  + '<div class="chart-card chart-skel"><div class="skel chart-skel-thumb"></div><div class="skel skel-line"></div><div class="skel skel-line short"></div></div>'.repeat(14)
+  + '</div>';
+
 async function loadCharts() {
   const grid = document.getElementById('charts-grid');
   const loading = document.getElementById('charts-loading');
@@ -2190,7 +2977,7 @@ async function fetchRobloxGames(sortId) {
   const d = r.data;
 
   // Response shape: { sorts: [{ games: [...] }] } or { games: [...] }
-  const games = d.games || (d.sorts && d.sorts[0] && d.sorts[0].games) || [];
+  const games = (d.games || (d.sorts && d.sorts[0] && d.sorts[0].games) || []).filter(g => !g.isSponsored);
   if (!games.length) throw new Error('No games in response');
 
   // Fetch thumbnails for all universeIds
@@ -2211,8 +2998,79 @@ async function fetchRobloxGames(sortId) {
     placeId: g.rootPlaceId || g.placeId,
     name: g.name,
     playerCount: g.playerCount,
+    likes: likePct(g.totalUpVotes, g.totalDownVotes),
     thumbUrl: thumbMap[g.universeId] || ''
   }));
+}
+
+function likePct(up, down) {
+  return typeof up === 'number' && typeof down === 'number' && up + down > 0 ? Math.round(up / (up + down) * 100) : null;
+}
+const cssUrl = u => `url("${String(u).replace(/["\\\n]/g, encodeURIComponent)}")`;
+
+// The top game of a chart gets a wide banner with its own screenshot.
+function chartFeatureHtml(g) {
+  const chart = document.querySelector('#page-charts .tab-btn.active')?.textContent || 'this chart';
+  return `<div class="chart-feature" onclick="openGameModal(0)" title="View game info">
+    <canvas class="chart-feature-glow" id="chart-feature-glow"></canvas>
+    <div class="chart-feature-media skel" id="chart-feature-media"></div>
+    <div class="chart-feature-info">
+      <div class="chart-feature-kicker">#1 in ${esc(chart)}</div>
+      <div class="chart-feature-name">${esc(g.name || 'Unknown')}</div>
+      <div class="chart-feature-stats">
+        ${typeof g.playerCount === 'number' ? `<span><span class="material-icons-round">people</span>${gvCompact(g.playerCount)} playing</span>` : ''}
+        ${typeof g.likes === 'number' ? `<span><span class="material-icons-round">thumb_up</span>${g.likes}% liked</span>` : ''}
+      </div>
+      <button class="btn btn-primary">View game</button>
+    </div>
+  </div>`;
+}
+// A soft wash of a picture's colors. The blur is done once, on a canvas a few
+// dozen pixels wide that the browser then stretches over the area. A CSS blur of
+// the same size is worked out again on every frame the page scrolls.
+// `pad` is how far past its box the wash spreads; the canvas is sized to match in CSS.
+const GLOW_PX = 64;
+function paintGlow(canvas, url, blur, pad = 0, done) {
+  if (!canvas || !url) return;
+  canvas._url = url;
+  const box = canvas.parentElement;
+  const W = box.offsetWidth || 900, H = box.offsetHeight || 360;
+  const s = GLOW_PX / (W + 2 * pad);
+  const img = new Image();
+  img.onload = () => {
+    if (canvas._url !== url || !img.naturalWidth) return; // a newer picture took over
+    canvas.width = GLOW_PX;
+    canvas.height = Math.max(1, Math.round((H + 2 * pad) * s));
+    const ctx = canvas.getContext('2d');
+    ctx.filter = `blur(${(blur * s).toFixed(2)}px) saturate(1.5)`;
+    const bw = W * s, bh = H * s, fit = Math.max(bw / img.naturalWidth, bh / img.naturalHeight);
+    const sw = bw / fit, sh = bh / fit; // the middle of the picture, cropped like background-size:cover
+    ctx.drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, pad * s, pad * s, bw, bh);
+    done?.();
+  };
+  img.src = url;
+}
+
+const _featureShots = {};
+async function loadChartFeature(g) {
+  const glow = document.getElementById('chart-feature-glow');
+  if (glow && g.thumbUrl) paintGlow(glow, g.thumbUrl, 60);
+  let url = _featureShots[g.universeId];
+  if (url === undefined) {
+    try {
+      const r = await api.robloxGet(`https://thumbnails.roblox.com/v1/games/multiget/thumbnails?universeIds=${g.universeId}&countPerUniverse=1&defaults=true&size=768x432&format=Png&isCircular=false`);
+      url = r?.data?.data?.[0]?.thumbnails?.find(t => t.state === 'Completed')?.imageUrl || '';
+    } catch { url = ''; }
+    _featureShots[g.universeId] = url;
+  }
+  const media = document.getElementById('chart-feature-media');
+  if (!media) return;
+  const src = url || g.thumbUrl;
+  if (!src) { media.classList.remove('skel'); return; }
+  if (glow && !glow._url) paintGlow(glow, src, 60); // no small thumbnail came with the game
+  media.innerHTML = `<img src="${esc(src)}" alt=""/>`;
+  const img = media.firstChild;
+  img.onload = img.onerror = () => media.classList.remove('skel');
 }
 
 let _chartGameMap = {};
@@ -2232,9 +3090,11 @@ function renderCharts(games, searchMode) {
   }
   emptyEl.style.display = 'none';
   grid.style.display = 'grid';
+  const featured = !searchMode && games.length > 4;
   grid.innerHTML = games.map((g, i) => {
     _chartGameMap[i] = g;
-    const players = typeof g.playerCount === 'number' ? Number(g.playerCount).toLocaleString() + ' playing' : '';
+    if (featured && i === 0) return chartFeatureHtml(g);
+    const players = typeof g.playerCount === 'number' ? gvCompact(g.playerCount) + ' playing' : '';
     // Rank only means something against the chart order; a search result list
     // has no ranking to show, so the overlay badge is skipped there instead of
     // labelling every card with the same "Search result" text.
@@ -2243,18 +3103,19 @@ function renderCharts(games, searchMode) {
     // of 512x512 PNG, and loading them all up front is what made this tab
     // expensive. The URL rides on data-src so it can be dropped and restored.
     const thumb = g.thumbUrl
-      ? `<img class="chart-card-thumb" data-src="${esc(g.thumbUrl)}" alt="" onerror="_chartThumbError(this)"/>`
+      ? `<img class="chart-card-thumb" data-src="${esc(g.thumbUrl)}" alt="" onload="this.classList.add('loaded')" onerror="_chartThumbError(this)"/>`
       : `<div class="chart-card-thumb-ph"><span class="material-icons-round">videogame_asset</span></div>`;
     return `<div class="chart-card" style="animation-delay:${i * 12}ms" onclick="openGameModal(${i})" title="View game info">
       ${thumb}
       ${rankLabel}
       <div class="chart-card-body">
         <div class="chart-card-name">${esc(g.name || 'Unknown')}</div>
-        ${players ? `<div class="chart-card-stat"><span class="material-icons-round">people</span>${players}</div>` : ''}
+        <div class="chart-card-stat">${players ? `<span><span class="material-icons-round">people</span>${players}</span>` : ''}${typeof g.likes === 'number' ? `<span><span class="material-icons-round">thumb_up</span>${g.likes}%</span>` : ''}</div>
       </div>
     </div>`;
   }).join('');
   _chartObserveImages();
+  if (featured) loadChartFeature(games[0]);
 }
 
 async function searchRobloxGames(query) {
@@ -2264,19 +3125,33 @@ async function searchRobloxGames(query) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = r.data;
 
-  // Extract game universe IDs from omni-search results
-  const contents = d.searchResults || [];
-  const gameSection = contents.find(s => s.contentGroupType === 'Game') || contents[0];
-  if (!gameSection || !gameSection.contents) return [];
-
-  const universeIds = gameSection.contents.map(c => c.contentId).filter(Boolean);
+  // omni-search returns one "Game" group per result (each holding a single
+  // content entry), so every Game group has to be collected; taking only the
+  // first group is what limited search to a single game. The entries already
+  // carry name, rootPlaceId and playerCount, so the games lookup below is
+  // only a fallback for anything missing them.
+  const games = (d.searchResults || [])
+    .filter(s => s.contentGroupType === 'Game')
+    .flatMap(s => s.contents || [])
+    .filter(c => !c.isSponsored && (c.universeId || c.contentId));
+  const seen = new Set();
+  const entries = games.filter(c => {
+    const uid = c.universeId || c.contentId;
+    if (seen.has(uid)) return false;
+    seen.add(uid);
+    return true;
+  });
+  const universeIds = entries.map(c => c.universeId || c.contentId);
   if (!universeIds.length) return [];
 
-  // Fetch full game details
-  const detailsRes = await api.robloxGet(`https://games.roblox.com/v1/games?universeIds=${universeIds.join(',')}`);
-  const details = detailsRes.ok ? detailsRes.data : { data: [] };
   const detailMap = {};
-  (details.data || []).forEach(g => { detailMap[g.id] = g; });
+  entries.forEach(c => { detailMap[c.universeId || c.contentId] = { rootPlaceId: c.rootPlaceId, name: c.name, playing: c.playerCount, likes: likePct(c.totalUpVotes, c.totalDownVotes) }; });
+  const missing = universeIds.filter(uid => !detailMap[uid].rootPlaceId || !detailMap[uid].name);
+  if (missing.length) {
+    const detailsRes = await api.robloxGet(`https://games.roblox.com/v1/games?universeIds=${missing.join(',')}`);
+    const details = detailsRes.ok ? detailsRes.data : { data: [] };
+    (details.data || []).forEach(g => { detailMap[g.id] = { rootPlaceId: g.rootPlaceId, name: g.name, playing: g.playing }; });
+  }
 
   // Fetch thumbnails
   let thumbMap = {};
@@ -2294,6 +3169,7 @@ async function searchRobloxGames(query) {
     const det = detailMap[uid] || {};
     return {
       universeId: uid,
+      likes: det.likes ?? null,
       placeId: det.rootPlaceId,
       name: det.name,
       playerCount: det.playing,
@@ -2337,27 +3213,9 @@ function filterCharts(val) {
   }, 420);
 }
 
-let _gameModal = {};
 function openGameModal(idx) {
   const g = _chartGameMap[idx];
-  if (!g) return;
-  _gameModal = g;
-  const thumb = document.getElementById('game-modal-thumb');
-  if (g.thumbUrl) { thumb.src = g.thumbUrl; thumb.style.display = 'block'; }
-  else { thumb.style.display = 'none'; }
-  document.getElementById('game-modal-name').textContent = g.name || 'Unknown';
-  document.getElementById('game-modal-id').textContent = g.placeId || '-';
-  const stat = typeof g.playerCount === 'number' ? Number(g.playerCount).toLocaleString() + ' playing now' : '';
-  document.getElementById('game-modal-stat').textContent = stat;
-  openModal('m-game');
-}
-function copyGameId() {
-  const id = String(_gameModal.placeId || '');
-  if (!id) return;
-  navigator.clipboard.writeText(id).then(() => toast('Place ID copied', 'ok'));
-}
-function gamePageOpen() {
-  if (_gameModal.placeId) api.openExternal('https://www.roblox.com/games/' + _gameModal.placeId);
+  if (g) openGameView(g);
 }
 
 
@@ -2377,18 +3235,23 @@ async function mixInit() {
   document.getElementById('mix-gfx-auto').checked = gfxAuto;
   const gfxVal = clampInt(gfxRaw, 1, 21, 10);
   document.getElementById('mix-gfx').value = gfxVal;
-  document.getElementById('mix-gfx-val').textContent = gfxAuto ? 'Auto' : gfxVal;
+  document.getElementById('mix-gfx-val').textContent = gfxAuto ? '' : gfxVal;
   document.getElementById('mix-gfx').disabled = gfxAuto;
 
   // FPS - read from GlobalBasicSettings_13.xml via new ipc
   try {
     const fpsCap = await api.readFpsCap();
-    const fpsUnl = (fpsCap === 0);
+    // fps_write stores "unlimited" (0) as 9999, which is what reads back, so
+    // checking only for 0 showed the toggle off again after every restart.
+    const fpsUnl = (fpsCap === 0 || fpsCap >= 9999);
     document.getElementById('mix-fps-unl').checked = fpsUnl;
     document.getElementById('mix-fps').value = fpsUnl ? 60 : Math.max(10, fpsCap || 60);
     document.getElementById('mix-fps-val').textContent = fpsUnl ? '\u221e' : (fpsCap || 60);
     document.getElementById('mix-fps').disabled = fpsUnl;
   } catch {}
+
+  const fpsLock = document.getElementById('mix-fps-lock');
+  if (fpsLock) fpsLock.checked = settings.fpsCapLock !== false;
 
   // Volume
   const vol = (typeof settings.masterVolume === 'number') ? settings.masterVolume : 100;
@@ -2403,32 +3266,50 @@ async function mixInit() {
 
 // FPS
 function mixFpsInput(v) {
-  v = parseInt(v, 10);
-  const snapped = v >= 9999 ? 9999 : Math.round(v / 5) * 5;
+  // The slider steps by 1 so exact refresh rates (144, 165) are reachable;
+  // snapping to 5s here used to undo every arrow-key press.
+  v = Math.min(9999, Math.max(10, parseInt(v, 10) || 60));
   const sl = document.getElementById('mix-fps');
-  if (sl.value != snapped) sl.value = snapped;
-  document.getElementById('mix-fps-val').textContent = snapped;
+  document.getElementById('mix-fps-val').textContent = v;
   updateSliderFill(sl);
 }
 async function mixFpsUnlToggle() {
   const unl = document.getElementById('mix-fps-unl').checked;
   document.getElementById('mix-fps').disabled = unl;
   if (unl) {
-    document.getElementById('mix-fps-val').textContent = '\u221e';
-    const res = await api.writeFpsCap(0);
-    if (res && res.ok === false) toast(res.error || 'Failed to set FPS cap', 'err');
-    else toast('FPS set to unlimited (next launch)', 'ok');
+    document.getElementById('mix-fps-val').textContent = '∞';
+    await mixWriteFps(0, 'FPS set to unlimited');
   } else {
     mixFpsCommit();
   }
 }
+
 async function mixFpsCommit() {
   if (document.getElementById('mix-fps-unl').checked) return;
   const v = parseInt(document.getElementById('mix-fps').value, 10);
   document.getElementById('mix-fps-val').textContent = v;
-  const res = await api.writeFpsCap(v);
-  if (res && res.ok === false) { toast(res.error || 'Failed to set FPS cap', 'err'); return; }
-  toast('FPS cap: ' + v + ' (next launch)', 'ok');
+  await mixWriteFps(v, 'FPS cap: ' + v);
+}
+
+// The backend remembers the written cap as the one its FPS guard protects,
+// so a successful write also arms the protection (unless it's switched off).
+async function mixWriteFps(cap, okMsg) {
+  let res;
+  try { res = await api.writeFpsCap(cap); } catch (e) { res = { ok: false, error: e?.message || String(e) }; }
+  if (!res || res.ok === false) { toast((res && res.error) || 'Failed to set FPS cap', 'err'); return false; }
+  settings.fpsCap = res.value;
+  logEntry('info', 'system', okMsg, { fpsCap: res.value });
+  toast(okMsg + (settings.fpsCapLock !== false ? ' (next launch, protected)' : ' (next launch)'), 'ok');
+  return true;
+}
+
+async function mixFpsLockToggle() {
+  const on = document.getElementById('mix-fps-lock').checked;
+  settings.fpsCapLock = on;
+  let saved = false;
+  try { saved = await api.saveSettings({ fpsCapLock: on }); } catch {}
+  if (!saved) { toast('Could not save FPS protection', 'err'); return; }
+  toast(on ? 'FPS cap protected from overwrites' : 'FPS cap protection off', on ? 'ok' : 'err');
 }
 
 function clampInt(v, min, max, dflt) {
@@ -2437,7 +3318,17 @@ function clampInt(v, min, max, dflt) {
   return Math.max(min, Math.min(max, n));
 }
 
+function paintAcctSub() {
+  const sub = document.getElementById('acct-sub');
+  if (!sub) return;
+  const saved = accounts.length;
+  if (!saved) sub.textContent = 'No accounts saved';
+  else if (_mixRunning > 0) sub.textContent = `${_mixRunning} running \u00b7 ${saved} saved`;
+  else sub.textContent = `${saved} account${saved !== 1 ? 's' : ''} saved`;
+}
+
 function setRunningBadges(n) {
+  paintAcctSub();
   const txt = n + ' running';
   const tb = document.getElementById('tb-running');
   if (tb) {
@@ -2464,6 +3355,17 @@ async function pollWatchedIds() {
   let ids;
   try { ids = await api.getWatchedIds(); } catch { return; }
   const watched = new Set(ids);
+  // Reconcile the launched set for every account, not just the ones with a
+  // card on screen: an account hidden by search/filter otherwise kept a stale
+  // state, which then drove the group Kill buttons, tracking and the filter.
+  let setChanged = false;
+  for (const a of accounts) {
+    const live = watched.has(a.id);
+    if (live !== _launchedIds.has(a.id)) {
+      if (live) { _launchedIds.add(a.id); relayoutSoon(a.id); } else _launchedIds.delete(a.id);
+      setChanged = true;
+    }
+  }
   // Cards that drop out of the active filter get pulled from the DOM
   // directly instead of a full render(), which would replay entrance
   // animations and flicker on every poll tick.
@@ -2481,19 +3383,114 @@ async function pollWatchedIds() {
         dot.classList.toggle('launched', shouldBeLive);
         dot.title = shouldBeLive ? 'Launched' : 'Not launched';
       }
-      if (shouldBeLive) _launchedIds.add(id); else _launchedIds.delete(id);
+      if (shouldBeLive) { _launchedIds.add(id); relayoutSoon(id); } else _launchedIds.delete(id);
       if (dropFromFilter && dropFromFilter(id)) card.remove();
     }
   });
+  if (setChanged) refreshPkgAvatarStatus();
+  if (_layoutOn && !_launchedIds.size) { _layoutOn = false; _layoutUsed = null; paintLayoutBtn(); }
+  syncRunTimes();
 }
 function pollStatus() {
   pollRunningCount();
-  pollWatchedIds();
+  pollWatchedIds().then(pollMemoryUsage);
+  pollSystemStats();
+}
+
+function formatPct(n) {
+  return n === null || n === undefined ? '–' : (n < 10 ? n.toFixed(1) : Math.round(n)) + '%';
+}
+function setMeter(cell, percent, text) {
+  cell.querySelector('.meter i').style.width = Math.max(0, Math.min(100, percent || 0)) + '%';
+  cell.querySelector('b').textContent = text;
+}
+
+// Whole-PC load for the Accounts toolbar, only measured while it's on screen.
+let _sysPollBusy = false, _sysPolls = 0;
+async function pollSystemStats() {
+  if (_sysPollBusy || _appAway || document.hidden || !document.getElementById('page-accounts').classList.contains('active')) return;
+  _sysPollBusy = true;
+  try { paintSystemStats((await api.getSystemStats()) || {}); } catch {} finally { _sysPollBusy = false; }
+}
+function paintSystemStats(s) {
+  _sysPolls++;
+  [['sys-cpu', s.cpu], ['sys-mem', s.memory], ['sys-gpu', s.gpu]].forEach(([id, value]) => {
+    const cell = document.getElementById(id);
+    setMeter(cell, value, formatPct(value));
+    cell.classList.toggle('high', (value || 0) >= 90);
+  });
+  // A PC without GPU counters: the first reading is always empty, so wait for a later one.
+  document.getElementById('sys-gpu').style.display = s.gpu === null && _sysPolls > 2 ? 'none' : '';
+}
+
+// Working-set readout on running cards. Skipped while nothing is running, so
+// an idle app makes no extra backend calls.
+let _memPollBusy = false;
+let _lastMemUsage = {}; // kept so a re-render can repaint the readout at once
+function formatMb(mb) {
+  return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : Math.round(mb) + ' MB';
+}
+async function pollMemoryUsage() {
+  if (_memPollBusy) return;
+  if (!_launchedIds.size) {
+    _lastMemUsage = {};
+    paintMemUsage();
+    return;
+  }
+  _memPollBusy = true;
+  let usage = {};
+  try { usage = (await api.getMemoryUsage()) || {}; } catch {} finally { _memPollBusy = false; }
+  _lastMemUsage = usage;
+  paintMemUsage();
+}
+function paintMemUsage() {
+  const usage = _lastMemUsage;
+  document.querySelectorAll('.card-mem').forEach(el => {
+    const id = el.id.slice(4);
+    const u = _launchedIds.has(id) ? usage[id] : null;
+    if (!u) { el.textContent = ''; el.title = ''; return; }
+    if (!el.firstChild) el.innerHTML = '<span class="stat-meter">CPU<span class="meter"><i></i></span><b></b></span><span class="stat-meter">Memory<span class="meter"><i></i></span><b></b></span>';
+    const [cpuCell, memCell] = el.children;
+    setMeter(cpuCell, u.cpuPercent, formatPct(u.cpuPercent));
+    // Without a limit the bar is measured against 4 GB, a heavy client's usual ceiling.
+    const pct = u.workingSetMb / (u.limitMb || 4096) * 100;
+    setMeter(memCell, pct, formatMb(u.workingSetMb));
+    memCell.classList.toggle('high', !!u.limitMb && pct >= 85);
+    el.title = 'RAM in use: ' + formatMb(u.workingSetMb) + ' (private ' + formatMb(u.privateMb) + ')'
+      + (u.limitMb ? ' · limit ' + formatMb(u.limitMb) : ' · no limit');
+  });
+  paintRunTimes();
+}
+// Every 3 seconds while the window is in view, every 15 while it's minimized or in
+// the tray. The backend still pushes launches and closes the moment they happen;
+// this poll only repairs anything those pushes missed.
+const STATUS_POLL_MS = 3000, STATUS_POLL_AWAY_MS = 15000;
+let _appAway = false;
+async function appOutOfSight() {
+  if (document.hidden) return true;
+  try { return !!(await api.isOutOfSight?.()); } catch { return false; }
 }
 function startStatusPoll() {
   if (_statusPoll) return;
-  pollStatus();
-  _statusPoll = setInterval(pollStatus, 3000);
+  _statusPoll = -1;
+  let ticking = false;
+  const tick = async () => {
+    if (ticking) return; // one loop only, even when a wake-up lands mid-tick
+    ticking = true;
+    clearTimeout(_statusPoll);
+    try {
+      _appAway = await appOutOfSight();
+      pollStatus();
+    } finally {
+      ticking = false;
+      _statusPoll = setTimeout(tick, _appAway ? STATUS_POLL_AWAY_MS : STATUS_POLL_MS);
+    }
+  };
+  // Coming back into view catches up at once instead of waiting out the slow wait.
+  const wake = () => { if (_appAway) tick(); };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
+  window.addEventListener('focus', wake);
+  tick();
 }
 
 async function mixRefreshRunning() {
@@ -2559,131 +3556,6 @@ async function setRenderEngine(engine) {
   toast('Rendering engine: ' + (RENDER_ENGINE_LABELS[engine] || 'Automatic') + ' (next launch)', 'ok');
 }
 
-// ── Roblox deployment channel (Settings > Roblox) ─────────────────────────
-const ROBLOX_CHANNEL_LABELS = { current: 'Current', custom: 'Custom' };
-
-function robloxChannelUpdateUI(channel) {
-  const label = document.getElementById('cdd-channel-label');
-  if (label) label.textContent = ROBLOX_CHANNEL_LABELS[channel] || 'Current';
-  document.querySelectorAll('#cdd-channel-menu .cdd-option').forEach(o =>
-    o.classList.toggle('selected', o.dataset.value === (channel || 'current')));
-}
-
-function setRobloxChannel(channel) {
-  settings.robloxChannel = channel;
-  api.saveSettings({ robloxChannel: channel });
-  robloxChannelUpdateUI(channel);
-  rddRowUpdate();
-  closeAllCdd();
-  toast('Roblox version: ' + (ROBLOX_CHANNEL_LABELS[channel] || 'Current') + (settings.lockChannel ? '' : ' (enable Lock version to apply)'), 'ok');
-  if (settings.lockChannel) detectRobloxVersion();
-}
-
-// The install/pick UI only matters for the Custom option; Current
-// resolves its hash from WEAO instead.
-function rddRowUpdate() {
-  const row = document.getElementById('rdd-row');
-  if (row) row.style.display = settings.robloxChannel === 'custom' ? '' : 'none';
-}
-
-function normalizeVerHash(v) {
-  let h = (v || '').trim();
-  if (!h) return '';
-  if (!h.startsWith('version-')) h = 'version-' + h;
-  return /^version-[0-9a-f]{16}$/i.test(h) ? h.toLowerCase() : null;
-}
-
-function rddSetStatus(msg, kind) {
-  const el = document.getElementById('rdd-status');
-  if (!el) return;
-  el.textContent = msg;
-  el.style.color = kind === 'err' ? 'var(--red)' : (kind === 'ok' ? 'var(--green)' : '');
-}
-
-// Downloads and unpacks the build for a hash into Roblox's Versions folder.
-// Progress arrives as rdd:progress events from the Rust side, one per package.
-async function rddInstall() {
-  const h = normalizeVerHash(document.getElementById('set-verhash').value);
-  if (!h) { rddSetStatus('Enter a version hash (16 hex characters).', 'err'); return; }
-  const btn = document.getElementById('rdd-btn');
-  const label = btn ? btn.querySelector('span:last-child') : null;
-  const wrap = document.getElementById('rdd-bar-wrap');
-  if (btn) { btn.disabled = true; if (label) label.textContent = 'Installing'; }
-  if (wrap) wrap.style.display = '';
-  rddSetStatus('Starting...', '');
-  try {
-    const r = await api.rddInstall(h);
-    rddSetStatus((r && r.alreadyInstalled) ? (h + ' is already installed.') : ('Installed ' + h + '.'), 'ok');
-    setRobloxVersionPick(h);
-  } catch (e) {
-    rddSetStatus(typeof e === 'string' ? e : (e.message || 'Install failed'), 'err');
-  } finally {
-    if (btn) { btn.disabled = false; if (label) label.textContent = 'Install'; }
-    if (wrap) wrap.style.display = 'none';
-    const bar = document.getElementById('rdd-bar');
-    if (bar) bar.style.width = '0%';
-  }
-}
-
-// Picking an installed build is what actually decides which client launches:
-// spawn_roblox_direct selects this exact version folder when Lock version is on.
-function setRobloxVersionPick(hash) {
-  settings.customVersion = hash;
-  api.saveSettings({ customVersion: hash });
-  const vh = document.getElementById('set-verhash');
-  if (vh) vh.value = hash;
-  rddRenderList();
-  if (settings.lockChannel && settings.robloxChannel === 'custom') detectRobloxVersion();
-}
-
-async function rddDelete(hash) {
-  if (!confirm('Delete ' + hash + ' from disk?')) return;
-  try {
-    await api.rddDeleteVersion(hash);
-    toast('Deleted ' + hash, 'ok');
-    if (settings.customVersion === hash) setRobloxVersionPick('');
-    else rddRenderList();
-  } catch (e) {
-    toast(typeof e === 'string' ? e : (e.message || 'Delete failed'), 'err');
-  }
-}
-
-async function rddRenderList() {
-  const list = document.getElementById('rdd-list');
-  if (!list) return;
-  let versions = [];
-  try { versions = await api.rddListVersions(); } catch {}
-  if (!versions.length) {
-    list.innerHTML = '<div class="sr-desc">No Roblox builds found on this machine.</div>';
-    return;
-  }
-  const sel = settings.customVersion || '';
-  const selLabel = versions.find(v => v.version === sel);
-  const triggerText = selLabel
-    ? esc(selLabel.version) + (selLabel.installedAt ? ' &nbsp;·&nbsp; ' + new Date(selLabel.installedAt).toLocaleDateString() : '')
-    : (versions.length ? 'Select a version' : 'No builds installed');
-  const opts = versions.map(v => {
-    const when = v.installedAt ? new Date(v.installedAt).toLocaleDateString() : '';
-    const isSelected = v.version === sel;
-    return '<div class="cdd-option' + (isSelected ? ' selected' : '') + '" data-value="' + esc(v.version) + '" role="button" tabindex="0"'
-      + ' onclick="setRobloxVersionPick(\'' + esc(v.version) + '\');closeAllCdd();rddRenderList()">'
-      + '<div class="cdd-opt-left"><div class="cdd-opt-name" style="font-family:\'JetBrains Mono\',monospace;font-size:11.5px">' + esc(v.version) + '</div>'
-      + (when ? '<div class="cdd-opt-desc">Installed ' + when + '</div>' : '')
-      + '</div>'
-      + '<span class="material-icons-round cdd-check">check</span>'
-      + '<button type="button" class="btn btn-ghost" title="Delete this version" onclick="event.stopPropagation();rddDelete(\'' + esc(v.version) + '\')" style="padding:0 6px;height:28px;margin-left:4px;flex-shrink:0"><span class="material-icons-round" style="font-size:14px">delete</span></button>'
-      + '</div>';
-  }).join('');
-  list.innerHTML = '<div class="cdd" id="cdd-rddver" style="width:100%">'
-    + '<div class="cdd-trigger" id="cdd-rddver-trigger" onclick="toggleCdd(\'rddver\')" role="button" tabindex="0" aria-label="Installed Roblox version">'
-    + '<span class="cdd-label" id="cdd-rddver-label" style="font-family:\'JetBrains Mono\',monospace;font-size:11.5px">' + triggerText + '</span>'
-    + '<span class="material-icons-round cdd-arrow">expand_more</span>'
-    + '</div>'
-    + '<div class="cdd-menu" id="cdd-rddver-menu">' + opts + '</div>'
-    + '</div>';
-}
-
-
 // Smoothly fill the slider track up to the current value.
 function updateSliderFill(el) {
   if (!el) return;
@@ -2706,7 +3578,7 @@ function mixGfxAutoToggle() {
   const auto = document.getElementById('mix-gfx-auto').checked;
   document.getElementById('mix-gfx').disabled = auto;
   if (auto) {
-    document.getElementById('mix-gfx-val').textContent = 'Auto';
+    document.getElementById('mix-gfx-val').textContent = '';
     mixWriteFlag(FF_GFX, null);
     toast('Graphics set to Auto', 'ok');
   } else {
@@ -2751,7 +3623,9 @@ async function mixKillAll() {
   const btns = Array.from(document.querySelectorAll('.kill-roblox-btn'));
   if (!btns.length || btns[0].disabled) return;
   btns.forEach(b => { b.disabled = true; });
-  const res = await api.killAllRoblox();
+  // A rejected invoke used to leave every Kill button disabled until restart.
+  let res;
+  try { res = await api.killAllRoblox(); } catch (e) { res = { ok: false, error: e?.message || String(e) }; }
   // Reset all dots / launched state.
   _launchedIds.clear();
   document.querySelectorAll('.card.is-live').forEach(c => c.classList.remove('is-live'));
@@ -2779,7 +3653,9 @@ async function mixApply() {
 
   mixGfxCommit();
   mixFpsCommit();
-  try { await api.setRobloxVolume(document.getElementById('mix-vol').value); } catch {}
+  // parseInt: roblox_set_volume takes a number, and the raw slider string made
+  // the invoke reject (silently, in this catch), so Apply never set volume.
+  try { await api.setRobloxVolume(parseInt(document.getElementById('mix-vol').value, 10)); } catch {}
 
   btn.disabled = false;
   btn.innerHTML = orig;
@@ -2850,7 +3726,6 @@ function genSetType(value, label, desc) {
 // works for either service: BLOX- = BloxGen, MG_ = Altgen (altgen.me/docs).
 async function genCombo() {
   const apiKey = (document.getElementById('gen-apikey').value || '').trim();
-  try { localStorage.setItem('bloxgen_apikey', document.getElementById('gen-apikey').value); } catch {}
 
   let provider;
   if (apiKey.startsWith('BLOX-')) provider = 'bloxgen';
@@ -2867,6 +3742,7 @@ async function genCombo() {
 
   try {
     const d = provider === 'bloxgen' ? await genBloxgen(apiKey) : await genAltgen(apiKey);
+    if (d.cookie) d.cookie = normalizeCookie(d.cookie);
 
     out.value = d.username + ':' + d.password;
     out.select();
@@ -2917,8 +3793,6 @@ async function genAltgen(apiKey) {
 let _genHistory = [];
 let _lastGenData = null;
 
-const GH_ITEM_H = 36;
-const GH_VISIBLE = 4;
 const GH_BATCH = 40;
 let _ghRendered = 0;
 
@@ -2927,23 +3801,14 @@ function genRenderHistory() {
   const sc = document.getElementById('gen-history-sc');
   if (!list || !sc) return;
   if (_genHistory.length === 0) {
-    // Hiding the section alone left old rows sitting in the DOM; the next
-    // _ghPrepend() (on the very next Generate) would reveal the section
-    // again with every "cleared" row still there, underneath the new one,
-    // now pointing at the wrong _genHistory index. Clear actually has to
-    // empty the list, not just hide its container.
-    sc.style.display = 'none';
+    // The rows have to go too: _ghPrepend() on the next Generate would keep
+    // any left here, pointing at the wrong _genHistory index.
+    sc.classList.add('is-empty');
     list.innerHTML = '';
-    list.style.maxHeight = '';
     _ghRendered = 0;
     return;
   }
-  sc.style.display = '';
-  if (_genHistory.length > GH_VISIBLE) {
-    list.style.maxHeight = (GH_ITEM_H * GH_VISIBLE) + 'px';
-  } else {
-    list.style.maxHeight = '';
-  }
+  sc.classList.remove('is-empty');
   _ghRendered = 0;
   list.innerHTML = '';
   _ghAppendBatch(list);
@@ -2964,8 +3829,8 @@ function _ghAppendBatch(list) {
     row.innerHTML =
       '<span class="gh-user"><span style="color:var(--t3)">User:</span> ' + esc(h.username) + '  <span style="color:var(--t3)">Pass:</span> ' + esc(h.password) + '</span>' +
       '<div class="gh-actions">' +
-        '<button class="btn btn-ghost"><span class="material-icons-round" style="font-size:15px">content_copy</span></button>' +
-        '<button class="btn btn-ghost"><span class="material-icons-round" style="font-size:15px">person_add</span></button>' +
+        '<button class="btn btn-ghost" title="Copy username:password"><span class="material-icons-round" style="font-size:15px">content_copy</span></button>' +
+        '<button class="btn btn-ghost" title="Sign in and add to your accounts"><span class="material-icons-round" style="font-size:15px">person_add</span></button>' +
       '</div>';
     const btns = row.querySelectorAll('button');
     btns[0].onclick = () => genHistCopy(i);
@@ -2980,8 +3845,7 @@ function _ghPrepend() {
   const list = document.getElementById('gen-history-list');
   const sc = document.getElementById('gen-history-sc');
   if (!list || !sc) return;
-  sc.style.display = '';
-  if (_genHistory.length > GH_VISIBLE) list.style.maxHeight = (GH_ITEM_H * GH_VISIBLE) + 'px';
+  sc.classList.remove('is-empty');
   // Re-index existing rows so their onclick indices stay correct
   list.querySelectorAll('.gen-hist-item').forEach(row => {
     const old = +row.dataset.idx;
@@ -2999,8 +3863,8 @@ function _ghPrepend() {
   row.innerHTML =
     '<span class="gh-user"><span style="color:var(--t3)">User:</span> ' + esc(h.username) + '  <span style="color:var(--t3)">Pass:</span> ' + esc(h.password) + '</span>' +
     '<div class="gh-actions">' +
-      '<button class="btn btn-ghost"><span class="material-icons-round" style="font-size:15px">content_copy</span></button>' +
-      '<button class="btn btn-ghost"><span class="material-icons-round" style="font-size:15px">person_add</span></button>' +
+      '<button class="btn btn-ghost" title="Copy username:password"><span class="material-icons-round" style="font-size:15px">content_copy</span></button>' +
+      '<button class="btn btn-ghost" title="Sign in and add to your accounts"><span class="material-icons-round" style="font-size:15px">person_add</span></button>' +
     '</div>';
   const btns = row.querySelectorAll('button');
   btns[0].onclick = () => genHistCopy(0);
@@ -3015,29 +3879,49 @@ function genHistCopy(i) {
   navigator.clipboard.writeText(h.username + ':' + h.password).then(() => toast('Copied ' + h.username, 'ok'));
 }
 
+// Adds a generated account, preferring a fresh sign-in with its password. That
+// session belongs to this connection, whereas the provider's cookie was issued
+// to theirs and may not outlive the move. The cookie is only the fallback, for
+// when the sign-in can't finish. Throws with the reason if neither works.
+const LOGIN_WINDOW_CLOSED = 'Login window closed';
+async function _genImportAccount(g) {
+  let loginError = null;
+  if (g.username && g.password) {
+    const r = await api.loginWithCredentials(g.username, g.password);
+    if (r && r.success && r.cookie) {
+      return api.addAccount({ username: r.username || g.username, userId: r.userId || null, cookie: r.cookie, gameTarget: '', nickname: '' });
+    }
+    loginError = (r && r.error) || 'Login failed';
+    if (loginError === LOGIN_WINDOW_CLOSED) return null; // the user backed out
+  }
+  const cookie = normalizeCookie(g.cookie);
+  if (cookie) {
+    const res = await api.validateCookie(cookie);
+    if (res && res.ok) return api.addAccount({ username: res.username, userId: res.userId, cookie, gameTarget: '', nickname: '' });
+    if (!loginError) loginError = (res && res.reason) || 'Cookie invalid or expired';
+  }
+  throw new Error(loginError || 'No password or cookie available for this account');
+}
+
 async function genHistAdd(i) {
   const h = _genHistory[i];
-  if (!h || !h.cookie) { toast('No cookie available for this account', 'err'); return; }
+  if (!h) return;
   try {
-    const res = await api.validateCookie(h.cookie);
-    if (!res || !res.username) { toast('Cookie invalid or expired', 'err'); return; }
-    const a = await api.addAccount({ username: res.username, userId: res.userId, cookie: h.cookie, gameTarget: '', nickname: '' });
-    if (a) { accounts.push(a); render(); toast('Added ' + res.username + ' to accounts', 'ok'); }
-  } catch(e) { toast('Failed to add: ' + e.message, 'err'); }
+    const a = await _genImportAccount(h);
+    if (a) { accounts.push(a); render(); toast('Added ' + a.username + ' to accounts', 'ok'); }
+  } catch(e) { toast('Failed to add: ' + (e.message || e), 'err'); }
 }
 
 async function genAddToAccounts() {
-  if (!_lastGenData || !_lastGenData.username || !_lastGenData.password) { toast('No account to add', 'err'); return; }
+  if (!_lastGenData || !_lastGenData.username) { toast('No account to add', 'err'); return; }
   const btn = document.getElementById('gen-add-btn');
   const btnLabel = btn ? btn.querySelector('span:last-child') : null;
   if (btn) { btn.disabled = true; if (btnLabel) btnLabel.textContent = 'Adding'; }
   try {
-    const r = await api.loginWithCredentials(_lastGenData.username, _lastGenData.password);
-    if (!r.success || !r.cookie) { toast(r.error || 'Login failed', 'err'); if (btn) { btn.disabled = false; if (btnLabel) btnLabel.textContent = 'add'; } return; }
-    const a = await api.addAccount({ username: r.username || _lastGenData.username, userId: r.userId || null, cookie: r.cookie, gameTarget: '', nickname: '' });
-    if (a) { accounts.push(a); render(); toast('Added ' + (r.username || _lastGenData.username) + ' to accounts!', 'ok'); }
-    if (btn) { btn.disabled = false; if (btnLabel) btnLabel.textContent = 'add'; }
-  } catch(e) { toast('Failed: ' + (e.message || e), 'err'); if (btn) { btn.disabled = false; if (btnLabel) btnLabel.textContent = 'add'; } }
+    const a = await _genImportAccount(_lastGenData);
+    if (a) { accounts.push(a); render(); toast('Added ' + a.username + ' to accounts!', 'ok'); }
+  } catch(e) { toast('Failed: ' + (e.message || e), 'err'); }
+  if (btn) { btn.disabled = false; if (btnLabel) btnLabel.textContent = 'Add'; }
 }
 
 // Tracked so a Generate right after Clear can wait for the clear's write to land first.
@@ -3114,23 +3998,23 @@ function renderTrackingPage() {
   if (!container) return;
   const timedIds = getTrackingTimedIds();
   if (!accounts.length) {
-    container.innerHTML = '<div class="tracking-empty">No accounts yet. Add an account first.</div>';
+    container.innerHTML = `<div class="empty"><span class="material-icons-round">radar</span><div class="empty-title">No accounts yet</div><div class="empty-sub">Add an account to capture its window and post it to your webhook.</div><button class="btn btn-primary" style="margin-top:8px" onclick="goTo('accounts');openLogin()">Add account</button></div>`;
     return;
   }
   container.innerHTML = accounts.map(a => {
     const regions = getTrackingRegions(a.id);
     const metaText = regions.length ? (regions.length + ' spot' + (regions.length !== 1 ? 's' : '')) : 'Full window';
     return `
-    <div class="tracking-account">
+    <div class="tracking-account${_launchedIds.has(a.id) ? ' live' : ''}">
       <span class="pm-av" id="tracking-av-${a.id}">${esc((a.username || '?')[0].toUpperCase())}</span>
       <div class="tracking-account-info">
         <div class="tracking-account-name">${esc(a.nickname || a.username || 'Unknown')}</div>
-        <div class="tracking-account-meta">${metaText}</div>
+        <div class="tracking-account-meta"><span class="trk-dot"></span>${_launchedIds.has(a.id) ? 'Running' : 'Not running'} · ${metaText}</div>
       </div>
       <div class="tracking-account-actions">
-        <label class="toggle sm" title="Include in timed capture"><input type="checkbox" data-track-timed="${a.id}" onchange="toggleTimedTrackingAccount('${a.id}')" ${timedIds.has(a.id) ? 'checked' : ''}/><span class="toggle-trk"></span></label>
-        <button class="btn btn-ghost" onclick="openRegionPicker('${a.id}')"><span class="material-icons-round" style="font-size:15px">crop</span></button>
-        <button class="btn btn-ghost" data-track-capture="${a.id}" onclick="captureTrackingNow('${a.id}')" ${_launchedIds.has(a.id) ? '' : 'disabled'}><span class="material-icons-round" style="font-size:15px">photo_camera</span></button>
+        <label class="strip-afk" title="Include in timed capture">Auto<span class="toggle"><input type="checkbox" data-track-timed="${a.id}" onchange="toggleTimedTrackingAccount(${jsArg(a.id)})" ${timedIds.has(a.id) ? 'checked' : ''}/><span class="toggle-trk"></span></span></label>
+        <button class="btn btn-ghost" title="Outline capture spots" onclick="openRegionPicker(${jsArg(a.id)})"><span class="material-icons-round" style="font-size:15px">crop</span>Spots</button>
+        <button class="btn btn-ghost" title="Capture now" data-track-capture="${a.id}" onclick="captureTrackingNow(${jsArg(a.id)})" ${_launchedIds.has(a.id) ? '' : 'disabled'}><span class="material-icons-round" style="font-size:15px">photo_camera</span>Capture</button>
       </div>
     </div>`;
   }).join('');
@@ -3236,6 +4120,9 @@ async function openRegionPicker(id) {
   renderRegionBoxes();
   let res;
   try { res = await api.trackingCapturePreview(id); } catch { res = null; }
+  // The picker may have been closed, or reopened for another account, while
+  // the capture ran; this preview (or its error) no longer belongs on screen.
+  if (_regionPickerAccountId !== id || !document.getElementById('m-region-picker').classList.contains('open')) return;
   if (!res || !res.ok) {
     toast((res && res.error) || 'Could not capture a preview', 'err');
     closeRegionPicker();
@@ -3341,4 +4228,88 @@ function saveRegionPicker() {
     });
     renderRegionBoxes();
   });
+})();
+
+// ── Sliding hover pill for tab-style selectors ──
+// One gray pill per bar follows the pointer from option to option (the springy
+// motion is in styles.css). Active options don't get it; they have the white pill.
+const HV_HOSTS = '#topnav, .tab-bar, .gv-seg, .view-toggle';
+const HV_ITEMS = '.nav-item, .tab-btn, .gv-seg button, .vt';
+function hvMove(host, item) {
+  let pill = host._hv;
+  if (!pill || !pill.isConnected) {
+    pill = document.createElement('span');
+    pill.className = 'hv-pill';
+    pill.setAttribute('aria-hidden', 'true');
+    host.prepend(pill);
+    host._hv = pill;
+  }
+  host._hvItem = item;
+  if (item.classList.contains('active') || item.disabled) { pill.style.opacity = '0'; return; }
+  const h = host.getBoundingClientRect(), r = item.getBoundingClientRect();
+  const appear = pill.style.opacity !== '1';
+  if (appear) pill.style.transition = 'none'; // first hover: show in place, then slide from there
+  pill.style.left = (r.left - h.left - host.clientLeft + host.scrollLeft) + 'px';
+  pill.style.top = (r.top - h.top - host.clientTop + host.scrollTop) + 'px';
+  pill.style.width = r.width + 'px';
+  pill.style.height = r.height + 'px';
+  if (appear) { void pill.offsetWidth; pill.style.transition = ''; }
+  pill.style.opacity = '1';
+}
+document.addEventListener('pointerover', e => {
+  if (!(e.target instanceof Element)) return;
+  const item = e.target.closest(HV_ITEMS), host = item?.closest(HV_HOSTS);
+  if (item && host) hvMove(host, item);
+}, true);
+document.addEventListener('pointerout', e => {
+  if (!(e.target instanceof Element)) return;
+  const host = e.target.closest(HV_HOSTS);
+  if (host?._hv && !(e.relatedTarget instanceof Element && host.contains(e.relatedTarget))) host._hv.style.opacity = '0';
+}, true);
+document.addEventListener('click', e => {
+  const host = e.target instanceof Element && e.target.closest(HV_HOSTS);
+  if (host?._hvItem) setTimeout(() => hvMove(host, host._hvItem), 0); // the clicked option just became active
+}, true);
+
+// ── Tooltips ──
+// Replaces the system tooltip (which can't be animated): any element with a title
+// shows this one instead, after a short wait, popping in near the pointer's target.
+(function initTips() {
+  const tip = document.createElement('div');
+  tip.id = 'ui-tip';
+  tip.setAttribute('role', 'tooltip');
+  document.body.append(tip);
+  let cur = null, timer = 0;
+  function hide() { clearTimeout(timer); timer = 0; cur = null; tip.classList.remove('show'); }
+  function show(el, text) {
+    if (!el.isConnected) return;
+    const snap = tip.classList.contains('show'); // sliding from another tip
+    tip.textContent = text;
+    const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    const below = r.top < h + 16;
+    const x = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2));
+    const y = below ? r.bottom + 8 : r.top - h - 8;
+    if (!snap) tip.classList.add('snap'); // from hidden: appear at the spot, only slide when moving between tips
+    tip.style.setProperty('--tx', x + 'px');
+    tip.style.setProperty('--ty', y + 'px');
+    tip.style.setProperty('--to', `${Math.round(r.left + r.width / 2 - x)}px ${below ? '0' : '100%'}`);
+    if (!snap) { void tip.offsetWidth; tip.classList.remove('snap'); }
+    tip.classList.add('show');
+  }
+  document.addEventListener('pointerover', e => {
+    if (!(e.target instanceof Element)) return;
+    const el = e.target.closest('[title],[data-tip]');
+    if (el === cur) return;
+    if (!el) { hide(); return; }
+    if (el.hasAttribute('title')) { el.dataset.tip = el.getAttribute('title'); el.removeAttribute('title'); }
+    const text = el.dataset.tip;
+    if (!text) { hide(); return; }
+    clearTimeout(timer);
+    cur = el;
+    timer = setTimeout(() => show(el, text), tip.classList.contains('show') ? 60 : 420);
+  }, true);
+  document.addEventListener('pointerout', e => {
+    if (cur && !(e.relatedTarget instanceof Element && cur.contains(e.relatedTarget))) hide();
+  }, true);
+  ['pointerdown', 'wheel', 'keydown', 'blur'].forEach(t => addEventListener(t, hide, true));
 })();
