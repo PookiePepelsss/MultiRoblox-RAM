@@ -235,13 +235,6 @@ Locally on your PC, encrypted with Windows DPAPI by default, or with AES-256-GCM
 
 Using this software is at your own risk. The author is not responsible for any bans, suspensions, or other action taken against your account. MultiRoblox is not affiliated with Roblox Corporation.
 
-<br>
-
-## Credits
-
-The Auto layout window technique follows the approach of [RoALT](https://github.com/inspectsoftware/RoALT) (MIT). See [THIRD_PARTY_NOTICES.md](MultiRoblox/THIRD_PARTY_NOTICES.md).
-
-<br>
 
 ## Support
 
