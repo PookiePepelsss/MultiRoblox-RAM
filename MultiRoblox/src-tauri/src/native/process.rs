@@ -354,7 +354,7 @@ pub async fn trim_account_memory(app: &AppHandle, state: &AppState, account_id: 
 
 // Waits for specific PIDs to disappear. Scoped to our own processes: a
 // blanket "no RobloxPlayerBeta.exe anywhere" wait would never be satisfied
-// while an instance the user started outside MultiRoblox is still open.
+// while an instance the user started outside Vanta Manager is still open.
 async fn wait_for_pids_closed(app: &AppHandle, state: &AppState, pids: &[u32], max_wait: Duration) {
     let started = std::time::Instant::now();
     loop {

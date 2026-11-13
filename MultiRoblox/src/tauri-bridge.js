@@ -46,6 +46,10 @@
     setRobloxVolume: (percent) => invoke('roblox_set_volume', { percent }),
     killAllRoblox: () => invoke('roblox_kill_all'),
     killOneRoblox: (id) => invoke('roblox_kill_one', { id }),
+    // Hides a running account's window entirely (show=false) or brings it back.
+    setWindowVisible: (id, show) => invoke('roblox_window_visibility', { id, show }),
+    // Settings' Hide Roblox windows: applies to running clients left on "Default".
+    hideAllWindows: (hide) => invoke('roblox_hide_all', { hide }),
     getRunningCount: () => invoke('roblox_running_count'),
     getWatchedIds: () => invoke('roblox_watched_ids'),
     trimRobloxMemory: () => invoke('roblox_trim_memory'),
@@ -98,6 +102,9 @@
 
     readFFlags: () => invoke('fflag_read'),
     writeFFlags: (flags) => invoke('fflag_write', { flags }),
+    // Custom flags from Roblox's allowlist, for every account or chosen ones.
+    loadCustomFFlags: () => invoke('custom_fflags_load'),
+    saveCustomFFlags: (list) => invoke('custom_fflags_save', { list }),
     readFpsCap: () => invoke('fps_read'),
     writeFpsCap: (cap) => invoke('fps_write', { cap }),
 
@@ -105,6 +112,7 @@
     onRobloxClosed: (cb) => listen('roblox:closed', (e) => cb(e.payload)),
     onRobloxStarted: (cb) => listen('roblox:started', (e) => cb(e.payload)),
     onRobloxCount: (cb) => listen('roblox:count', (e) => cb(e.payload)),
+    onRobloxHidden: (cb) => listen('roblox:hidden', (e) => cb(e.payload)),
     onLogEntry: (cb) => listen('log:entry', (e) => cb(e.payload)),
 
     getGameName: (placeId, cookie) => invoke('roblox_get_game_name', { placeIdOrTarget: placeId, cookie }),

@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MultiRoblox",
-  "version": "1.2.7",
+  "productName": "Vanta Manager",
+  "mainBinaryName": "VantaManager",
+  "version": "1.2.8",
   "identifier": "com.multiroblox.client",
   "build": {
     "frontendDist": "../src"
@@ -10,10 +11,10 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "MultiRoblox",
-        "width": 980,
-        "height": 760,
-        "minWidth": 945,
+        "title": "Vanta Manager",
+        "width": 1130,
+        "height": 746,
+        "minWidth": 1146,
         "minHeight": 755,
         "decorations": false,
         "transparent": false,
@@ -34,9 +35,9 @@
     ],
     "publisher": "PookiePepelsss",
     "copyright": "Copyright (c) 2026 PookiePepelsss",
-    "homepage": "https://github.com/PookiePepelsss/MultiRoblox-RAM",
+    "homepage": "https://github.com/PookiePepelsss/Vanta-Manager",
     "shortDescription": "Run and manage multiple Roblox accounts",
-    "longDescription": "MultiRoblox lets you run several Roblox clients at once and manage multiple accounts from a single dashboard.",
+    "longDescription": "Vanta Manager lets you run several Roblox clients at once and manage multiple accounts from a single dashboard.",
     "windows": {
       "nsis": {
         "installMode": "currentUser",

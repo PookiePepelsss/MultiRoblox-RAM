@@ -137,6 +137,7 @@ pub fn run() {
                             if let Some(w) = handle5.get_webview_window("main") {
                                 let _ = w.hide();
                             }
+                            tray::set_low_memory(&handle5, true);
                         }
                     }
                 });
@@ -182,6 +183,8 @@ pub fn run() {
             commands::roblox_set_volume,
             commands::roblox_kill_all,
             commands::roblox_kill_one,
+            commands::roblox_window_visibility,
+            commands::roblox_hide_all,
             commands::roblox_running_count,
             commands::roblox_watched_ids,
             commands::roblox_trim_memory,
@@ -191,6 +194,8 @@ pub fn run() {
             commands::roblox_get_json,
             commands::roblox_public_servers_as,
             commands::roblox_headshots,
+            commands::custom_fflags_load,
+            commands::custom_fflags_save,
             commands::roblox_follow_user,
             commands::altgen_generate,
             commands::roblox_launch,

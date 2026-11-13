@@ -21,6 +21,7 @@ pub fn show_main_window(app: tauri::AppHandle) {
     app.state::<AppState>()
         .ui_ready
         .store(true, Ordering::SeqCst);
+    crate::tray::set_low_memory(&app, false);
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
     }
@@ -309,32 +310,40 @@ pub fn gen_key_save(state: State<AppState>, key: String) -> Result<(), String> {
 // ---- fflags / fps ----
 #[tauri::command]
 pub fn fflag_read() -> Value {
-    crate::native::get_fflag_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str(s.trim_start_matches('\u{feff}')).ok())
-        .unwrap_or_else(|| Value::Object(Map::new()))
+    Value::Object(crate::native::profile::read_flags())
 }
 
 #[tauri::command]
 pub fn fflag_write(flags: Value) -> bool {
-    let paths = crate::native::fflag_paths();
-    let Some((primary, rest)) = paths.split_first() else {
-        return false;
-    };
-    let json = serde_json::to_string_pretty(&flags).unwrap_or_else(|_| "{}".into());
-    // Atomic: Roblox reads this file at startup, and a truncated one (crash
-    // or full disk mid-write) makes it ignore every flag. Only the primary
-    // copy decides success; the extra copy for a bootstrapper's active
-    // version folder is best-effort (see native::fflag_paths).
-    let ok = crate::jsonfile::write_atomic(primary, &json).is_ok();
-    if ok {
-        for p in rest {
-            if let Err(e) = crate::jsonfile::write_atomic(p, &json) {
-                eprintln!("[fflags] could not mirror to {}: {e}", p.display());
-            }
-        }
+    match flags {
+        Value::Object(map) => crate::native::profile::write_flags(&map),
+        _ => false,
     }
-    ok
+}
+
+/// The allowlisted flags the custom list can set, and the saved list.
+#[tauri::command]
+pub fn custom_fflags_load() -> Value {
+    let list = crate::settings::snapshot()
+        .get(crate::native::profile::CUSTOM_KEY)
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    json!({
+        "allowed": crate::native::profile::allowed_for_ui(),
+        "list": Value::Array(crate::native::profile::parse_entries(Some(&list)).into_iter().map(|e| match e.accounts {
+            Some(a) => json!({ "name": e.name, "value": e.value, "accounts": a }),
+            None => json!({ "name": e.name, "value": e.value }),
+        }).collect()),
+    })
+}
+
+/// Saves the custom list; returns what was kept (invalid entries dropped).
+#[tauri::command]
+pub fn custom_fflags_save(list: Value) -> Value {
+    match crate::native::profile::save_custom(&list) {
+        Ok(kept) => json!({ "ok": true, "list": kept }),
+        Err(e) => json!({ "ok": false, "error": e }),
+    }
 }
 
 #[tauri::command]
@@ -432,7 +441,7 @@ pub async fn roblox_kill_all(app: AppHandle, state: State<'_, AppState>) -> Resu
         "warn",
         "kill",
         &format!(
-            "Killing Roblox instances launched by MultiRoblox ({} running: {})",
+            "Killing Roblox instances launched by Vanta Manager ({} running: {})",
             ids.len(),
             if running_names.is_empty() {
                 "none".into()
@@ -443,6 +452,72 @@ pub async fn roblox_kill_all(app: AppHandle, state: State<'_, AppState>) -> Resu
         Some(json!({ "count": ids.len(), "accounts": running_names })),
     );
     Ok(crate::native::kill_all_roblox(&app, &state).await)
+}
+
+/// Hides a running account's window (no window, no taskbar button, nothing
+/// drawn) or brings it back. Ok(false) when it isn't running or has no window.
+#[tauri::command]
+pub async fn roblox_window_visibility(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    show: bool,
+) -> Result<bool, String> {
+    use tauri::Emitter;
+    let Some(pid) = state.account_pids.lock().unwrap().get(&id).copied() else {
+        return Ok(false);
+    };
+    crate::native::profile::note_manual_window(pid);
+    let cmd = format!("winmode|{pid}|{}", if show { "show" } else { "hide" });
+    let done = crate::helper::call(&app, &state, &cmd, crate::helper::DEFAULT_TIMEOUT)
+        .await
+        .map(|r| r.trim() == "1")
+        .unwrap_or(false);
+    if done {
+        let _ = app.emit("roblox:hidden", json!({ "id": id, "hidden": !show }));
+    }
+    Ok(done)
+}
+
+/// Settings' Hide Roblox windows switched on or off: hides (or puts back on
+/// the taskbar, minimized) every running client whose account window choice
+/// is "Default". Returns the account ids that changed.
+#[tauri::command]
+pub async fn roblox_hide_all(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hide: bool,
+) -> Result<Vec<String>, String> {
+    use tauri::Emitter;
+    let running: Vec<(String, u32)> = state
+        .account_pids
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(id, pid)| (id.clone(), *pid))
+        .collect();
+    let accounts = storage::load_accounts(&state);
+    let mut changed = Vec::new();
+    for (id, pid) in running {
+        let follows = accounts
+            .iter()
+            .find(|a| account_id(a) == Some(id.as_str()))
+            .map_or(true, crate::native::profile::follows_window_default);
+        if !follows {
+            continue;
+        }
+        crate::native::profile::note_manual_window(pid);
+        let cmd = format!("winmode|{pid}|{}", if hide { "hide" } else { "unhide" });
+        let done = crate::helper::call(&app, &state, &cmd, crate::helper::DEFAULT_TIMEOUT)
+            .await
+            .map(|r| r.trim() == "1")
+            .unwrap_or(false);
+        if done {
+            let _ = app.emit("roblox:hidden", json!({ "id": id, "hidden": hide }));
+            changed.push(id);
+        }
+    }
+    Ok(changed)
 }
 
 #[tauri::command]

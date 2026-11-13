@@ -1,7 +1,7 @@
 @echo off
 title Build
 cd /d "%~dp0"
-echo Building MultiRoblox executable...
+echo Building Vanta Manager executable...
 echo.
 
 where cargo >nul 2>&1
@@ -17,13 +17,13 @@ if exist "%CSC%" (
   echo csc.exe not found - building with the existing src-tauri\resources\RobloxNative.exe, which may be out of date
 )
 
-cargo build --release --manifest-path src-tauri\Cargo.toml --bin MultiRoblox
+cargo build --release --manifest-path src-tauri\Cargo.toml --bin VantaManager
 if errorlevel 1 (echo Build failed & pause & exit /b 1)
 
 if not exist dist mkdir dist
-copy /y "src-tauri\target\release\MultiRoblox.exe" "dist\MultiRoblox.exe" >nul
-if errorlevel 1 (echo Could not copy MultiRoblox.exe & pause & exit /b 1)
+copy /y "src-tauri\target\release\VantaManager.exe" "dist\VantaManager.exe" >nul
+if errorlevel 1 (echo Could not copy VantaManager.exe & pause & exit /b 1)
 
 echo.
-echo Done. Executable: dist\MultiRoblox.exe
+echo Done. Executable: dist\VantaManager.exe
 pause

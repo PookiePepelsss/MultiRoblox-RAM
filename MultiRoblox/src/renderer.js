@@ -278,7 +278,7 @@ async function continueInit() {
   startStatusPoll();
   if (settings.autoTrim) startAutoTrimLoop();
   startTrackingLoop();
-  logEntry('info', 'system', 'MultiRoblox started', { version: 'v1', accounts: accounts.length, platform: navigator.platform });
+  logEntry('info', 'system', 'Vanta Manager started', { version: 'v1', accounts: accounts.length, platform: navigator.platform });
   loadGenKey();
   try {
     const t = GEN_TYPES.find(x => x.value === localStorage.getItem('bloxgen_type'));
@@ -301,9 +301,11 @@ async function continueInit() {
   // caller. markLaunched() is idempotent, so the startAccount() success path
   // below calling it again once its own await resolves is harmless.
   api.onRobloxStarted(id => markLaunched(id));
+  api.onRobloxHidden?.(p => { if (p && p.id) setHiddenState(p.id, !!p.hidden); });
 
   api.onRobloxClosed(id => {
     _launchedIds.delete(id);
+    setHiddenState(id, false);
     syncRunTimes();
     const closedAcct = accounts.find(a => a.id === id);
     logEntry('info', 'close', `Roblox closed for ${closedAcct ? closedAcct.username : id}`, { accountId: id, username: closedAcct?.username || null, userId: closedAcct?.userId || null });
@@ -443,7 +445,7 @@ function applySettings() {
   if (encDesc) {
     encDesc.textContent = settings.keySet
       ? 'Cookies are encrypted with your key (scrypt + AES-256-GCM).'
-      : 'Cookies are encrypted with Windows DPAPI, tied to your Windows account. Set a key below to use a passphrase instead.';
+      : 'Cookies are encrypted with Windows DPAPI, tied to your Windows account. Set an encryption key to use a passphrase instead.';
   }
   const keyIn = document.getElementById('custom-key');
   if (keyIn) { keyIn.value = ''; keyIn.placeholder = settings.keySet ? 'Key is set, type to update it' : 'e.g. SecureKey1234@A#'; }
@@ -455,9 +457,6 @@ function applySettings() {
   if (afkIv) {
     const mins = Math.round(Math.min(settings.antiAfkInterval || 17 * 60, 17 * 60) / 60);
     afkIv.value = mins;
-    updateSliderFill(afkIv);
-    const afkIvVal = document.getElementById('set-antiafk-interval-val');
-    if (afkIvVal) afkIvVal.textContent = mins + ' min';
   }
   paintAntiAfkKey();
   layoutCfgLoad();
@@ -470,17 +469,13 @@ function applySettings() {
   if (trimIv) {
     const mins = settings.autoTrimIntervalMin || 5;
     trimIv.value = mins;
-    updateSliderFill(trimIv);
-    const trimIvVal = document.getElementById('set-autotrim-interval-val');
-    if (trimIvVal) trimIvVal.textContent = mins + ' min';
   }
+  const hideWin = document.getElementById('set-hidewindows');
+  if (hideWin) hideWin.checked = !!settings.hideWindows;
   const ramIv = document.getElementById('set-ramlimit');
-  if (ramIv) {
-    ramIv.value = Number(settings.ramLimitMb) || 0;
-    updateSliderFill(ramIv);
-    const ramVal = document.getElementById('set-ramlimit-val');
-    if (ramVal) ramVal.textContent = ramLimitLabel(settings.ramLimitMb);
-  }
+  if (ramIv) ramIv.value = Number(settings.ramLimitMb) > 0 ? Number(settings.ramLimitMb) : '';
+  agPaint();
+  if (agState().on) agApply(); // the file can be rewritten by a bootstrapper while the app is closed
   const relaunch = document.getElementById('set-autorelaunch');
   if (relaunch) relaunch.checked = !!settings.autoRelaunch;
   const lowPriority = document.getElementById('set-lowpriority');
@@ -521,13 +516,18 @@ function onAcctSearch(v) {
   clearTimeout(_searchTimer);
   _searchTimer = setTimeout(render, 120); // debounce so a long list isn't rebuilt on every keystroke
 }
-function toggleFilterMenu(e) { if (e) e.stopPropagation(); document.getElementById('filter-menu').classList.toggle('open'); }
+function toggleFilterMenu(e) {
+  if (e) e.stopPropagation();
+  const fm = document.getElementById('filter-menu');
+  if (fm.classList.contains('open') && !fm._closing) popClose(fm);
+  else popOpen(fm);
+}
 function setAcctFilter(f) {
   _acctFilter = f;
   try { localStorage.setItem('mr-acct-filter', (f === 'running' || f === 'idle') ? 'all' : f); } catch {}
   _gridAnimate = true;
   document.querySelectorAll('#filter-menu button').forEach(b => b.classList.toggle('active', b.dataset.f === f));
-  document.getElementById('filter-menu').classList.remove('open');
+  popClose(document.getElementById('filter-menu'));
   document.getElementById('filter-btn').classList.toggle('on', f !== 'all');
   render();
 }
@@ -542,7 +542,7 @@ function setAcctView(v) {
 }
 document.addEventListener('click', e => {
   const fm = document.getElementById('filter-menu');
-  if (fm && fm.classList.contains('open') && !e.target.closest('.filter-wrap')) fm.classList.remove('open');
+  if (fm && fm.classList.contains('open') && !e.target.closest('.filter-wrap')) popClose(fm);
 });
 
 function paintWelcome() {
@@ -584,13 +584,13 @@ function paintAntiAfkKey() {
   if (!btn) return;
   btn.textContent = vkName(antiAfkKeyOf());
   btn.classList.remove('listening');
-  const reset = document.getElementById('set-antiafk-key-reset');
-  if (reset) reset.style.visibility = antiAfkKeyOf() === 16 ? 'hidden' : '';
 }
 function setAntiAfkKey(vk) {
   settings.antiAfkKey = vk;
   api.saveSettings({ antiAfkKey: vk });
   paintAntiAfkKey();
+  const btn = document.getElementById('set-antiafk-key');
+  if (btn) { btn.classList.remove('key-set'); void btn.offsetWidth; btn.classList.add('key-set'); }
   toast('Anti-AFK will press ' + vkName(vk === 0 ? 16 : vk), 'ok');
 }
 let _keyPicking = false;
@@ -618,7 +618,6 @@ function antiAfkPickKey() {
   document.addEventListener('keydown', onKey, true);
   setTimeout(() => document.addEventListener('mousedown', onAway, true), 0);
 }
-function antiAfkResetKey() { setAntiAfkKey(0); }
 
 // ── Game previews on running tiles ──
 // A 160-pixel JPEG of each running window every 30 seconds, only while the app is in
@@ -793,12 +792,17 @@ async function relayoutTick(tries) {
   else _layoutPending.clear();
 }
 
-function antiAfkIntervalInput(v) {
-  document.getElementById('set-antiafk-interval-val').textContent = v + ' min';
-  updateSliderFill(document.getElementById('set-antiafk-interval'));
+// A number field: out-of-range or empty values snap back into its min..max.
+function clampField(el, fallback) {
+  const min = Number(el.min), max = Number(el.max);
+  let v = parseInt(el.value, 10);
+  if (!Number.isFinite(v)) v = fallback;
+  v = Math.min(max, Math.max(min, v));
+  el.value = v;
+  return v;
 }
 function antiAfkIntervalCommit() {
-  const mins = parseInt(document.getElementById('set-antiafk-interval').value, 10);
+  const mins = clampField(document.getElementById('set-antiafk-interval'), 17);
   const secs = mins * 60;
   settings.antiAfkInterval = secs;
   api.saveSettings({ antiAfkInterval: secs });
@@ -807,8 +811,9 @@ function antiAfkIntervalCommit() {
 
 // Silent trim; no toast/button spinner, just logs. Skips the tasklist
 // round-trip entirely when nothing is running.
-let _autoTrimTimer = null;
+let _autoTrimTimer = null, _autoTrimNext = 0;
 async function _autoTrimTick() {
+  _autoTrimNext = Date.now() + (settings.autoTrimIntervalMin || 5) * 60000;
   if (_mixRunning <= 0) return;
   let res;
   try { res = await api.trimRobloxMemory(); } catch { return; }
@@ -818,10 +823,29 @@ function startAutoTrimLoop() {
   stopAutoTrimLoop();
   const mins = settings.autoTrimIntervalMin || 5;
   _autoTrimTimer = setInterval(_autoTrimTick, mins * 60 * 1000);
+  _autoTrimNext = Date.now() + mins * 60000;
+  paintTrimTimer();
 }
 function stopAutoTrimLoop() {
   if (_autoTrimTimer) { clearInterval(_autoTrimTimer); _autoTrimTimer = null; }
+  _autoTrimNext = 0;
+  paintTrimTimer();
 }
+// Accounts strip: countdown to the next automatic trim ("Off" when auto trim is off).
+function paintTrimTimer() {
+  const el = document.getElementById('strip-trim-left'), box = document.getElementById('strip-trim-timer');
+  if (!el) return;
+  const on = !!(settings.autoTrim && _autoTrimNext);
+  box?.classList.toggle('off', !on);
+  if (box) box.title = on ? 'Time until the next automatic RAM trim' : 'Auto trim is off. Turn it on in Settings, Performance';
+  if (!on) { el.textContent = 'Off'; return; }
+  const left = Math.max(0, Math.round((_autoTrimNext - Date.now()) / 1000));
+  el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
+// The countdown ticks only while its element exists (it's not in the strip
+// right now), so no timer runs every second for nothing.
+setInterval(() => { if (!document.hidden && document.getElementById('strip-trim-left')) paintTrimTimer(); }, 1000);
+// Trim button on the Accounts strip. A manual trim also restarts the auto-trim countdown.
 function toggleAutoRelaunch() {
   const el = document.getElementById('set-autorelaunch');
   const on = el.checked;
@@ -851,6 +875,20 @@ function toggleProtectSignIn() {
   api.saveSettings({ protectSignIn: on });
   toast(on ? 'Sign-in protection on' : 'Sign-in protection off', on ? 'ok' : 'err');
 }
+async function toggleHideWindows() {
+  const el = document.getElementById('set-hidewindows');
+  const on = el.checked;
+  settings.hideWindows = on;
+  let saved = false;
+  try { saved = await api.saveSettings({ hideWindows: on }); } catch {}
+  if (!saved) { toast('Could not save Headless clients', 'err'); return; }
+  let changed = [];
+  try { changed = (await api.hideAllWindows(on)) || []; } catch {}
+  const n = changed.length;
+  const now = n ? ` (${n} running client${n === 1 ? '' : 's'} ${on ? 'went headless' : 'back on the taskbar'})` : '';
+  toast((on ? 'New clients will start headless' : 'New clients will start with a window') + now, on ? 'ok' : 'err');
+  logEntry('info', 'system', on ? 'Headless clients turned on' : 'Headless clients turned off', { changed: n });
+}
 function toggleLowPriority() {
   const el = document.getElementById('set-lowpriority');
   const on = el.checked;
@@ -866,7 +904,7 @@ function toggleHideToTray() {
   // Persist first, then reconcile the icon: the backend reads the saved
   // setting on every close, and apply_setting only creates/removes the icon.
   api.setHideToTray(on);
-  toast(on ? 'Closing will hide to the system tray' : 'Closing will quit MultiRoblox', on ? 'ok' : 'err');
+  toast(on ? 'Closing will hide to the system tray' : 'Closing will quit Vanta Manager', on ? 'ok' : 'err');
 }
 function toggleAutoTrim() {
   const el = document.getElementById('set-autotrim');
@@ -876,12 +914,8 @@ function toggleAutoTrim() {
   if (on) startAutoTrimLoop(); else stopAutoTrimLoop();
   toast(on ? 'Auto trim on' : 'Auto trim off', on ? 'ok' : 'err');
 }
-function autoTrimIntervalInput(v) {
-  document.getElementById('set-autotrim-interval-val').textContent = v + ' min';
-  updateSliderFill(document.getElementById('set-autotrim-interval'));
-}
 function autoTrimIntervalCommit() {
-  const mins = parseInt(document.getElementById('set-autotrim-interval').value, 10);
+  const mins = clampField(document.getElementById('set-autotrim-interval'), 5);
   settings.autoTrimIntervalMin = mins;
   api.saveSettings({ autoTrimIntervalMin: mins });
   if (settings.autoTrim) startAutoTrimLoop();
@@ -889,29 +923,19 @@ function autoTrimIntervalCommit() {
 }
 
 // ── RAM limiter (Settings > Performance) ─────────────────────────────────
-// 0 = off. The backend floors any real cap at 512 MB, so the slider's first
-// step past Off is the smallest value that actually takes effect.
-function ramLimitLabel(mb) {
-  mb = parseInt(mb, 10) || 0;
-  return mb > 0 ? formatMb(Math.max(512, mb)) : 'Off';
-}
-function ramLimitInput(v) {
-  document.getElementById('set-ramlimit-val').textContent = ramLimitLabel(v);
-  updateSliderFill(document.getElementById('set-ramlimit'));
-}
+// Empty or 0 = off. The backend floors any real cap at 512 MB, so smaller
+// values are raised to that and the field shows what was actually saved.
 async function ramLimitCommit() {
-  let mb = parseInt(document.getElementById('set-ramlimit').value, 10) || 0;
-  if (mb > 0 && mb < 512) mb = 512;
-  // Keep the thumb on the value that was actually saved (256 rounds up).
-  const ramSl = document.getElementById('set-ramlimit');
-  if (parseInt(ramSl.value, 10) !== mb) { ramSl.value = mb; ramLimitInput(mb); }
+  const ramIn = document.getElementById('set-ramlimit');
+  let mb = Math.max(0, parseInt(ramIn.value, 10) || 0);
+  if (mb > 0) mb = Math.min(Number(ramIn.max) || 16384, Math.max(512, mb));
+  ramIn.value = mb > 0 ? mb : '';
   settings.ramLimitMb = mb;
   let saved = false;
   try { saved = await api.saveSettings({ ramLimitMb: mb }); } catch {}
   if (!saved) { toast('Could not save the RAM limit', 'err'); return; }
   logEntry('info', 'system', mb ? `RAM limit per instance set to ${mb} MB` : 'RAM limit per instance turned off', { limitMb: mb });
   toast(mb ? 'RAM limit: ' + formatMb(mb) + ' per instance' : 'RAM limit off', 'ok');
-  pollMemoryUsage();
 }
 
 // ── Roblox install picker (Settings > Roblox) ─────────────────────────────
@@ -934,7 +958,10 @@ async function installsInit() {
         + ' · ' + i.versions.length + ' build' + (i.versions.length === 1 ? '' : 's'))).join('');
   installUpdateUI(settings.robloxInstall || '');
   const desc = document.getElementById('install-desc');
-  if (desc && !_installs.length) desc.textContent = 'No Roblox installation found. Install Roblox (or a bootstrapper) and reopen this tab.';
+  if (desc && !_installs.length) {
+    desc.textContent = 'No Roblox installation found. Install Roblox (or a bootstrapper) and reopen this tab.';
+    settingsDetailsInit(); // the text replaced the row's details chevron
+  }
 }
 function installUpdateUI(path) {
   const found = _installs.find(i => i.path.toLowerCase() === String(path || '').toLowerCase());
@@ -962,12 +989,24 @@ function toggleCdd(name) {
   const open = menu.classList.contains('open');
   closeAllCdd();
   if (open) return;
-  // Open upward when the list would run past the bottom of the window.
+  openCddMenu(trigger, menu);
+}
+function openCddMenu(trigger, menu) {
+  // Open upward only when the list fits above and not below, measured inside
+  // the scrolling area that would clip it. When it fits neither way, open
+  // downward and scroll that area so the whole list shows.
   const box = trigger.getBoundingClientRect();
   const height = menu.offsetHeight + 16;
-  menu.classList.toggle('up', box.bottom + height > window.innerHeight && box.top - height > 68);
+  let area = trigger.parentElement;
+  while (area && area !== document.body && !/(auto|scroll)/.test(getComputedStyle(area).overflowY)) area = area.parentElement;
+  const r = area && area !== document.body ? area.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const below = Math.min(r.bottom, window.innerHeight) - box.bottom;
+  const above = box.top - Math.max(r.top, 68);
+  const up = below < height && above >= height;
+  menu.classList.toggle('up', up);
   trigger.classList.add('open');
   menu.classList.add('open');
+  if (!up && below < height) requestAnimationFrame(() => menu.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
 }
 function closeAllCdd() {
   document.querySelectorAll('.cdd-trigger.open').forEach(t => t.classList.remove('open'));
@@ -988,14 +1027,30 @@ function refreshAllSliderFills() {
 // options, then settles on the one it lands on.
 // Same-option moves (window resizes) jump straight there.
 const _reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+// Where a pill is drawn right now, mid-glide included, in its parent's own
+// coordinates (the glide is a transform, so its left/width are already the end).
+function pillNow(pill) {
+  const p = pill.offsetParent;
+  if (!p) return null;
+  const pr = p.getBoundingClientRect(), r = pill.getBoundingClientRect();
+  if (!r.width) return null;
+  const k = p.offsetWidth ? pr.width / p.offsetWidth : 1; // a pressed parent is scaled
+  return { left: (r.left - pr.left) / k - p.clientLeft, top: (r.top - pr.top) / k - p.clientTop, width: r.width / k };
+}
+// Moves a selector's highlight. Its box is set to the end position at once and
+// the glide is played as a transform, which the compositor runs on its own:
+// the pill stays smooth even while the page is busy drawing the new tab.
 function movePill(pill, to, from, glide = true) {
-  if (!from) {
-    const cs = getComputedStyle(pill); // mid-move this is where it is right now
-    from = { left: parseFloat(cs.left), top: parseFloat(cs.top), width: parseFloat(cs.width) };
-  }
   const running = pill.getAnimations().filter(a => a.id === 'pill-move' && a.playState === 'running');
   const t = pill._to;
   if (running.length && t && Math.abs(t.left - to.left) < 1 && Math.abs(t.width - to.width) < 1 && (to.top == null || t.top == null || Math.abs(t.top - to.top) < 1)) return; // already heading there
+  if (!from) {
+    from = running.length ? pillNow(pill) : null;
+    if (!from) {
+      const cs = getComputedStyle(pill);
+      from = { left: parseFloat(cs.left), top: parseFloat(cs.top), width: parseFloat(cs.width) };
+    }
+  }
   running.forEach(a => a.cancel());
   pill._to = to;
   pill.style.left = to.left + 'px';
@@ -1003,19 +1058,21 @@ function movePill(pill, to, from, glide = true) {
   if (to.top != null) pill.style.top = to.top + 'px';
   if (to.height != null) pill.style.height = to.height + 'px';
   const still = Math.abs(from.left - to.left) < 1 && Math.abs(from.width - to.width) < 1;
-  if (!glide || still || _reduceMotion.matches || !to.width || ![from.left, from.width].every(Number.isFinite)) return;
-  // The pill stretches out toward the new option, then its trailing edge catches up.
-  const spanL = Math.min(from.left, to.left);
-  const spanW = Math.max(from.left + from.width, to.left + to.width) - spanL;
-  const frames = [
-    { left: from.left + 'px', width: from.width + 'px' },
-    { offset: 0.4, left: spanL + 'px', width: spanW + 'px' },
-    { left: to.left + 'px', width: to.width + 'px' },
-  ];
-  if (to.top != null && Number.isFinite(from.top) && Math.abs(from.top - to.top) >= 1) {
-    [from.top, (from.top + to.top) / 2, to.top].forEach((t, i) => { frames[i].top = t + 'px'; });
-  }
-  pill.animate(frames, { id: 'pill-move', duration: 360, easing: 'cubic-bezier(.32,.72,.2,1)' });
+  if (!glide || still || _reduceMotion.matches || !to.width || ![from.left, from.width].every(Number.isFinite) || !from.width) return;
+  // The leading edge runs ahead and the trailing edge catches up, so the pill
+  // stretches a little toward the new option on the way.
+  const right = to.left > from.left;
+  const fromR = from.left + from.width, toR = to.left + to.width;
+  const midL = from.left + (to.left - from.left) * (right ? 0.3 : 0.75);
+  const midR = fromR + (toR - fromR) * (right ? 0.75 : 0.3);
+  const dy = to.top != null && Number.isFinite(from.top) ? from.top - to.top : 0;
+  const at = (l, w, y) => `translate(${l - to.left}px, ${y}px) scaleX(${w / to.width})`;
+  pill.style.transformOrigin = '0 50%';
+  pill.animate([
+    { transform: at(from.left, from.width, dy) },
+    { offset: 0.42, transform: at(midL, midR - midL, dy / 2) },
+    { transform: 'none' },
+  ], { id: 'pill-move', duration: 380, easing: 'cubic-bezier(.32,.72,.2,1)' });
 }
 
 // ── Tab motion (after RoALT, MIT; see THIRD_PARTY_NOTICES.md) ──
@@ -1109,25 +1166,41 @@ window.addEventListener('resize', () => {
   });
 });
 
+let _settingsTabNow = 'general';
+const SETTINGS_TABS = ['general', 'performance', 'roblox', 'privacy', 'themes'];
 function settingsTab(tab) {
+  const prevTab = _settingsTabNow;
+  const wasSearching = document.getElementById('page-settings')?.classList.contains('searching');
+  _settingsTabNow = tab;
+  const search = document.getElementById('st-search');
+  if (search && search.value) search.value = '';
+  settingsSearchClear();
   ['general','performance','roblox','privacy','themes'].forEach(t => {
     const panel = document.getElementById('stab-panel-' + t);
     const btn = document.getElementById('stab-' + t);
     if (panel) panel.style.display = t === tab ? '' : 'none';
     if (btn) btn.classList.toggle('active', t === tab);
   });
-  if (tab === 'performance') renderEngineInit();
+  if (prevTab !== tab || wasSearching) panelSwap(document.getElementById('stab-panel-' + tab), swapDir(SETTINGS_TABS, prevTab, tab));
+  if (tab === 'performance') { renderEngineInit(); agPaint(); }
   if (tab === 'roblox') installsInit();
   refreshAllSliderFills();
   positionTabSlider(document.getElementById('stab-general')?.closest('.tab-bar'));
 }
 
+// Pages that aren't shown can't be clicked or tabbed into (see .page in styles.css).
+document.querySelectorAll('.page:not(.active)').forEach(x => { x.inert = true; });
 function goTo(p) {
   if (p === 'themes') { goTo('settings'); settingsTab(p); return; }
   closeGameView();
-  document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+  const fromPage = document.querySelector('.page.active');
+  const navOrder = [...document.querySelectorAll('.nav-item')].map(n => n.id.replace(/^nav-/, ''));
+  const toPage = document.getElementById('page-' + p);
+  document.querySelectorAll('.page').forEach(x => { x.classList.remove('active'); x.inert = true; });
   document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
-  document.getElementById('page-' + p).classList.add('active');
+  toPage.classList.add('active');
+  toPage.inert = false;
+  pageSwap(fromPage, toPage, swapDir(navOrder, fromPage?.id.replace(/^page-/, ''), p));
   const navItem = document.getElementById('nav-' + p);
   navItem.classList.add('active');
   placeNavPill(navItem);
@@ -1196,12 +1269,30 @@ function placeNavPill(item = document.querySelector('#topnav .nav-item.active'))
 placeNavPill();
 window.addEventListener('resize', () => placeNavPill());
 document.fonts?.ready.then(() => placeNavPill());
-
 // When each running account started, kept across app restarts so the timer on a
 // client that is still open doesn't reset to zero.
 let _liveSince = {};
 try { _liveSince = JSON.parse(localStorage.getItem('live-since')) || {}; } catch {}
 
+// Accounts running headless: no window, no taskbar button (see the Headless window mode).
+const _hiddenIds = new Set();
+function setHiddenState(id, hidden) {
+  if (hidden === _hiddenIds.has(id)) return;
+  if (hidden) _hiddenIds.add(id); else _hiddenIds.delete(id);
+  document.querySelector(`.card[data-id="${CSS.escape(id)}"]`)?.classList.toggle('is-hidden', hidden);
+  paintRunTimes();
+}
+async function ctxToggleHidden(id) {
+  closeCardMenu();
+  const show = _hiddenIds.has(id);
+  const a = accounts.find(x => x.id === id);
+  const name = a ? (a.nickname || a.username || 'this account') : 'this account';
+  let ok = false;
+  try { ok = await api.setWindowVisible(id, show); } catch {}
+  if (!ok) { toast(show ? 'Could not find the window to show' : 'The window is not open yet', 'err'); return; }
+  setHiddenState(id, !show);
+  toast(show ? 'Showing ' + name : name + ' is now headless', 'ok');
+}
 function syncRunTimes() {
   let changed = false;
   _launchedIds.forEach(id => { if (!_liveSince[id]) { _liveSince[id] = Date.now(); changed = true; } });
@@ -1214,7 +1305,8 @@ function paintRunTimes() {
   document.querySelectorAll('.card.is-live .card-av').forEach(av => {
     const since = _liveSince[av.closest('.card').dataset.id];
     const mins = since ? Math.floor((Date.now() - since) / 60000) : 0;
-    av.dataset.run = mins < 1 ? 'Running' : mins < 60 ? `Running ${mins}m` : `Running ${Math.floor(mins / 60)}h ${mins % 60}m`;
+    const id = av.closest('.card').dataset.id;
+    av.dataset.run = (mins < 1 ? 'Running' : mins < 60 ? `Running ${mins}m` : `Running ${Math.floor(mins / 60)}h ${mins % 60}m`) + (_hiddenIds.has(id) ? ' · Headless' : '');
   });
 }
 
@@ -1254,6 +1346,7 @@ function showCardMenu(id, x, y) {
   menu.innerHTML = `
     <div class="ctx-header">${esc(a ? (a.nickname || a.username || 'Unknown') : id)}</div>
     ${isLive ? `<button class="ctx-item ctx-danger" onclick="ctxKill(${jsArg(id)})"><span class="material-icons-round">power_settings_new</span>Kill instance</button>` : ''}
+    ${isLive ? `<button class="ctx-item" onclick="ctxToggleHidden(${jsArg(id)})"><span class="material-icons-round">${_hiddenIds.has(id) ? 'visibility' : 'visibility_off'}</span>${_hiddenIds.has(id) ? 'Show window' : 'Go headless'}</button>` : ''}
     ${isLive ? `<button class="ctx-item" onclick="ctxTrim(${jsArg(id)})"><span class="material-icons-round">memory</span>Trim memory</button>` : ''}
     ${isLive ? `
     <div class="ctx-item ctx-has-sub">
@@ -1331,7 +1424,13 @@ function positionCardSubmenu(menu, vw, vh) {
   const overflowBelow = parent.getBoundingClientRect().top - 4 + subRect.height + CTX_EDGE_GAP - vh;
   if (overflowBelow > 0) sub.style.top = (-4 - overflowBelow) + 'px';
 }
-function closeCardMenu() { const m = document.getElementById('card-ctx-menu'); if (m) m.remove(); _ctxMenuId = null; }
+function closeCardMenu() {
+  const m = document.getElementById('card-ctx-menu');
+  _ctxMenuId = null;
+  if (!m) return;
+  m.removeAttribute('id');
+  popClose(m, true);
+}
 async function ctxKill(id) { closeCardMenu(); await killOne(id); }
 async function ctxTrim(id) {
   closeCardMenu();
@@ -1403,7 +1502,7 @@ function refreshPkgAvatarStatus() {
     const ids = (p.accountIds || []).filter(id => accounts.some(a => a.id === id));
     const running = ids.filter(id => _launchedIds.has(id)).length;
     const meta = card.querySelector('.pkg-meta');
-    meta.textContent = ids.length ? `${running}/${ids.length} running` : 'No accounts';
+    meta.textContent = !ids.length ? 'No accounts' : running ? `${running} of ${ids.length} running` : `${ids.length} account${ids.length === 1 ? '' : 's'}, none running`;
     meta.classList.toggle('live', running > 0);
     card.querySelector('.pkg-run-bar span').style.width = ids.length ? (running / ids.length * 100) + '%' : '0';
   });
@@ -1472,7 +1571,7 @@ function render() {
     card.addEventListener('contextmenu', e => { e.preventDefault(); showCardMenu(card.dataset.id, e.clientX, e.clientY); });
   });
   initDrag(fresh);
-  paintMemUsage(); // new cards start with empty readouts
+  paintRunTimes();
   paintPreviews();
   // A picture that never arrives falls back to the account's letter.
   setTimeout(() => document.querySelectorAll('.card-av.av-loading').forEach(av => av.classList.remove('av-loading')), 8000);
@@ -1493,7 +1592,6 @@ function cardMarkup(a, avMark, draftMark) {
         <div class="card-uid">${a.userId ? 'ID ' + esc(a.userId) : 'No ID'}</div>
       </div>
       <div class="card-game visible${a.gameTarget ? '' : ' none'}" id="gt-${a.id}" title="${esc(a.gameTarget || 'No game set. Edit the account to pick one')}">${a.gameTarget ? esc(truncate(_gameNameCache[a.id] || extractTargetLabel(a.gameTarget), 22)) : 'No game set'}</div>
-      <div class="card-mem" id="mem-${esc(a.id)}"></div>
       <div class="card-idle-note">Not running</div>
       <div class="card-follow">
         <label class="card-follow-label" for="follow-${esc(a.id)}">Username</label>
@@ -1645,7 +1743,16 @@ async function recheckAllCookies(force) {
   if (changed) render(); // rebuild once at the end so the cards match
   } finally { _recheckRunning = false; }
 }
-setInterval(() => { if (accounts.length) recheckAllCookies(false); }, 60000);
+const AWAY_RECHECK_MS = 15 * 60 * 1000;
+let _awayRecheckAt = 0;
+setInterval(() => {
+  if (!accounts.length) return;
+  if (_appAway || document.hidden) {
+    if (Date.now() - _awayRecheckAt < AWAY_RECHECK_MS) return;
+    _awayRecheckAt = Date.now();
+  }
+  recheckAllCookies(false);
+}, 60000);
 
 
 const _gameNameCache = {}; // accountId -> resolved game name
@@ -2124,6 +2231,7 @@ function openEdit(id) {
   document.getElementById('in-description').value = editAcc.description || '';
   document.getElementById('in-target').value = editAcc.gameTarget || '';
   document.getElementById('in-ramlimit').value = Number(editAcc.ramLimitMb) > 0 ? editAcc.ramLimitMb : '';
+  editPerfFill(editAcc);
   // Reset follow field/status; it's a lookup tool, not a saved value.
   document.getElementById('in-follow').value = '';
   followSetStatus("Finds the server they're in and fills the target above.", '');
@@ -2131,12 +2239,54 @@ function openEdit(id) {
   setTimeout(() => document.getElementById('in-nickname').focus(), 220);
 }
 
+// ── Per-account performance (FPS cap, graphics, window at launch) ──────────
+// Stored on the account as launchFps / launchGfx / launchWindow; the backend
+// writes them into Roblox's files right before this account's client starts.
+const EDIT_FPS_CHOICES = [10, 15, 20, 30, 45, 60, 90, 120, 144, 240, 9999];
+let _editWindow = '';
+function editPerfFill(a) {
+  const fps = document.getElementById('in-launch-fps');
+  fps.innerHTML = '<option value="">Same as the Mixer</option>' +
+    EDIT_FPS_CHOICES.map(v => `<option value="${v}">${v === 9999 ? 'Unlimited' : v + ' FPS'}</option>`).join('');
+  const f = Number(a.launchFps) || 0;
+  fps.value = EDIT_FPS_CHOICES.includes(f) ? String(f) : '';
+  if (f > 0 && !EDIT_FPS_CHOICES.includes(f)) { fps.insertAdjacentHTML('beforeend', `<option value="${f}">${f} FPS</option>`); fps.value = String(f); }
+  const gfx = document.getElementById('in-launch-gfx');
+  gfx.innerHTML = '<option value="">Same as the Mixer</option>' +
+    Array.from({ length: 21 }, (_, i) => i + 1).map(v => `<option value="${v}">${v}${v === 1 ? ' (lowest)' : v === 21 ? ' (highest)' : ''}</option>`).join('');
+  const g = Number(a.launchGfx) || 0;
+  gfx.value = g >= 1 && g <= 21 ? String(g) : '';
+  setEditWindow(['normal', 'small', 'minimized', 'hidden'].includes(a.launchWindow) ? a.launchWindow : '');
+  setEditAdv(a.launchAdvGfx === 'on' || a.launchAdvGfx === 'off' ? a.launchAdvGfx : '');
+}
+let _editAdv = '';
+function setEditAdv(v) {
+  _editAdv = v;
+  document.querySelectorAll('#in-launch-adv button').forEach(b => b.classList.toggle('active', b.dataset.v === v));
+  syncSeg(document.getElementById('in-launch-adv'));
+}
+function setEditWindow(v) {
+  _editWindow = v;
+  document.querySelectorAll('#in-launch-window button').forEach(b => b.classList.toggle('active', b.dataset.v === v));
+  syncSeg(document.getElementById('in-launch-window'));
+}
+function editPerfValues() {
+  const fps = parseInt(document.getElementById('in-launch-fps').value, 10);
+  const gfx = parseInt(document.getElementById('in-launch-gfx').value, 10);
+  return { launchFps: fps > 0 ? fps : 0, launchGfx: gfx >= 1 && gfx <= 21 ? gfx : 0, launchWindow: _editWindow, launchAdvGfx: _editAdv };
+}
+
+let _editTabNow = 'details';
 function editTab(tab) {
-  ['details', 'launch'].forEach(t => {
+  if (tab !== _editTabNow) panelSwap(document.getElementById('edit-panel-' + tab), swapDir(['details', 'launch', 'perf'], _editTabNow, tab));
+  _editTabNow = tab;
+  ['details', 'launch', 'perf'].forEach(t => {
     document.getElementById('edit-panel-' + t).style.display = t === tab ? '' : 'none';
   });
   document.querySelectorAll('#edit-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   syncSeg(document.getElementById('edit-tabs'));
+  // Measured only once visible; while hidden its highlight would size to nothing.
+  if (tab === 'perf') { syncSeg(document.getElementById('in-launch-window')); syncSeg(document.getElementById('in-launch-adv')); }
 }
 
 function normalizeTag(v) { return String(v || '').trim().slice(0, 12).toUpperCase(); }
@@ -2197,7 +2347,7 @@ async function saveEdit() {
   if (ramLimitMb > 0 && ramLimitMb < 512) ramLimitMb = 512;
   const ramChanged = (Number(editAcc.ramLimitMb) || 0) !== ramLimitMb;
   let updated;
-  try { updated = await api.updateAccount(id, { gameTarget: target, nickname, description, tag: normalizeTag(document.getElementById('in-tag').value) }); }
+  try { updated = await api.updateAccount(id, { gameTarget: target, nickname, description, tag: normalizeTag(document.getElementById('in-tag').value), ...editPerfValues() }); }
   catch (e) { toast('Save failed: ' + (e?.message || e), 'err'); return; }
   // accounts_update answers null when the id no longer exists; claiming
   // "Saved" there hid that the edit went nowhere.
@@ -2411,6 +2561,7 @@ function setPackageMode(id, mode) {
   renderPackages();
 }
 
+const PKG_MEMBERS_SHOWN = 8;
 function renderPackages() {
   const list = document.getElementById('pkg-list'), empty = document.getElementById('pkg-empty');
   if (!list) return;
@@ -2418,20 +2569,22 @@ function renderPackages() {
   empty.style.display = 'none';
   list.innerHTML = packages.map((p, i) => {
     const members = (p.accountIds || []).map(id => accounts.find(a => a.id === id)).filter(Boolean);
-    const shown = members.slice(0, 6);
+    const shown = members.slice(0, PKG_MEMBERS_SHOWN);
     const extra = members.length - shown.length;
-    const avatarsHtml = shown.map(m => `<div class="pkg-avatar${_launchedIds.has(m.id) ? ' online' : ''}" id="pkg-av-${p.id}-${m.id}" data-acc-id="${m.id}" data-uid="${esc(m.userId || '')}" data-uname="${esc(m.username || '')}" data-nick="${esc(m.nickname || '')}">${esc((m.username || '?')[0].toUpperCase())}<span class="pkg-avatar-dot"></span></div>`).join('')
-      + (extra > 0 ? `<div class="pkg-avatar more">+${extra}</div>` : '');
+    // One chip per account: its picture (filled in by loadPkgAvatar) and name.
+    const membersHtml = members.length
+      ? shown.map(m => `<div class="pkg-member">
+          <div class="pkg-avatar${_launchedIds.has(m.id) ? ' online' : ''}" id="pkg-av-${p.id}-${m.id}" data-acc-id="${m.id}" data-uid="${esc(m.userId || '')}" data-uname="${esc(m.username || '')}" data-nick="${esc(m.nickname || '')}">${esc((m.username || '?')[0].toUpperCase())}<span class="pkg-avatar-dot"></span></div>
+          <span class="pkg-member-name">${esc(m.nickname || m.username || 'Unknown')}</span>
+        </div>`).join('') + (extra > 0 ? `<button class="pkg-member more" onclick="openEditPackage(${jsArg(p.id)})" title="See every account in this group">+${extra} more</button>` : '')
+      : `<div class="pkg-members-empty">No accounts in this group yet.<button class="pkg-add-link" onclick="openEditPackage(${jsArg(p.id)})">Add accounts</button></div>`;
     return `
     <div class="pkg-card" data-id="${p.id}" style="animation-delay:${i * 18}ms">
       <div class="pkg-card-top">
-        <div class="sr-icon"><span class="material-icons-round">groups</span></div>
         <div class="pkg-card-info">
           <div class="pkg-name">${esc(p.name)}</div>
-          <div class="pkg-meta"></div>
-          <div class="pkg-run-bar"><span></span></div>
+          <div class="pkg-status"><span class="pkg-meta"></span><div class="pkg-run-bar"><span></span></div></div>
         </div>
-        <div class="pkg-avatars">${avatarsHtml}</div>
         <div class="pkg-card-actions">
           <button class="btn btn-edit" onclick="openEditPackage(${jsArg(p.id)})" title="Manage accounts" aria-label="Manage accounts">
             <span class="material-icons-round">group</span>
@@ -2441,16 +2594,17 @@ function renderPackages() {
           </button>
         </div>
       </div>
+      <div class="pkg-members">${membersHtml}</div>
       <div class="pkg-link-row">
         <div class="pkg-link-field">
           <span class="material-icons-round pkg-link-icon">link</span>
-          <input type="text" class="pkg-link-input" id="pkg-link-${p.id}" placeholder="Game ID or server link for everyone to join…"
+          <input type="text" class="pkg-link-input" id="pkg-link-${p.id}" placeholder="Game ID or server link" title="Game ID or server link for everyone in this group"
             value="${esc(p.link || '')}" onchange="setPackageLink(${jsArg(p.id)}, this.value)"
             onkeydown="if(event.key==='Enter'){this.blur();launchPackage(${jsArg(p.id)});}"/>
         </div>
         <div class="cdd pkg-mode" id="cdd-pkgmode-${p.id}">
           <div class="cdd-trigger" id="cdd-pkgmode-${p.id}-trigger" onclick="toggleCdd('pkgmode-${p.id}')" role="button" tabindex="0" aria-label="Where accounts join">
-            <span class="cdd-label">${esc(PKG_SERVER_MODES[p.serverMode || 'same'].label)}</span>
+            <span class="cdd-label">${esc((PKG_SERVER_MODES[p.serverMode] || PKG_SERVER_MODES.same).label)}</span>
             <span class="material-icons-round cdd-arrow">expand_more</span>
           </div>
           <div class="cdd-menu" id="cdd-pkgmode-${p.id}-menu">
@@ -2458,7 +2612,7 @@ function renderPackages() {
           </div>
         </div>
         <button class="btn btn-launch pkg-launch-btn" onclick="launchPackage(${jsArg(p.id)})" ${members.length ? '' : 'disabled'}>
-          Start All
+          <span class="material-icons-round">play_arrow</span>Start All
         </button>
         <button class="btn btn-del pkg-kill-btn" onclick="killPackage(${jsArg(p.id)})" title="Stop this group's accounts" aria-label="Stop this group's accounts" ${members.some(m => _launchedIds.has(m.id)) ? '' : 'disabled'}>
           <span class="material-icons-round">power_settings_new</span>
@@ -2468,7 +2622,7 @@ function renderPackages() {
     </div>`;
   }).join('');
   packages.forEach(p => {
-    (p.accountIds || []).slice(0, 6).forEach(id => {
+    (p.accountIds || []).filter(id => accounts.some(a => a.id === id)).slice(0, PKG_MEMBERS_SHOWN).forEach(id => {
       const m = accounts.find(a => a.id === id);
       if (m && m.userId) loadPkgAvatar(p.id, m.id, m.userId);
     });
@@ -2543,9 +2697,39 @@ function deletePackage(id) {
   confirmAction('Delete package "' + p.name + '"? The accounts themselves won\u2019t be removed.', () => {
     packages = packages.filter(x => x.id !== id);
     api.savePackages(packages);
-    renderPackages();
+    const list = document.getElementById('pkg-list');
+    const card = list && list.querySelector('.pkg-card[data-id="' + CSS.escape(id) + '"]');
+    if (card && !motionOff()) pkgRemoveCard(card, list);
+    else renderPackages();
     toast('Group deleted', 'err');
   });
+}
+
+// The card fades and shrinks away, then the groups after it slide into the gap
+// (a CSS animation per card, see .pkg-leaving and .pkg-shift in styles.css).
+function pkgRemoveCard(card, list) {
+  card.classList.add('pkg-leaving');
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    const rest = [...list.querySelectorAll('.pkg-card')].filter(c => c !== card);
+    const before = new Map(rest.map(c => [c, c.getBoundingClientRect()]));
+    card.remove();
+    if (!rest.length) { renderPackages(); return; } // the "no groups" message
+    for (const c of rest) {
+      const a = before.get(c), b = c.getBoundingClientRect();
+      const dx = a.left - b.left, dy = a.top - b.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+      c.style.setProperty('--fx', dx + 'px');
+      c.style.setProperty('--fy', dy + 'px');
+      c.classList.remove('pkg-shift');
+      void c.offsetWidth; // restart it if it was already running
+      c.classList.add('pkg-shift');
+    }
+  };
+  card.addEventListener('animationend', e => { if (e.target === card && e.animationName === 'pkg-out') finish(); });
+  setTimeout(finish, 450);
 }
 
 function setPackageLink(id, value) {
@@ -2641,7 +2825,7 @@ async function launchPackage(id) {
   }));
 
   if (targetsChanged) render();
-  if (btn) { btn.disabled = false; btn.innerHTML = 'Start All'; delete btn.dataset.busy; }
+  if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-icons-round">play_arrow</span>Start All'; delete btn.dataset.busy; }
   if (killBtn && killBtn.dataset.busy !== '1') killBtn.disabled = !members.some(m => _launchedIds.has(m.id));
   const wanted = members.length - skipped;
   if (!wanted) { toast('All accounts in "' + p.name + '" are already running', 'ok'); return; }
@@ -2694,9 +2878,7 @@ async function killPackage(id) {
 }
 
 function toggleKeyVisibility(inputId = 'custom-key', iconId = 'key-vis-icon') {
-  const input = document.getElementById(inputId), icon = document.getElementById(iconId);
-  if (input.type === 'password') { input.type = 'text'; icon.textContent = 'visibility_off'; }
-  else { input.type = 'password'; icon.textContent = 'visibility'; }
+  toggleSecret(document.getElementById(inputId), document.getElementById(iconId));
 }
 let _saveKeyTimer;
 function onKeyInput() {
@@ -2912,6 +3094,8 @@ function chartsOnLeave() {
 }
 
 function switchChartTab(tab) {
+  const order = [...document.querySelectorAll('#page-charts .tab-btn')].map(b => b.id.replace(/^ctab-/, ''));
+  if (tab !== chartTab) panelSwap(document.getElementById('charts-grid'), swapDir(order, chartTab, tab));
   chartTab = tab;
   document.querySelectorAll('#page-charts .tab-btn').forEach(t => t.classList.remove('active'));
   document.getElementById('ctab-' + tab).classList.add('active');
@@ -3224,7 +3408,126 @@ const FF_GFX = 'DFIntDebugFRMQualityLevelOverride';
 const FF_FPS = 'DFIntTaskSchedulerTargetFps';
 let _volTimer = null, _mixRunning = 0;
 
+// ── Custom FFlags (Mixer) ───────────────────────────────────────────────────
+// Roblox's allowlist only (the backend drops anything else). Each row is one
+// flag with one value, for every account or for the accounts picked; the same
+// flag can appear twice, e.g. off for everyone and on for two alts.
+const FF_INFO = {
+  DFIntCSGLevelOfDetailSwitchingDistance: 'Distance where unions and meshes switch to less detail',
+  DFIntCSGLevelOfDetailSwitchingDistanceL12: 'Detail switch distance, level 1 to 2',
+  DFIntCSGLevelOfDetailSwitchingDistanceL23: 'Detail switch distance, level 2 to 3',
+  DFIntCSGLevelOfDetailSwitchingDistanceL34: 'Detail switch distance, level 3 to 4',
+  FFlagHandleAltEnterFullscreenManually: 'Roblox handles Alt+Enter itself (False allows exclusive fullscreen)',
+  DFFlagTextureQualityOverrideEnabled: 'Allow forcing texture quality (needed by the next one)',
+  DFIntTextureQualityOverride: 'Texture quality, 0 lowest to 3 highest',
+  FIntDebugForceMSAASamples: 'Anti-aliasing samples: 0 off, 1, 2, 4 or 8',
+  DFFlagDisableDPIScale: 'Ignore Windows display scaling',
+  FFlagDebugSkyGray: 'Plain gray sky',
+  DFFlagDebugPauseVoxelizer: 'Pause lighting voxel updates (less CPU, lighting may look off)',
+  FIntFRMMaxGrassDistance: 'Grass draw distance, max (0 hides grass)',
+  FIntFRMMinGrassDistance: 'Grass draw distance, min',
+  FIntGrassMovementReducedMotionFactor: 'Grass movement (0 keeps it still)',
+};
+let _ffAllowed = [], _ffList = [], _ffSaveTimer = null, _ffPicking = -1;
+async function ffInit() {
+  let r = null;
+  try { r = await api.loadCustomFFlags(); } catch {}
+  _ffAllowed = (r && r.allowed) || [];
+  _ffList = ((r && r.list) || []).map(e => ({ ...e }));
+  // A flag saved as False back when there was a switch: on/off flags are always on now.
+  let fixed = false;
+  _ffList.forEach(e => { if (ffKind(e.name) === 'bool' && e.value !== 'True') { e.value = 'True'; fixed = true; } });
+  if (fixed) ffSaveSoon();
+  ffRender();
+}
+function ffKind(name) { return (_ffAllowed.find(f => f.name === name) || {}).kind || 'int'; }
+function ffScopeLabel(e) {
+  if (!e.accounts || !e.accounts.length) return 'All accounts';
+  const names = e.accounts.map(id => accounts.find(a => a.id === id)).filter(Boolean).map(a => a.nickname || a.username || 'Unknown');
+  return names.length === 1 ? names[0] : names.length + ' accounts';
+}
+function ffRender() {
+  const el = document.getElementById('ff-list');
+  if (!el) return;
+  if (!_ffList.length) {
+    el.innerHTML = '<div class="ff-empty">No custom flags yet.</div>';
+    return;
+  }
+  el.innerHTML = _ffList.map((e, i) => {
+    const kind = ffKind(e.name);
+    // On/off flags are always on: adding one is what turns it on.
+    const value = kind === 'bool'
+      ? ''
+      : `<input class="ff-num" inputmode="numeric" value="${esc(e.value)}" oninput="ffSet(${i},'value',this.value)" aria-label="Value"/>`;
+    const picker = _ffPicking === i ? `<div class="ff-pick">
+        <button class="mk-chip-lite${!e.accounts || !e.accounts.length ? ' on' : ''}" onclick="ffScopeAll(${i})">All accounts</button>
+        ${accounts.map(a => `<button class="mk-chip-lite${(e.accounts || []).includes(a.id) ? ' on' : ''}" onclick="ffToggleAcct(${i},${jsArg(a.id)})">${esc(a.nickname || a.username || 'Unknown')}</button>`).join('')}
+      </div>` : '';
+    return `<div class="ff-row">
+      <div class="ff-main">
+        <select class="field-select ff-name" onchange="ffSet(${i},'name',this.value)" aria-label="Flag">
+          ${_ffAllowed.map(f => `<option value="${esc(f.name)}" ${f.name === e.name ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}
+        </select>
+        ${value}
+        <button class="ff-scope${_ffPicking === i ? ' open' : ''}" onclick="ffTogglePick(${i})" title="Which accounts use this flag"><span class="material-icons-round">group</span><span>${esc(ffScopeLabel(e))}</span><span class="material-icons-round">expand_more</span></button>
+        <button class="ff-del" onclick="ffRemove(${i})" title="Remove" aria-label="Remove"><span class="material-icons-round">close</span></button>
+      </div>
+      <div class="ff-desc">${esc(FF_INFO[e.name] || '')}</div>
+      ${picker}
+    </div>`;
+  }).join('');
+}
+function ffAdd() {
+  const used = new Set(_ffList.map(e => e.name));
+  const pick = _ffAllowed.find(f => !used.has(f.name)) || _ffAllowed[0];
+  if (!pick) return;
+  _ffList.push({ name: pick.name, value: pick.kind === 'bool' ? 'True' : '0' });
+  _ffPicking = -1;
+  ffRender();
+  ffSaveSoon();
+  const rows = document.querySelectorAll('#ff-list > .ff-row');
+  rowGrow(rows[rows.length - 1], rows.length > 1);
+}
+function ffRemove(i) {
+  const row = document.querySelectorAll('#ff-list > .ff-row')[i];
+  const drop = () => { _ffList.splice(i, 1); _ffPicking = -1; ffRender(); ffSaveSoon(); };
+  if (!row || row.dataset.leaving) { if (!row) drop(); return; }
+  row.dataset.leaving = '1';
+  rowShrink(row, row.previousElementSibling || row.nextElementSibling).then(drop);
+}
+function ffSet(i, key, v) {
+  const e = _ffList[i]; if (!e) return;
+  e[key] = v;
+  if (key === 'name') { e.value = ffKind(v) === 'bool' ? 'True' : '0'; ffRender(); }
+  ffSaveSoon();
+}
+function ffTogglePick(i) { _ffPicking = _ffPicking === i ? -1 : i; ffRender(); }
+function ffScopeAll(i) { const e = _ffList[i]; if (!e) return; delete e.accounts; ffRender(); ffSaveSoon(); }
+function ffToggleAcct(i, id) {
+  const e = _ffList[i]; if (!e) return;
+  const set = new Set(e.accounts || []);
+  set.has(id) ? set.delete(id) : set.add(id);
+  if (set.size) e.accounts = [...set]; else delete e.accounts;
+  ffRender();
+  ffSaveSoon();
+}
+function ffSaveSoon() {
+  clearTimeout(_ffSaveTimer);
+  _ffSaveTimer = setTimeout(ffSave, 500);
+}
+async function ffSave() {
+  // Rows with an unfinished number stay on screen but aren't saved yet.
+  const ready = _ffList
+    .filter(e => ffKind(e.name) === 'bool' || /^-?\d+$/.test(String(e.value).trim()))
+    .map(e => ffKind(e.name) === 'bool' ? { ...e, value: 'True' } : e);
+  let r = null;
+  try { r = await api.saveCustomFFlags(ready); } catch (e) { r = { ok: false, error: e?.message || String(e) }; }
+  if (!r || !r.ok) { toast((r && r.error) || 'Could not save the custom flags', 'err'); return; }
+  toast('Custom flags saved. Used from the next launch', 'ok');
+}
+
 async function mixInit() {
+  ffInit();
   // Pull current values from saved Fast Flags + settings.
   let flags = {};
   try { flags = (await api.readFFlags()) || {}; } catch {}
@@ -3393,7 +3696,7 @@ async function pollWatchedIds() {
 }
 function pollStatus() {
   pollRunningCount();
-  pollWatchedIds().then(pollMemoryUsage);
+  pollWatchedIds();
   pollSystemStats();
 }
 
@@ -3423,43 +3726,8 @@ function paintSystemStats(s) {
   document.getElementById('sys-gpu').style.display = s.gpu === null && _sysPolls > 2 ? 'none' : '';
 }
 
-// Working-set readout on running cards. Skipped while nothing is running, so
-// an idle app makes no extra backend calls.
-let _memPollBusy = false;
-let _lastMemUsage = {}; // kept so a re-render can repaint the readout at once
 function formatMb(mb) {
   return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : Math.round(mb) + ' MB';
-}
-async function pollMemoryUsage() {
-  if (_memPollBusy) return;
-  if (!_launchedIds.size) {
-    _lastMemUsage = {};
-    paintMemUsage();
-    return;
-  }
-  _memPollBusy = true;
-  let usage = {};
-  try { usage = (await api.getMemoryUsage()) || {}; } catch {} finally { _memPollBusy = false; }
-  _lastMemUsage = usage;
-  paintMemUsage();
-}
-function paintMemUsage() {
-  const usage = _lastMemUsage;
-  document.querySelectorAll('.card-mem').forEach(el => {
-    const id = el.id.slice(4);
-    const u = _launchedIds.has(id) ? usage[id] : null;
-    if (!u) { el.textContent = ''; el.title = ''; return; }
-    if (!el.firstChild) el.innerHTML = '<span class="stat-meter">CPU<span class="meter"><i></i></span><b></b></span><span class="stat-meter">Memory<span class="meter"><i></i></span><b></b></span>';
-    const [cpuCell, memCell] = el.children;
-    setMeter(cpuCell, u.cpuPercent, formatPct(u.cpuPercent));
-    // Without a limit the bar is measured against 4 GB, a heavy client's usual ceiling.
-    const pct = u.workingSetMb / (u.limitMb || 4096) * 100;
-    setMeter(memCell, pct, formatMb(u.workingSetMb));
-    memCell.classList.toggle('high', !!u.limitMb && pct >= 85);
-    el.title = 'RAM in use: ' + formatMb(u.workingSetMb) + ' (private ' + formatMb(u.privateMb) + ')'
-      + (u.limitMb ? ' · limit ' + formatMb(u.limitMb) : ' · no limit');
-  });
-  paintRunTimes();
 }
 // Every 3 seconds while the window is in view, every 15 while it's minimized or in
 // the tray. The backend still pushes launches and closes the moment they happen;
@@ -3556,6 +3824,161 @@ async function setRenderEngine(engine) {
   toast('Rendering engine: ' + (RENDER_ENGINE_LABELS[engine] || 'Automatic') + ' (next launch)', 'ok');
 }
 
+// ── Advanced graphics (Settings > Performance) ───────────────────────────
+// A group of allowlisted graphics flags behind one switch, for every account.
+// The choices are kept even while it's off, so turning it back on restores
+// them. An account can override the switch (launchAdvGfx "on"/"off"); the
+// backend adds or removes the flags for that launch only. It also keeps these
+// flags out of the custom FFlag list. Saved as lighterRendering before the rename.
+const AG_FLAGS = ['FIntDebugForceMSAASamples', 'DFFlagTextureQualityOverrideEnabled', 'DFIntTextureQualityOverride', 'FIntFRMMaxGrassDistance', 'FIntFRMMinGrassDistance'];
+const AG_DEFAULT = { on: false, msaa: 1, texture: 0, grass: true };
+const AG_MSAA = { 1: 'x1', 2: 'x2', 4: 'x4', 8: 'x8' };
+const AG_TEXTURE = { 0: 'Lowest', 1: 'Low', 2: 'Medium', 3: 'High' };
+function agState() {
+  const s = Object.assign({}, AG_DEFAULT, settings.advancedGraphics || settings.lighterRendering || {});
+  if (!AG_MSAA[s.msaa]) s.msaa = AG_DEFAULT.msaa;
+  if (!AG_TEXTURE[s.texture]) s.texture = AG_DEFAULT.texture;
+  return s;
+}
+function agPaint() {
+  const s = agState();
+  const on = document.getElementById('set-advgfx');
+  if (on) on.checked = s.on;
+  const grass = document.getElementById('set-ag-grass');
+  if (grass) grass.checked = s.grass;
+  document.getElementById('ag-group')?.classList.toggle('off', !s.on);
+  const pick = (name, value, label) => {
+    const l = document.getElementById('cdd-' + name + '-label');
+    if (l) l.textContent = label;
+    document.querySelectorAll('#cdd-' + name + '-menu .cdd-option').forEach(o =>
+      o.classList.toggle('selected', o.dataset.value === String(value)));
+  };
+  pick('agmsaa', s.msaa, AG_MSAA[s.msaa]);
+  pick('agtex', s.texture, AG_TEXTURE[s.texture]);
+}
+// Puts the group's flags in the FFlag file (or takes them out when off).
+async function agApply() {
+  const s = agState();
+  let flags = {};
+  try { flags = (await api.readFFlags()) || {}; } catch {}
+  const before = JSON.stringify(flags);
+  for (const f of AG_FLAGS) delete flags[f];
+  if (s.on) {
+    flags.FIntDebugForceMSAASamples = String(s.msaa);
+    flags.DFFlagTextureQualityOverrideEnabled = 'True';
+    flags.DFIntTextureQualityOverride = String(s.texture);
+    if (s.grass) { flags.FIntFRMMaxGrassDistance = '0'; flags.FIntFRMMinGrassDistance = '0'; }
+  }
+  if (JSON.stringify(flags) === before) return true;
+  try { return !!(await api.writeFFlags(flags)); } catch { return false; }
+}
+async function agSet(patch) {
+  closeAllCdd();
+  settings.advancedGraphics = Object.assign(agState(), patch);
+  agPaint();
+  let saved = false;
+  try { saved = await api.saveSettings({ advancedGraphics: settings.advancedGraphics }); } catch {}
+  const written = await agApply();
+  if (!saved || !written) { toast(saved ? "Saved, but Roblox's FFlag file could not be written" : 'Could not save Advanced graphics', 'err'); return; }
+  const s = settings.advancedGraphics;
+  const when = s.on ? ' (next launch)' : '';
+  if ('on' in patch) toast(s.on ? 'Advanced graphics on for every account (next launch)' : 'Advanced graphics off (next launch)', s.on ? 'ok' : 'err');
+  else if ('msaa' in patch) toast('Anti-aliasing: ' + AG_MSAA[s.msaa] + when, 'ok');
+  else if ('texture' in patch) toast('Texture quality: ' + AG_TEXTURE[s.texture] + when, 'ok');
+  else if ('grass' in patch) toast((s.grass ? 'Grass hidden' : 'Grass shown') + when, 'ok');
+}
+
+// ── Settings: expandable details and search ──────────────────────────────
+// Each row shows a one-line description; the longer explanation sits in
+// .sr-more and opens with the chevron after the description.
+function settingsDetailsInit() {
+  document.querySelectorAll('#page-settings .sr, #page-generator .sr').forEach(row => {
+    const more = row.querySelector(':scope > .sr-left > .sr-more');
+    if (!more || row.querySelector('.sr-chev')) return;
+    const host = row.querySelector(':scope > .sr-left > .sr-desc') || row.querySelector(':scope > .sr-left > .sr-label');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sr-chev';
+    btn.setAttribute('aria-label', 'More about this setting');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.innerHTML = '<span class="material-icons-round">expand_more</span>';
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      const open = row.classList.toggle('open');
+      btn.setAttribute('aria-expanded', String(open));
+    });
+    host.appendChild(btn);
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', settingsDetailsInit);
+else settingsDetailsInit();
+
+const ST_SEARCH_PANELS = ['general', 'performance', 'roblox', 'privacy'];
+let _settingsSearchPrimed = false;
+function settingsSearchClear() {
+  const page = document.getElementById('page-settings');
+  if (!page || !page.classList.contains('searching')) return;
+  page.classList.remove('searching');
+  page.querySelectorAll('.st-hide').forEach(el => el.classList.remove('st-hide'));
+  const empty = document.getElementById('st-empty');
+  if (empty) empty.hidden = true;
+}
+// Searches every tab but Themes at once; matching rows stay, the rest hide.
+function settingsSearch(raw) {
+  const q = String(raw || '').trim().toLowerCase();
+  const page = document.getElementById('page-settings');
+  if (!q) { settingsTab(_settingsTabNow); return; }
+  if (!_settingsSearchPrimed) { _settingsSearchPrimed = true; renderEngineInit(); installsInit(); agPaint(); }
+  settingsSearchClear();
+  page.classList.add('searching');
+  document.getElementById('stab-panel-themes').style.display = 'none';
+  const words = q.split(/\s+/);
+  const hit = el => { const t = el.textContent.toLowerCase(); return words.every(w => t.includes(w)); };
+  let total = 0;
+  for (const name of ST_SEARCH_PANELS) {
+    const panel = document.getElementById('stab-panel-' + name);
+    panel.style.display = '';
+    let panelHits = 0;
+    let sec = null;
+    for (const el of panel.children) {
+      if (el.classList.contains('st-sec')) { sec = el; continue; }
+      if (!el.classList.contains('sc')) continue;
+      const secHit = !!(sec && hit(sec));
+      let cardHits = 0;
+      let lastTop = null;
+      for (const part of el.children) {
+        if (part.classList.contains('sr')) {
+          const ok = secHit || hit(part.querySelector('.sr-left') || part);
+          part.classList.toggle('st-hide', !ok);
+          if (ok) cardHits++;
+          lastTop = { row: part, ok };
+        } else if (part.classList.contains('sr-group')) {
+          // A sub-option match keeps its parent row; a parent match keeps the whole group.
+          let sub = 0;
+          for (const r of part.querySelectorAll(':scope > .sr')) {
+            const ok = secHit || !!(lastTop && lastTop.ok) || hit(r.querySelector('.sr-left') || r);
+            r.classList.toggle('st-hide', !ok);
+            if (ok) sub++;
+          }
+          part.classList.toggle('st-hide', !sub);
+          if (sub && lastTop && !lastTop.ok) { lastTop.row.classList.remove('st-hide'); lastTop.ok = true; cardHits++; }
+          cardHits += sub;
+        }
+      }
+      el.classList.toggle('st-hide', !cardHits);
+      if (sec) sec.classList.toggle('st-hide', !cardHits);
+      panelHits += cardHits;
+    }
+    panel.classList.toggle('st-hide', !panelHits);
+    total += panelHits;
+  }
+  const empty = document.getElementById('st-empty');
+  if (empty) empty.hidden = total > 0;
+}
+function settingsSearchKey(e) {
+  if (e.key === 'Escape' && e.target.value) { e.target.value = ''; settingsSearch(''); e.stopPropagation(); }
+}
+
 // Smoothly fill the slider track up to the current value.
 function updateSliderFill(el) {
   if (!el) return;
@@ -3637,7 +4060,7 @@ async function mixKillAll() {
     const n = res.killed || 0;
     // Only instances this app launched are killed, so say how many rather
     // than claiming everything Roblox-shaped on the machine is gone.
-    let msg = n ? `Closed ${n} instance${n === 1 ? '' : 's'}` : 'No instances launched by MultiRoblox';
+    let msg = n ? `Closed ${n} instance${n === 1 ? '' : 's'}` : 'No instances launched by Vanta Manager';
     if (res.untracked) msg += ` (${res.untracked} couldn't be identified)`;
     toast(msg, 'ok');
   } else toast('Kill failed' + (res && res.error ? ': ' + res.error : ''), 'err');
@@ -3681,10 +4104,7 @@ async function mixTrimMemory(btnId = 'set-trim-btn') {
 }
 
 function genToggleKey() {
-  const inp = document.getElementById('gen-apikey');
-  const icon = document.getElementById('gen-eye-icon');
-  if (inp.type === 'password') { inp.type = 'text'; icon.textContent = 'visibility_off'; }
-  else { inp.type = 'password'; icon.textContent = 'visibility'; }
+  toggleSecret(document.getElementById('gen-apikey'), document.getElementById('gen-eye-icon'));
 }
 
 // Literal values BloxGen's API expects for `type`, confirmed against their
@@ -3700,13 +4120,27 @@ const GEN_TYPES = [
 ];
 let _genType = 'alt';
 
+// Provider is auto-detected from the key's prefix so the single API-key field
+// works for either service: BLOX- = BloxGen, MG_ = Altgen (altgen.me/docs).
+function genProvider(apiKey) {
+  return apiKey.startsWith('BLOX-') ? 'bloxgen' : apiKey.startsWith('MG_') ? 'altgen' : '';
+}
+
 // Account-type selection only applies to BloxGen (Altgen has no equivalent
 // tiers in what this app sends it), so the row hides itself for an Altgen
-// key instead of showing a control that does nothing.
+// key instead of showing a control that does nothing. The chip beside the
+// title and the line under "API key" say which service the key belongs to.
 function genOnKeyInput() {
-  const apiKey = (document.getElementById('gen-apikey').value || '').trim();
+  const apiKey = (document.getElementById('gen-apikey')?.value || '').trim();
+  const p = genProvider(apiKey);
   const row = document.getElementById('gen-type-row');
-  if (row) row.style.display = apiKey.startsWith('BLOX-') ? '' : 'none';
+  if (row) row.style.display = p === 'bloxgen' ? '' : 'none';
+  const chip = document.getElementById('gen-provider');
+  if (chip) chip.dataset.state = p || (apiKey ? 'bad' : 'none');
+  const text = document.getElementById('gen-provider-text');
+  if (text) text.textContent = p === 'bloxgen' ? 'BloxGen' : p === 'altgen' ? 'Altgen' : apiKey ? 'Key not recognised' : 'No key yet';
+  const desc = document.getElementById('gen-key-desc');
+  if (desc) desc.textContent = p === 'bloxgen' ? 'BloxGen key found.' : p === 'altgen' ? 'Altgen key found.' : apiKey ? 'Keys start with BLOX- or MG_.' : 'Paste a BloxGen or Altgen key.';
 }
 
 function genSetType(value, label, desc) {
@@ -3722,49 +4156,37 @@ function genSetType(value, label, desc) {
   closeAllCdd();
 }
 
-// Provider is auto-detected from the key's prefix so the single API-key field
-// works for either service: BLOX- = BloxGen, MG_ = Altgen (altgen.me/docs).
 async function genCombo() {
   const apiKey = (document.getElementById('gen-apikey').value || '').trim();
 
-  let provider;
-  if (apiKey.startsWith('BLOX-')) provider = 'bloxgen';
-  else if (apiKey.startsWith('MG_')) provider = 'altgen';
-  else {
+  const provider = genProvider(apiKey);
+  if (!provider) {
     toast('Enter a valid API key (BloxGen: BLOX-... or Altgen: MG_...)', 'err');
     return;
   }
 
   const btn = document.getElementById('gen-btn');
-  const out = document.getElementById('gen-output');
+  const icon = document.getElementById('gen-btn-icon');
   const btnLabel = btn ? btn.querySelector('span:last-child') : null;
-  if (btn) { btn.disabled = true; if (btnLabel) btnLabel.textContent = 'Generating'; }
+  const idle = () => { if (btn) { btn.disabled = false; btn.classList.remove('is-busy'); if (btnLabel) btnLabel.textContent = 'Generate'; if (icon) icon.textContent = 'bolt'; } };
+  if (btn) { btn.disabled = true; btn.classList.add('is-busy'); if (btnLabel) btnLabel.textContent = 'Generating'; if (icon) icon.textContent = 'autorenew'; }
 
   try {
     const d = provider === 'bloxgen' ? await genBloxgen(apiKey) : await genAltgen(apiKey);
     if (d.cookie) d.cookie = normalizeCookie(d.cookie);
 
-    out.value = d.username + ':' + d.password;
-    out.select();
-
-    const counter = document.getElementById('gen-counter');
-    if (counter) counter.textContent = d.type ? ('Generated: ' + d.type + (d.cost != null ? ' · cost ' + d.cost : '')) : '';
-
-    // Store in history
     if (_genClearPromise) await _genClearPromise; // let a pending Clear's disk write land first
-    _lastGenData = d;
-    _genHistory.unshift({ username: d.username, password: d.password, cookie: d.cookie });
+    genShowResult(d);
+    _genHistory.unshift({ username: d.username, password: d.password, cookie: d.cookie, at: Date.now() });
     if (_genHistory.length > 500) _genHistory.length = 500; // bound the persisted history
     api.writeGenHistory(_genHistory).catch(() => {});
-    _ghPrepend();
+    genRenderHistory(true);
 
     navigator.clipboard.writeText(d.username + ':' + d.password).catch(() => {});
-
-    if (btn) { btn.disabled = false; if (btnLabel) btnLabel.textContent = 'Generate'; }
-
+    idle();
   } catch (e) {
     toast(e.message || 'Generation failed', 'err');
-    if (btn) { btn.disabled = false; if (btnLabel) btnLabel.textContent = 'Generate'; }
+    idle();
   }
 }
 
@@ -3793,90 +4215,161 @@ async function genAltgen(apiKey) {
 let _genHistory = [];
 let _lastGenData = null;
 
+// A steady tint per name, so the same account always gets the same monogram.
+function genHue(name) {
+  let h = 0;
+  for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
+}
+function genInitial(name) {
+  return (String(name).replace(/[^A-Za-z0-9]/g, '')[0] || '?').toUpperCase();
+}
+function genAgo(ts) {
+  if (!ts) return '';
+  const s = Math.max(0, (Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  const m = s / 60;
+  if (m < 60) return Math.floor(m) + 'm ago';
+  const h = m / 60;
+  if (h < 24) return Math.floor(h) + 'h ago';
+  return Math.floor(h / 24) + 'd ago';
+}
+
+// The big card under Generate: the account just made, with its password
+// hidden until asked for.
+function genShowResult(d) {
+  _lastGenData = d;
+  const box = document.getElementById('gen-latest');
+  if (!box) return;
+  const mono = document.getElementById('gl-mono');
+  mono.textContent = genInitial(d.username);
+  mono.style.setProperty('--h', genHue(d.username));
+  document.getElementById('gl-name').textContent = d.username;
+  document.getElementById('gl-user').textContent = d.username;
+  const pass = document.getElementById('gl-pass');
+  pass.dataset.shown = '0';
+  pass.textContent = '•'.repeat(Math.min(12, Math.max(8, String(d.password || '').length)));
+  document.getElementById('gl-eye').textContent = 'visibility';
+  document.getElementById('gen-counter').textContent = (d.type ? d.type : 'Generated') + (d.cost != null ? ' · cost ' + d.cost : '');
+  const addBtn = document.getElementById('gen-add-btn');
+  if (addBtn) { addBtn.disabled = false; const s = addBtn.querySelector('span:last-child'); if (s) s.textContent = 'Add'; }
+  box.classList.remove('is-empty');
+  const body = document.getElementById('gl-body');
+  body.classList.remove('gl-pop');
+  void body.offsetWidth; // restart the entrance
+  body.classList.add('gl-pop');
+}
+function genTogglePass() {
+  if (!_lastGenData) return;
+  const pass = document.getElementById('gl-pass');
+  const show = pass.dataset.shown !== '1';
+  pass.dataset.shown = show ? '1' : '0';
+  pass.textContent = show ? _lastGenData.password : '•'.repeat(Math.min(12, Math.max(8, String(_lastGenData.password || '').length)));
+  blinkIcon(document.getElementById('gl-eye'), show ? 'visibility_off' : 'visibility');
+}
+function genCopyField(which) {
+  if (!_lastGenData) { toast('Nothing to copy', 'err'); return; }
+  const text = which === 'pass' ? _lastGenData.password : _lastGenData.username;
+  navigator.clipboard.writeText(text).then(() => toast(which === 'pass' ? 'Password copied' : 'Username copied', 'ok'));
+}
+
+// ── History ──
 const GH_BATCH = 40;
 let _ghRendered = 0;
+let _ghQuery = '';
+let _ghView = []; // indices into _genHistory that match the search
 
-function genRenderHistory() {
+function ghRow(i, isNew) {
+  const h = _genHistory[i];
+  const row = document.createElement('div');
+  row.className = 'gen-hist-item' + (isNew ? ' gh-new' : '');
+  row.dataset.idx = i;
+  const when = genAgo(h.at);
+  row.innerHTML =
+    '<span class="gh-mono" style="--h:' + genHue(h.username) + '">' + esc(genInitial(h.username)) + '</span>' +
+    '<div class="gh-main"><div class="gh-user">' + esc(h.username) + '</div>' +
+      '<div class="gh-sub"><button class="gh-pass" data-act="peek" data-shown="0" title="Click to show the password">' + '•'.repeat(Math.min(12, Math.max(8, String(h.password || '').length))) + '</button>' +
+      (when ? '<span>· ' + esc(when) + '</span>' : '') +
+      (h.added ? '<span class="gh-added">Added</span>' : '') + '</div></div>' +
+    '<div class="gh-actions">' +
+      '<button class="gl-icon" data-act="copy" title="Copy username:password" aria-label="Copy username and password"><span class="material-icons-round">content_copy</span></button>' +
+      '<button class="gl-icon" data-act="add" title="' + (h.added ? 'Already added. Add again' : 'Sign in and add to your accounts') + '" aria-label="Add to accounts"><span class="material-icons-round">person_add</span></button>' +
+    '</div>';
+  return row;
+}
+
+function genRenderHistory(animateFirst) {
   const list = document.getElementById('gen-history-list');
   const sc = document.getElementById('gen-history-sc');
   if (!list || !sc) return;
-  if (_genHistory.length === 0) {
-    // The rows have to go too: _ghPrepend() on the next Generate would keep
-    // any left here, pointing at the wrong _genHistory index.
-    sc.classList.add('is-empty');
-    list.innerHTML = '';
-    _ghRendered = 0;
-    return;
+  const q = _ghQuery.trim().toLowerCase();
+  _ghView = [];
+  for (let i = 0; i < _genHistory.length; i++) {
+    if (!q || String(_genHistory[i].username).toLowerCase().includes(q)) _ghView.push(i);
   }
-  sc.classList.remove('is-empty');
+  const count = document.getElementById('gen-count');
+  if (count) count.textContent = _genHistory.length ? (q ? _ghView.length + ' of ' + _genHistory.length : String(_genHistory.length)) : '';
+  sc.classList.toggle('is-empty', _genHistory.length === 0);
+  sc.classList.toggle('no-match', _genHistory.length > 0 && _ghView.length === 0);
+  document.getElementById('gen-history-sc').closest('.gen-right')?.classList.toggle('has-history', _genHistory.length > 0);
+  // The rows go too when emptied, so nothing stale points at a wrong index.
   _ghRendered = 0;
   list.innerHTML = '';
-  _ghAppendBatch(list);
+  list.scrollTop = 0;
+  if (!_ghView.length) return;
+  _ghAppendBatch(list, animateFirst);
   list.onscroll = () => {
-    if (list.scrollTop + list.clientHeight >= list.scrollHeight - 20) _ghAppendBatch(list);
+    if (list.scrollTop + list.clientHeight >= list.scrollHeight - 20) _ghAppendBatch(list, false);
   };
 }
 
-function _ghAppendBatch(list) {
-  const end = Math.min(_ghRendered + GH_BATCH, _genHistory.length);
+function _ghAppendBatch(list, animateFirst) {
+  const end = Math.min(_ghRendered + GH_BATCH, _ghView.length);
   if (_ghRendered >= end) return;
   const frag = document.createDocumentFragment();
-  for (let i = _ghRendered; i < end; i++) {
-    const h = _genHistory[i];
-    const row = document.createElement('div');
-    row.className = 'gen-hist-item';
-    row.dataset.idx = i;
-    row.innerHTML =
-      '<span class="gh-user"><span style="color:var(--t3)">User:</span> ' + esc(h.username) + '  <span style="color:var(--t3)">Pass:</span> ' + esc(h.password) + '</span>' +
-      '<div class="gh-actions">' +
-        '<button class="btn btn-ghost" title="Copy username:password"><span class="material-icons-round" style="font-size:15px">content_copy</span></button>' +
-        '<button class="btn btn-ghost" title="Sign in and add to your accounts"><span class="material-icons-round" style="font-size:15px">person_add</span></button>' +
-      '</div>';
-    const btns = row.querySelectorAll('button');
-    btns[0].onclick = () => genHistCopy(i);
-    btns[1].onclick = () => genHistAdd(i);
-    frag.appendChild(row);
-  }
+  for (let k = _ghRendered; k < end; k++) frag.appendChild(ghRow(_ghView[k], !!animateFirst && k === 0));
   list.appendChild(frag);
   _ghRendered = end;
 }
 
-function _ghPrepend() {
-  const list = document.getElementById('gen-history-list');
-  const sc = document.getElementById('gen-history-sc');
-  if (!list || !sc) return;
-  sc.classList.remove('is-empty');
-  // Re-index existing rows so their onclick indices stay correct
-  list.querySelectorAll('.gen-hist-item').forEach(row => {
-    const old = +row.dataset.idx;
-    const ni = old + 1;
-    row.dataset.idx = ni;
-    const btns = row.querySelectorAll('button');
-    btns[0].onclick = () => genHistCopy(ni);
-    btns[1].onclick = () => genHistAdd(ni);
-  });
-  _ghRendered++;
-  const h = _genHistory[0];
-  const row = document.createElement('div');
-  row.className = 'gen-hist-item';
-  row.dataset.idx = 0;
-  row.innerHTML =
-    '<span class="gh-user"><span style="color:var(--t3)">User:</span> ' + esc(h.username) + '  <span style="color:var(--t3)">Pass:</span> ' + esc(h.password) + '</span>' +
-    '<div class="gh-actions">' +
-      '<button class="btn btn-ghost" title="Copy username:password"><span class="material-icons-round" style="font-size:15px">content_copy</span></button>' +
-      '<button class="btn btn-ghost" title="Sign in and add to your accounts"><span class="material-icons-round" style="font-size:15px">person_add</span></button>' +
-    '</div>';
-  const btns = row.querySelectorAll('button');
-  btns[0].onclick = () => genHistCopy(0);
-  btns[1].onclick = () => genHistAdd(0);
-  list.insertBefore(row, list.firstChild);
-  list.scrollTop = 0;
+function genSearch(v) {
+  _ghQuery = String(v || '');
+  genRenderHistory(false);
 }
+
+// One listener for every row's buttons.
+document.getElementById('gen-history-list')?.addEventListener('click', e => {
+  const btn = e.target.closest('[data-act]');
+  const row = btn && btn.closest('.gen-hist-item');
+  if (!btn || !row) return;
+  const i = +row.dataset.idx;
+  const h = _genHistory[i];
+  if (!h) return;
+  const act = btn.dataset.act;
+  if (act === 'copy') genHistCopy(i);
+  else if (act === 'add') genHistAdd(i, btn);
+  else if (act === 'peek') {
+    const show = btn.dataset.shown !== '1';
+    btn.dataset.shown = show ? '1' : '0';
+    btn.textContent = show ? h.password : '•'.repeat(Math.min(12, Math.max(8, String(h.password || '').length)));
+    btn.title = show ? 'Click to hide the password' : 'Click to show the password';
+  }
+});
 
 function genHistCopy(i) {
   const h = _genHistory[i];
   if (!h) return;
   navigator.clipboard.writeText(h.username + ':' + h.password).then(() => toast('Copied ' + h.username, 'ok'));
+}
+
+// Marks an account as added, so the history shows it and it isn't added twice by accident.
+function genMarkAdded(entry) {
+  if (!entry) return;
+  entry.added = true;
+  api.writeGenHistory(_genHistory).catch(() => {});
+  const i = _genHistory.indexOf(entry);
+  const row = document.querySelector(`#gen-history-list .gen-hist-item[data-idx="${i}"]`);
+  if (row) row.replaceWith(ghRow(i, false));
 }
 
 // Adds a generated account, preferring a fresh sign-in with its password. That
@@ -3903,13 +4396,15 @@ async function _genImportAccount(g) {
   throw new Error(loginError || 'No password or cookie available for this account');
 }
 
-async function genHistAdd(i) {
+async function genHistAdd(i, btn) {
   const h = _genHistory[i];
   if (!h) return;
+  if (btn) btn.disabled = true;
   try {
     const a = await _genImportAccount(h);
-    if (a) { accounts.push(a); render(); toast('Added ' + a.username + ' to accounts', 'ok'); }
+    if (a) { accounts.push(a); render(); genMarkAdded(h); toast('Added ' + a.username + ' to accounts', 'ok'); }
   } catch(e) { toast('Failed to add: ' + (e.message || e), 'err'); }
+  if (btn && btn.isConnected) btn.disabled = false;
 }
 
 async function genAddToAccounts() {
@@ -3917,11 +4412,16 @@ async function genAddToAccounts() {
   const btn = document.getElementById('gen-add-btn');
   const btnLabel = btn ? btn.querySelector('span:last-child') : null;
   if (btn) { btn.disabled = true; if (btnLabel) btnLabel.textContent = 'Adding'; }
+  let added = false;
   try {
     const a = await _genImportAccount(_lastGenData);
-    if (a) { accounts.push(a); render(); toast('Added ' + a.username + ' to accounts!', 'ok'); }
+    if (a) {
+      accounts.push(a); render(); added = true;
+      genMarkAdded(_genHistory.find(h => h.username === _lastGenData.username && h.password === _lastGenData.password));
+      toast('Added ' + a.username + ' to accounts!', 'ok');
+    }
   } catch(e) { toast('Failed: ' + (e.message || e), 'err'); }
-  if (btn) { btn.disabled = false; if (btnLabel) btnLabel.textContent = 'Add'; }
+  if (btn) { btn.disabled = false; if (btnLabel) btnLabel.textContent = added ? 'Added' : 'Add'; }
 }
 
 // Tracked so a Generate right after Clear can wait for the clear's write to land first.
@@ -3929,27 +4429,20 @@ let _genClearPromise = null;
 async function genClearHistory() {
   _genHistory = [];
   _lastGenData = null;
+  _ghQuery = '';
+  const find = document.getElementById('gen-search');
+  if (find) find.value = '';
   genRenderHistory();
+  document.getElementById('gen-latest')?.classList.add('is-empty');
   toast('History cleared', 'ok');
   _genClearPromise = api.clearGenHistory().catch(() => {});
   await _genClearPromise;
   _genClearPromise = null;
 }
 
-function genDetailsCopy() {
-  const details = document.getElementById('gen-details');
-  const text = details ? details.innerText.replace('copy', '').trim() : '';
-  if (!text) { toast('No details to copy', 'err'); return; }
-  const btn = document.getElementById('gen-details-copy-btn');
-  navigator.clipboard.writeText(text).then(() => {
-    if (btn) { const s = btn.querySelector('span:last-child'); if(s){s.textContent='done'; setTimeout(()=>{s.textContent='details';},1500);} }
-    toast('Details copied', 'ok');
-  });
-}
-
 function genCopy() {
-  const val = document.getElementById('gen-output').value;
-  if (!val) { toast('Nothing to copy', 'err'); return; }
+  if (!_lastGenData) { toast('Nothing to copy', 'err'); return; }
+  const val = _lastGenData.username + ':' + _lastGenData.password;
   const btn = document.getElementById('gen-copy-btn');
   navigator.clipboard.writeText(val).then(() => {
     if (btn) {
@@ -3973,7 +4466,8 @@ function getTrackingRegions(id) {
 }
 function formatTrackingInterval(sec) {
   if (sec < 60) return sec + 's';
-  return Math.round(sec / 60) + ' min';
+  const m = Math.floor(sec / 60), r = Math.round(sec % 60);
+  return r ? `${m}m ${r}s` : m + ' min';
 }
 // Strips orphaned tracking settings when an account is removed.
 function forgetTrackingAccount(id) {
@@ -4313,3 +4807,382 @@ document.addEventListener('click', e => {
   }, true);
   ['pointerdown', 'wheel', 'keydown', 'blur'].forEach(t => addEventListener(t, hide, true));
 })();
+
+// ── Motion: page and tab changes, eye toggles, button text changes ───────
+const MOTION_EASE = 'cubic-bezier(.16,1,.3,1)';
+function motionOff() { return _reduceMotion.matches || !Element.prototype.animate; }
+
+// What to cascade in on a page or panel: the visible blocks in reading order.
+// Big containers (scroll areas, grids) are opened up so their cards and
+// sections move one by one, instead of the whole area as a slab.
+function staggerItems(root, max) {
+  const out = [];
+  const vh = window.innerHeight;
+  const walk = (el, depth) => {
+    for (const c of el.children) {
+      if (out.length >= max) return;
+      if (c.matches('script, style, template, .seg-pill, .tab-slider, [hidden]')) continue;
+      const r = c.getBoundingClientRect();
+      if (!r.height || !r.width || r.bottom < 0 || r.top > vh) continue;
+      if (depth < 3 && c.children.length > 1 && r.height > vh * 0.45) walk(c, depth + 1);
+      else out.push(c);
+    }
+  };
+  walk(root, 0);
+  return out;
+}
+// The stagger is a CSS animation (.cas in styles.css), not element.animate():
+// in WebView2 a Web Animation on these blocks that ends back at "no transform"
+// left their buttons unclickable until something else repainted them. The class
+// is dropped when each one finishes.
+function cascade(items, { lift = 12, step = 32, start = 50, duration = 420 } = {}) {
+  items.forEach((el, i) => {
+    el.style.setProperty('--cas-lift', lift + 'px');
+    el.style.setProperty('--cas-dur', duration + 'ms');
+    el.style.setProperty('--cas-delay', (start + i * step) + 'ms');
+    el.classList.remove('cas');
+    void el.offsetWidth; // restart it if it was still running
+    el.classList.add('cas');
+    const clear = () => {
+      el.classList.remove('cas');
+      el.style.removeProperty('--cas-lift'); el.style.removeProperty('--cas-dur'); el.style.removeProperty('--cas-delay');
+    };
+    const onEnd = e => {
+      if (e.target !== el || e.animationName !== 'cas-in') return;
+      el.removeEventListener('animationend', onEnd);
+      clear();
+    };
+    el.addEventListener('animationend', onEnd);
+    setTimeout(() => { el.removeEventListener('animationend', onEnd); clear(); }, start + i * step + duration + 150);
+  });
+}
+
+// Pages: the old one slips out the other way while the new one slides in from
+// the side of the nav item that was picked, then its contents cascade up.
+// Transform and opacity only, so it stays smooth on big pages.
+function pageSwap(from, to, dir) {
+  if (motionOff() || !to || from === to) return;
+  const d = dir < 0 ? -1 : 1;
+  for (const a of to.getAnimations()) if (!(a instanceof CSSAnimation) && !(a instanceof CSSTransition)) a.cancel();
+  to.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, easing: 'ease-out' });
+  to.animate([{ transform: `translateX(${d * 26}px)` }, { transform: 'none' }], { duration: 560, easing: MOTION_EASE });
+  if (from) from.animate([
+    { opacity: 1, transform: 'none' },
+    { opacity: 0, transform: `translateX(${-d * 22}px)` },
+  ], { duration: 200, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' }).finished.then(a => a.cancel()).catch(() => {});
+  // After goTo's synchronous renders, so freshly drawn cards are included.
+  // The page is still nearly transparent then, so nothing flashes.
+  requestAnimationFrame(() => cascade(staggerItems(to, 10)));
+}
+// A tab's panel inside a page: a shorter slide, then its sections cascade.
+function panelSwap(el, dir) {
+  if (motionOff() || !el) return;
+  const d = dir < 0 ? -1 : 1;
+  el.animate([{ opacity: 0, transform: `translateX(${d * 18}px)` }, { opacity: 1, transform: 'none' }], { duration: 380, easing: MOTION_EASE });
+  requestAnimationFrame(() => cascade(staggerItems(el, 8), { lift: 8, step: 28, start: 30, duration: 360 }));
+}
+// Which way to slide: +1 when the new item is right of the old one.
+function swapDir(list, from, to) {
+  const a = list.indexOf(from), b = list.indexOf(to);
+  return a < 0 || b < 0 ? 1 : (b >= a ? 1 : -1);
+}
+
+// Show/hide buttons blink: the eye closes, swaps, and opens again, and the
+// field's text sharpens into view.
+function blinkIcon(icon, name) {
+  if (!icon) return;
+  icon.dataset.noSwap = '1';
+  if (motionOff()) { icon.textContent = name; return; }
+  icon.style.display = 'inline-block';
+  const close = icon.animate([{ transform: 'scaleY(1)' }, { transform: 'scaleY(.08)' }], { duration: 110, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+  close.finished.then(() => {
+    icon.textContent = name;
+    close.cancel();
+    icon.animate([{ transform: 'scaleY(.08)' }, { transform: 'scaleY(1.12)', offset: .7 }, { transform: 'scaleY(1)' }], { duration: 260, easing: 'ease-out' });
+  }).catch(() => { icon.textContent = name; });
+}
+function toggleSecret(input, icon) {
+  if (!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  blinkIcon(icon, show ? 'visibility_off' : 'visibility');
+  if (!motionOff() && input.value) {
+    input.animate([
+      { filter: 'blur(4px)', letterSpacing: show ? '.12em' : '0', opacity: .5 },
+      { filter: 'blur(0)', letterSpacing: 'normal', opacity: 1 },
+    ], { duration: 280, easing: MOTION_EASE });
+  }
+}
+
+// When a button's text changes ("Trim now" to "Trimming...", "Launch" to
+// "Stop"), the new words fade in and the button eases to its new width
+// instead of jumping. Widths are remembered from the last hover, press or
+// change, since by the time a change is seen the old text is already gone.
+const _btnW = new WeakMap(), _btnTxt = new WeakMap(), _btnAt = new WeakMap();
+function btnRemember(btn) {
+  if (!btn || !btn.isConnected) return;
+  _btnW.set(btn, btn.getBoundingClientRect().width);
+  _btnTxt.set(btn, btn.textContent);
+}
+for (const type of ['pointerover', 'pointerdown', 'focusin']) {
+  document.addEventListener(type, e => {
+    const b = e.target instanceof Element && e.target.closest('button, .btn');
+    if (b) btnRemember(b);
+  }, true);
+}
+function btnTextChanged(btn, changed) {
+  const oldTxt = _btnTxt.get(btn), newTxt = btn.textContent;
+  const oldW = _btnW.get(btn);
+  btnRemember(btn);
+  if (oldTxt === newTxt || motionOff() || !btn.offsetParent) return;
+  const now = performance.now(), last = _btnAt.get(btn) || 0;
+  _btnAt.set(btn, now);
+  if (now - last < 350) return; // a ticking countdown: just let it update
+  // The words: a fade with a slight lift (an inline span can't move, so it only fades).
+  const word = changed && changed !== btn ? changed : null;
+  if (word) word.animate([{ opacity: 0, filter: 'blur(3px)', transform: 'translateY(4px)' }, { opacity: 1, filter: 'blur(0)', transform: 'none' }], { duration: 300, easing: MOTION_EASE });
+  else btn.animate([{ color: 'transparent' }, { color: getComputedStyle(btn).color }], { duration: 260, easing: 'ease-out' });
+  // The size: only when it really changed and the button sizes to its text.
+  const newW = btn.getBoundingClientRect().width;
+  if (oldW && Math.abs(newW - oldW) > 1 && Math.abs(newW - oldW) < 240) {
+    btn.style.overflow = 'hidden';
+    btn.animate([{ width: oldW + 'px' }, { width: newW + 'px' }], { duration: 320, easing: MOTION_EASE })
+      .finished.then(() => { btn.style.overflow = ''; }).catch(() => { btn.style.overflow = ''; });
+  }
+}
+new MutationObserver(records => {
+  if (document.hidden || motionOff()) return;
+  const seen = new Map();
+  for (const r of records) {
+    const node = r.target.nodeType === 3 ? r.target.parentElement : r.target;
+    if (!(node instanceof Element) || node.closest('[data-no-swap]')) continue;
+    const btn = node.closest('button, .btn');
+    if (!btn || btn === document.body) continue;
+    // Whole buttons being replaced by a re-render are not text changes.
+    if (r.type === 'childList' && [...r.addedNodes].some(n => n.nodeType === 1 && (n.matches('button, .btn') || n.querySelector?.('button, .btn')))) continue;
+    if (!seen.has(btn)) seen.set(btn, node);
+  }
+  for (const [btn, node] of seen) {
+    btnTextChanged(btn, node);
+  }
+}).observe(document.body, { subtree: true, childList: true, characterData: true });
+
+// ── Popups that fade out instead of vanishing ────────────────────────────
+// popOpen/popClose drive the "open" class; closing plays a short fade and
+// shrink first. With remove=true the element is taken out afterwards.
+function popOpen(el) {
+  if (!el) return;
+  if (el._closing) { el._closing.cancel(); el._closing = null; el.inert = false; }
+  el.classList.add('open');
+}
+function popClose(el, remove = false) {
+  if (!el || el._closing) return;
+  const done = () => {
+    el._closing = null;
+    el.inert = false;
+    if (remove) el.remove(); else el.classList.remove('open');
+  };
+  if (motionOff() || (!remove && !el.classList.contains('open'))) { done(); return; }
+  el.inert = true;
+  // Stop the opening animations so the fade starts from where they are.
+  for (const a of el.getAnimations({ subtree: true })) if (a instanceof CSSAnimation) a.finish();
+  const anim = el.animate([
+    { opacity: 1, transform: 'none' },
+    { opacity: 0, transform: 'translateY(-4px) scale(.96)' },
+  ], { duration: 150, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+  el._closing = anim;
+  anim.finished.then(() => { if (el._closing === anim) { done(); anim.cancel(); } }).catch(() => {});
+}
+
+// ── Native dropdowns drawn like the app's own ────────────────────────────
+// Every <select class="field-select"> gets the same trigger and menu as the
+// Settings dropdowns. The select stays (hidden) as the value, so code that
+// fills it, sets .value or listens for change keeps working unchanged.
+function enhanceSelect(sel) {
+  if (sel.dataset.cdd) return;
+  sel.dataset.cdd = '1';
+  const box = document.createElement('div');
+  box.className = 'cdd cdd-select ' + [...sel.classList].filter(c => c !== 'field-select').join(' ');
+  box.innerHTML = '<div class="cdd-trigger" role="button" tabindex="0"><span class="cdd-label"></span><span class="material-icons-round cdd-arrow">expand_more</span></div><div class="cdd-menu" role="listbox"></div>';
+  const trigger = box.firstElementChild, menu = box.lastElementChild, label = trigger.firstElementChild;
+  const name = sel.getAttribute('aria-label') || (sel.id && document.querySelector(`label[for="${sel.id}"]`)?.textContent);
+  if (name) trigger.setAttribute('aria-label', name);
+  sel.classList.add('cdd-native');
+  sel.tabIndex = -1;
+  sel.after(box);
+  const paint = () => {
+    const o = sel.options[sel.selectedIndex];
+    label.textContent = o ? o.textContent : '';
+    menu.querySelectorAll('.cdd-option').forEach(el => el.classList.toggle('selected', +el.dataset.i === sel.selectedIndex));
+  };
+  const build = () => {
+    menu.innerHTML = [...sel.options].map((o, i) =>
+      `<div class="cdd-option${i === sel.selectedIndex ? ' selected' : ''}" data-i="${i}" role="option" tabindex="0"><div class="cdd-opt-left"><div class="cdd-opt-name">${esc(o.textContent)}</div></div></div>`).join('');
+  };
+  const open = () => {
+    const was = menu.classList.contains('open');
+    closeAllCdd();
+    if (was) return;
+    build();
+    openCddMenu(trigger, menu);
+    const cur = menu.querySelector('.cdd-option.selected');
+    if (cur) menu.scrollTop = Math.max(0, cur.offsetTop - (menu.clientHeight - cur.offsetHeight) / 2);
+  };
+  const pick = el => {
+    const i = +el.dataset.i;
+    closeAllCdd();
+    if (i === sel.selectedIndex) return;
+    sel.selectedIndex = i;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  trigger.addEventListener('click', open);
+  trigger.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') { e.preventDefault(); open(); } });
+  menu.addEventListener('click', e => { const el = e.target.closest('.cdd-option'); if (el) pick(el); });
+  menu.addEventListener('keydown', e => {
+    const el = e.target.closest('.cdd-option');
+    if (!el) return;
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(el); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); el.nextElementSibling?.focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); el.previousElementSibling?.focus(); }
+    else if (e.key === 'Escape') { closeAllCdd(); trigger.focus(); }
+  });
+  // The label follows the select however its value changes: new options,
+  // or .value / .selectedIndex set from code (which fires no event).
+  new MutationObserver(paint).observe(sel, { childList: true, subtree: true, attributes: true });
+  for (const prop of ['value', 'selectedIndex']) {
+    const d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, prop);
+    Object.defineProperty(sel, prop, { configurable: true, get() { return d.get.call(this); }, set(v) { d.set.call(this, v); paint(); } });
+  }
+  sel.addEventListener('change', paint);
+  paint();
+}
+function enhanceSelects(root = document) {
+  root.querySelectorAll('select.field-select:not([data-cdd])').forEach(enhanceSelect);
+}
+// Selects drawn later (the FFlag rows re-render) are picked up as they appear.
+new MutationObserver(records => {
+  for (const r of records) for (const n of r.addedNodes) {
+    if (n.nodeType !== 1) continue;
+    if (n.matches('select.field-select')) enhanceSelect(n);
+    else if (n.querySelector) enhanceSelects(n);
+  }
+}).observe(document.body, { subtree: true, childList: true });
+enhanceSelects();
+
+// A list row opening to its height as it's added, and folding away as it's
+// removed (the list's 8px gap folds with it, so nothing below jumps).
+const LIST_GAP = 8;
+function rowGrow(row, hasGap) {
+  if (!row || motionOff()) return;
+  const h = row.offsetHeight;
+  row.style.overflow = 'hidden';
+  row.animate([
+    { height: '0px', opacity: 0, marginTop: hasGap ? -LIST_GAP + 'px' : '0px', transform: 'translateY(-6px) scale(.98)', paddingTop: '0px', paddingBottom: '0px' },
+    { height: h + 'px', opacity: 1, marginTop: '0px', transform: 'none' },
+  ], { duration: 320, easing: MOTION_EASE }).finished.then(() => { row.style.overflow = ''; }).catch(() => {});
+}
+function rowShrink(row, hasGap) {
+  if (!row || motionOff()) return Promise.resolve();
+  row.style.overflow = 'hidden';
+  row.style.pointerEvents = 'none';
+  const anim = row.animate([
+    { height: row.offsetHeight + 'px', opacity: 1, marginTop: '0px', transform: 'none' },
+    { height: '0px', opacity: 0, marginTop: hasGap ? -LIST_GAP + 'px' : '0px', transform: 'scale(.98)', paddingTop: '0px', paddingBottom: '0px', borderWidth: '0px' },
+  ], { duration: 240, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
+  return anim.finished.then(() => {}, () => {});
+}
+
+// ── Slider numbers you can type into ─────────────────────────────────────
+// The number beside each slider can be clicked (or tabbed to) and typed into.
+// Enter or clicking away applies it, Esc puts it back, and the arrow keys step
+// it. The value goes through the slider itself, so its own input and change
+// handlers save it exactly as dragging would.
+function sliderOfLabel(label) {
+  const s = label.previousElementSibling;
+  return s && s.matches('input[type=range]') ? s : null;
+}
+// Seconds per unit for time sliders; the unit shown when editing started is
+// used when none is typed ("5" on a "5 min" label means 5 minutes).
+function typedSliderValue(text, startText, slider) {
+  const t = String(text).trim().toLowerCase().replace(',', '.');
+  const n = parseFloat(t.replace(/[^0-9.\-]/g, ''));
+  if (!Number.isFinite(n)) return null;
+  if (slider.id === 'tracking-interval') {
+    const unit = /h/.test(t) ? 3600 : /m/.test(t) ? 60 : /s/.test(t) ? 1
+      : /min/.test(startText) ? 60 : /h/.test(startText) ? 3600 : 1;
+    return n * unit;
+  }
+  return n;
+}
+function applySliderValue(slider, v) {
+  const min = Number(slider.min) || 0, max = Number(slider.max) || 100, step = Number(slider.step) || 1;
+  v = Math.min(max, Math.max(min, v));
+  v = Math.round((v - min) / step) * step + min;
+  slider.value = String(Math.min(max, v));
+  slider.dispatchEvent(new Event('input', { bubbles: true }));
+  slider.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function initSliderNumbers(root = document) {
+  root.querySelectorAll('.fps-val-label').forEach(label => {
+    const slider = sliderOfLabel(label);
+    if (!slider || label.dataset.editable) return;
+    label.dataset.editable = '1';
+    label.tabIndex = 0;
+    label.setAttribute('role', 'spinbutton');
+    const name = slider.closest('.sr')?.querySelector('.sr-label')?.textContent.trim();
+    if (name) label.setAttribute('aria-label', name);
+    let start = '', editing = false, cancelled = false;
+    const sync = () => {
+      label.title = slider.disabled ? '' : 'Click to type a value';
+      label.setAttribute('aria-disabled', String(slider.disabled));
+      label.setAttribute('aria-valuenow', slider.value);
+    };
+    const begin = () => {
+      sync();
+      if (slider.disabled || editing) { if (slider.disabled) label.blur(); return; }
+      editing = true; cancelled = false; start = label.textContent;
+      label.contentEditable = 'plaintext-only';
+      label.classList.add('editing');
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    };
+    const end = () => {
+      if (!editing) return;
+      editing = false;
+      label.contentEditable = 'false';
+      label.classList.remove('editing');
+      const typed = label.textContent;
+      label.textContent = start;
+      if (cancelled || typed.trim() === start.trim()) return;
+      const v = typedSliderValue(typed, start, slider);
+      if (v === null) { label.animate?.([{ transform: 'translateX(-3px)' }, { transform: 'translateX(3px)' }, { transform: 'none' }], { duration: 180 }); return; }
+      applySliderValue(slider, v);
+      sync();
+    };
+    label.addEventListener('focus', begin);
+    label.addEventListener('click', () => { if (!editing) begin(); });
+    label.addEventListener('blur', end);
+    label.addEventListener('keydown', e => {
+      // Focused but not editing yet (e.g. focus arrived while the window was in
+      // the background): typing a number or pressing Enter starts editing.
+      if (!editing && (e.key === 'Enter' || /^[0-9]$/.test(e.key))) { begin(); if (e.key === 'Enter') { e.preventDefault(); return; } }
+      if (e.key === 'Enter') { e.preventDefault(); label.blur(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelled = true; label.blur(); }
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        // Steps from the slider's value, then shows the new number still editable.
+        e.preventDefault();
+        const step = (Number(slider.step) || 1) * (e.shiftKey ? 10 : 1);
+        applySliderValue(slider, Number(slider.value) + (e.key === 'ArrowUp' ? step : -step));
+        start = label.textContent;
+        const range = document.createRange(); range.selectNodeContents(label);
+        const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      } else if (e.key.length === 1 && !/[0-9.,%a-z\s]/i.test(e.key)) e.preventDefault();
+    });
+    // Pasted text arrives as plain text only (plaintext-only), one line.
+    label.addEventListener('input', () => { if (label.textContent.length > 12) label.textContent = label.textContent.slice(0, 12); });
+    slider.addEventListener('input', sync);
+    sync();
+  });
+}
+initSliderNumbers();

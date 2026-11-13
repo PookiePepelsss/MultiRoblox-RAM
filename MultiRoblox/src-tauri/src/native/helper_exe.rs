@@ -81,7 +81,7 @@ pub fn ensure_native_helper(app: &AppHandle, state: &AppState) -> Option<PathBuf
 
 fn resolve_native_helper(app: &AppHandle) -> Option<PathBuf> {
     // Installed builds ship RobloxNative.exe as a normal loose resource next
-    // to MultiRoblox.exe (see tauri.conf.json's bundle.resources); prefer
+    // to the app's exe (see tauri.conf.json's bundle.resources); prefer
     // that plain, installer-placed file over self-extracting the embedded
     // copy. A binary that writes another PE from its own resources to disk
     // at runtime and executes it is a classic dropper behavior pattern to

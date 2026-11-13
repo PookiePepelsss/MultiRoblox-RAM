@@ -121,8 +121,11 @@ button:focus-visible,.nav-item:focus-visible,.tab-btn:focus-visible{outline:none
 
 /* pages stack on top of each other, only active one shows */
 .page-container{flex:1;display:grid;grid-template-areas:'stack';overflow:hidden}
-.page{grid-area:stack;display:flex;flex-direction:column;overflow:hidden;opacity:0;pointer-events:none;transition:opacity 220ms var(--smooth)}
-.page.active{opacity:1;pointer-events:all}
+/* Hidden pages are made inert in goTo() rather than pointer-events:none here:
+   a page's header and cards start animating in the same frame it turns on,
+   and WebView2 could keep the old inherited none on them, leaving buttons dead. */
+.page{grid-area:stack;display:flex;flex-direction:column;overflow:hidden;opacity:0;transition:opacity 220ms var(--smooth)}
+.page.active{opacity:1}
 
 /* page header */
 .ph{padding:20px 28px 14px;flex-shrink:0;display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
@@ -133,7 +136,7 @@ button:focus-visible,.nav-item:focus-visible,.tab-btn:focus-visible{outline:none
 .search input::placeholder{color:var(--t2)}
 .filter-wrap{position:relative}
 .btn-out{display:flex;align-items:center;gap:8px;height:40px;position:relative;background:var(--ac);border:1px solid transparent;border-radius:var(--r2);padding:0 15px;color:var(--on-ac);font-family:'Inter',sans-serif;font-size:var(--fs-sm);font-weight:500;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 6px rgba(0,0,0,.3);transition:background var(--dur),border-color var(--dur),transform var(--dur),box-shadow var(--dur)}
-.btn-out:hover{background:color-mix(in srgb,var(--ac) 82%,transparent)}
+.btn-out:hover{background:var(--ac)}
 .btn-out.on::after{content:'';position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:var(--red)}
 .btn-out .material-icons-round{font-size:16px;color:inherit}
 .filter-menu{position:absolute;top:calc(100% + 8px);right:0;z-index:30;min-width:176px;background:var(--s2);border:1px solid var(--bd2);border-radius:var(--r);padding:5px;box-shadow:0 18px 40px rgba(0,0,0,.55);display:none;flex-direction:column;gap:1px;animation:ctxIn 150ms var(--smooth)}
@@ -224,10 +227,6 @@ button:focus-visible,.nav-item:focus-visible,.tab-btn:focus-visible{outline:none
 .card.cookie-dead{border-color:rgba(240,111,111,.35)}
 .card.cookie-dead .card-av{border-color:var(--red)}
 .card-row{display:flex;gap:8px;margin-top:auto}
-.gen-hist-item{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:var(--fs-sm);font-family:'Inter',sans-serif;font-weight:500;color:var(--t2);cursor:default}
-.gen-hist-item:hover{background:var(--s3)}
-.gen-hist-item .gh-user{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t1)}
-.gen-hist-item .gh-actions{display:flex;gap:4px;flex-shrink:0}
 .card[draggable]{cursor:grab}
 .card[draggable]:active{cursor:grabbing}
 .card.drag-over{border-color:var(--ac);box-shadow:0 0 0 2px var(--ac3)}
@@ -252,7 +251,7 @@ button:focus-visible,.nav-item:focus-visible,.tab-btn:focus-visible{outline:none
 .btn-del:hover{background-color:var(--rd);color:var(--red);border-color:rgba(240,111,111,.25)}
 .btn-primary{padding:8px 16px;background-color:var(--ac);color:var(--on-ac);font-size:var(--fs-sm)}
 .btn-ghost{padding:8px 14px;background-color:var(--ac);color:var(--on-ac);border:1px solid transparent;font-size:var(--fs-sm)}
-.btn-ghost:hover{background-color:color-mix(in srgb,var(--ac) 82%,transparent);color:var(--on-ac)}
+.btn-ghost:hover{color:var(--on-ac)}
 .btn-danger{padding:8px 14px;background-color:var(--rd);color:var(--red);font-size:var(--fs-sm)}
 .btn-danger:hover{background-color:rgba(239,68,68,.9);color:#fff}
 
@@ -697,7 +696,6 @@ input[type=password]::-ms-reveal,input[type=password]::-ms-clear{display:none}
 .log-find-count{font-size:var(--fs-xs);color:var(--red);min-width:60px;text-align:right}
 
 
-/* Live memory readout on running account cards (filled by pollMemoryUsage). */
 
 
 
@@ -738,7 +736,11 @@ button:not(:disabled):active,.btn:not(:disabled):active,.tb-btn:active,.nav-add:
 /* ---- two-column pages and centered settings ---- */
 .split-layout{display:grid;grid-template-columns:minmax(290px,350px) minmax(0,1fr);gap:12px;align-items:start}
 .split-layout>.sc,.split-col>.sc:last-child{margin:0}
-#page-settings>:not(.tab-bar),#page-mixer>*{width:100%;max-width:1040px}
+/* Settings and Mixer: a column of up to 1040px, centred. The scroll area and its
+   scrollbar still span the whole window, so wide windows don't leave a dead strip. */
+#page-settings,#page-mixer{--gut:max(28px,calc((100% - 1040px) / 2))}
+#page-settings>.ph,#page-mixer>.ph,#page-settings>.sw,#page-mixer>.sw{padding-left:var(--gut);padding-right:var(--gut)}
+#page-settings>.tab-bar{margin-left:var(--gut);max-width:calc(100% - var(--gut) - 28px)}
 
 
 /* ---- group server mode ---- */
@@ -847,7 +849,7 @@ button:not(:disabled):active,.btn:not(:disabled):active,.tb-btn:active,.nav-add:
 .gv-pv-sub{font-size:var(--fs-sm);color:var(--t2);margin-top:3px}
 .gv-rename{display:flex;gap:6px}
 .gv-rename input{flex:1;width:auto;min-width:0}
-@media (max-width:1040px){.gv-hero{grid-template-columns:minmax(0,1.25fr) minmax(250px,1fr);gap:18px}.gv-tr{grid-template-columns:minmax(104px,1fr) minmax(120px,1.3fr) 62px 48px 112px}}
+@container main (max-width:1040px){.gv-hero{grid-template-columns:minmax(0,1.25fr) minmax(250px,1fr);gap:18px}.gv-tr{grid-template-columns:minmax(104px,1fr) minmax(120px,1.3fr) 62px 48px 112px}}
 
 /* ---- popups ---- */
 .modal .field input,.modal .sr-input,.modal textarea{background:var(--s1)}
@@ -894,12 +896,6 @@ button:not(:disabled):active,.btn:not(:disabled):active,.tb-btn:active,.nav-add:
 #gen-type-row .cdd-menu{overflow-x:hidden}
 #gen-type-row .cdd-opt-left{min-width:0}
 #gen-apikey{min-width:0}
-.gen-output-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
-.gen-output-actions .btn{justify-content:center;height:38px}
-#page-generator .split-layout{align-items:stretch;grid-template-rows:minmax(min-content,1fr)}
-#gen-history-sc{display:flex;flex-direction:column;min-height:260px}
-#gen-history-list{flex:1 1 0;height:0;min-height:0;display:flex;flex-direction:column;gap:1px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--s4) transparent}
-#gen-history-sc.is-empty #gen-history-list,#gen-history-sc.is-empty .gen-hist-clear,#gen-history-sc:not(.is-empty) #gen-history-empty{display:none}
 
 /* ---- groups ---- */
 .pkg-meta.live{color:var(--green)}
@@ -958,12 +954,7 @@ button:not(:disabled):active,.btn:not(:disabled):active,.tb-btn:active,.nav-add:
 .meter i{display:block;height:100%;min-width:3px;border-radius:999px;background:var(--t1);transition:width 400ms var(--smooth)}
 .stat-meter.high b{color:var(--red)}
 .stat-meter.high .meter i{background:var(--red)}
-.card-mem{display:flex;flex-wrap:wrap;gap:4px 14px;margin:0 7px 10px}
-.card-mem:empty{display:none}
 /* In a list row the figures replace the ID line, without the bars. */
-.grid.list-view .card-mem,.card.drag-list-clone .card-mem{position:absolute;left:98px;top:calc(50% + 2px);margin:0;flex-wrap:nowrap;gap:12px}
-.grid.list-view .card-mem .meter,.card.drag-list-clone .card-mem .meter{display:none}
-.grid.list-view .card-id:has(~.card-mem:not(:empty)) .card-uid,.card.drag-list-clone .card-id:has(~.card-mem:not(:empty)) .card-uid{visibility:hidden}
 
 /* ---- accounts toolbar ---- */
 .acct-head{align-self:stretch;display:flex;align-items:center;justify-content:space-between;gap:16px}
@@ -971,8 +962,8 @@ button:not(:disabled):active,.btn:not(:disabled):active,.tb-btn:active,.nav-add:
 .acct-ph .strip-btn{display:inline-flex;align-items:center;gap:7px;padding:0 15px 0 12px;font-size:var(--fs-sm);font-weight:500;white-space:nowrap}
 .acct-ph .strip-btn .material-icons-round{font-size:18px}
 /* keep the strip on one row as the window narrows: shorter bars, then numbers only */
-@media (max-width:1100px){.acct-ph .ph-actions{gap:10px}.acct-ph .stat-meter .meter{flex-basis:18px}}
-@media (max-width:980px){.acct-ph .stat-meter .meter{display:none}}
+@container main (max-width:1100px){.acct-ph .ph-actions{gap:10px}.acct-ph .stat-meter .meter{flex-basis:18px}}
+@container main (max-width:980px){.acct-ph .stat-meter .meter{display:none}}
 .key-pick{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .key-pick .btn{height:36px;min-width:74px;justify-content:center}
 .key-pick .key-pick-reset{min-width:0;width:36px;padding:0}
@@ -1114,7 +1105,6 @@ button:not(:disabled):active,.btn:not(:disabled):active,.tb-btn:active,.nav-add:
 .grid.list-view .card-add-icon{width:auto;height:auto;background:none;color:var(--ac);font-size:26px}
 /* the control strip: groups with a hairline between them */
 .strip-sep{flex:none;width:1px;height:22px;background:var(--bd2)}
-@media (max-width:1100px){.strip-sep{display:none}}
 
 /* ---- brighter: labels on controls are white, the rest stay a clear step down ---- */
 .strip-afk,.card-add-label,.stat-meter{color:var(--t1)}
@@ -1214,10 +1204,316 @@ html:not(.light) .vt.active,html:not(.light) .acct-ph .vt.active,html:not(.light
 #ui-tip.snap{transition:opacity 150ms var(--smooth),transform 0s}
 
 /* pages */
-.page{translate:0 8px;transition:opacity 240ms var(--smooth),translate 460ms var(--out-q)}
-.page.active{translate:none}
+/* pages fade here; the slide and blur come from pageSwap() in renderer.js */
+.page{transition:opacity 240ms var(--smooth)}
 @keyframes panelIn{from{opacity:0;translate:0 8px}to{opacity:1;translate:none}}
 .tab-panel{animation-duration:320ms;animation-timing-function:var(--out-q)}
 @keyframes cardIn{from{opacity:0;translate:0 8px}to{opacity:1;translate:none}}
 
 @media (prefers-reduced-motion:reduce){.modal,.toast,.av-tip,.ctx-menu,.filter-menu,.cdd-menu,.gv-acct-menu,.page{transition-duration:.01ms!important;animation-duration:.01ms!important}}
+
+
+/* ---- Accounts strip: Trim RAM button + auto-trim countdown ---- */
+.strip-trim,.strip-timer{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 10px;border:none;border-radius:8px;background:transparent;color:var(--t1);font:500 var(--fs-sm)/1 'Inter',sans-serif;white-space:nowrap;cursor:pointer;-webkit-app-region:no-drag;transition:background-color 160ms var(--smooth),color 160ms var(--smooth)}
+.strip-trim:hover,.strip-timer:hover{background:color-mix(in srgb,var(--t1) 9%,transparent)}
+.strip-trim:disabled{opacity:.55;cursor:default}
+.strip-trim .material-icons-round,.strip-timer .material-icons-round{font-size:19px}
+.strip-timer b{font-weight:500;font-variant-numeric:tabular-nums;min-width:34px;text-align:left}
+.strip-timer.off{color:var(--t2)}
+
+/* ---- Edit account: Performance tab ---- */
+.field-select{width:100%;height:40px;padding:0 36px 0 14px;background:var(--s2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 14px center;border:1px solid var(--bd);border-radius:var(--r2);box-shadow:inset 0 1px 2px rgba(0,0,0,.22);color:var(--t1);font:500 var(--fs-sm)/1 'Inter',sans-serif;outline:none;appearance:none;cursor:pointer;transition:border-color var(--dur) var(--smooth)}
+.field-select:focus{border-color:var(--ac)}
+.field-select option{background:var(--s2);color:var(--t1)}
+html:not(.light) .field-select{color-scheme:dark}
+.edit-win-seg{display:flex;width:100%}
+/* five options share the row; the side padding is trimmed so "Headless" fits */
+.edit-win-seg button{flex:1 1 auto;min-width:0;padding-left:8px;padding-right:8px}
+
+/* ---- Mixer: custom FFlags ---- */
+.ff-list{display:flex;flex-direction:column;gap:8px;padding:4px 18px 4px}
+.ff-empty{padding:10px 12px;border:1px dashed var(--bd2);border-radius:var(--r2);color:var(--t2);font-size:var(--fs-sm)}
+.ff-row{display:flex;flex-direction:column;gap:6px;padding:10px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--r2)}
+.ff-main{display:flex;align-items:center;gap:8px;min-width:0}
+.ff-name{flex:1;min-width:0;height:36px;font-family:'JetBrains Mono',monospace;font-size:var(--fs-xs);background-color:var(--s1)}
+.ff-num{width:96px;height:36px;padding:0 10px;background:var(--s1);border:1px solid var(--bd);border-radius:8px;color:var(--t1);font:500 var(--fs-sm)/1 'JetBrains Mono',monospace;outline:none;text-align:right}
+.ff-num:focus{border-color:var(--ac)}
+.ff-scope{display:flex;align-items:center;gap:6px;height:36px;max-width:190px;padding:0 8px 0 10px;background:var(--s1);border:1px solid var(--bd);border-radius:8px;color:var(--t1);font:500 var(--fs-sm)/1 'Inter',sans-serif;cursor:pointer;white-space:nowrap;transition:background-color 160ms var(--smooth),border-color 160ms var(--smooth)}
+.ff-scope:hover,.ff-scope.open{background:var(--s3);border-color:var(--bd2)}
+.ff-scope span:nth-child(2){overflow:hidden;text-overflow:ellipsis}
+.ff-scope .material-icons-round{font-size:16px;color:var(--t2);flex-shrink:0}
+.ff-scope.open .material-icons-round:last-child{transform:rotate(180deg)}
+.ff-del{width:32px;height:32px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:none;border-radius:8px;background:transparent;color:var(--t2);cursor:pointer;transition:background-color 160ms var(--smooth),color 160ms var(--smooth)}
+.ff-del:hover{background:var(--rd);color:var(--red)}
+.ff-del .material-icons-round{font-size:17px}
+.ff-desc{font-size:var(--fs-xs);color:var(--t2);padding-left:2px}
+.ff-pick{display:flex;flex-wrap:wrap;gap:6px;padding-top:4px;border-top:1px solid var(--bd);margin-top:2px;padding-top:9px}
+.mk-chip-lite{height:28px;padding:0 11px;border:1px solid var(--bd);border-radius:8px;background:var(--s1);color:var(--t1);font:500 var(--fs-xs)/1 'Inter',sans-serif;cursor:pointer;transition:background-color 160ms var(--smooth),color 160ms var(--smooth),border-color 160ms var(--smooth)}
+.mk-chip-lite:hover{background:var(--s3)}
+.mk-chip-lite.on{background:var(--ac);color:var(--on-ac);border-color:transparent}
+.ff-foot{padding:8px 18px 14px}
+
+/* ---- Groups ---- */
+.pkg-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(500px,1fr));gap:12px;align-items:start}
+.pkg-card{padding:0;display:flex;flex-direction:column}
+.pkg-card-top{padding:15px 16px 0;margin-bottom:12px;align-items:flex-start}
+.pkg-name{font-size:var(--fs-lg);font-weight:650;letter-spacing:-.015em;margin-bottom:5px}
+.pkg-status{display:flex;align-items:center;gap:10px}
+.pkg-status .pkg-meta{font-size:var(--fs-sm);font-weight:500}
+.pkg-status .pkg-run-bar{flex:0 0 96px;margin-top:0}
+.pkg-card-actions{gap:2px;margin:-4px -6px 0 0}
+.pkg-card-actions .btn.btn-edit,.pkg-card-actions .btn.btn-del{width:32px;height:32px;background:transparent;border-color:transparent;box-shadow:none;color:var(--t2)}
+.pkg-card-actions .btn.btn-edit:hover{background:var(--s3);color:var(--t1)}
+.pkg-card-actions .btn.btn-del:hover{background:var(--rd);color:var(--red)}
+.pkg-card-actions .btn .material-icons-round{font-size:17px}
+.pkg-members{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 14px}
+.pkg-member{display:inline-flex;align-items:center;gap:7px;height:30px;max-width:180px;padding:0 10px 0 3px;border-radius:8px;background:var(--s2);border:1px solid var(--bd);color:var(--t2);font:500 var(--fs-xs)/1 'Inter',sans-serif;transition:border-color 160ms var(--smooth),color 160ms var(--smooth),background-color 160ms var(--smooth)}
+.pkg-member:has(.pkg-avatar.online){color:var(--t1);border-color:color-mix(in srgb,var(--green) 38%,var(--bd))}
+.pkg-member .pkg-avatar{width:24px;height:24px;margin-left:0;border:none;border-radius:6px;font-size:10px}
+.pkg-member .pkg-avatar img{border-radius:6px}
+.pkg-member .pkg-avatar-dot{bottom:-2px;right:-2px;border-color:var(--s2)}
+.pkg-member-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pkg-member.more{padding:0 11px;cursor:pointer}
+.pkg-member.more:hover{background:var(--s3);color:var(--t1)}
+.pkg-members-empty{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);color:var(--t2)}
+.pkg-add-link{border:none;background:none;padding:4px 6px;border-radius:6px;color:var(--t1);font:600 var(--fs-sm)/1 'Inter',sans-serif;cursor:pointer;text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--t3)}
+.pkg-add-link:hover{background:var(--s3);text-decoration-color:var(--t1)}
+.pkg-link-row{margin-top:auto;padding:12px 16px;border-top:1px solid var(--bd);background:color-mix(in srgb,var(--bg) 50%,var(--s1));border-radius:0 0 var(--r) var(--r)}
+.pkg-link-field{background:var(--s1)}
+.pkg-launch-btn{gap:4px;padding:0 16px 0 12px}
+.pkg-launch-btn .material-icons-round{font-size:18px}
+.pkg-progress{padding:0 16px;margin-top:0}
+.pkg-progress:not(:empty){padding:0 16px 14px;margin-top:-2px}
+@container main (max-width:1060px){.pkg-list{grid-template-columns:minmax(0,1fr)}}
+
+/* ---- Squared leftovers: toggles, slider knobs, bars, avatars ----
+   Status dots, spinners and click ripples stay round on purpose. */
+.toggle-trk::before{border-radius:4px}
+.toggle.sm .toggle-trk::before{border-radius:3px}
+.strip-afk .toggle-trk{border-radius:8px}
+.strip-afk .toggle-trk::before{border-radius:5px}
+.fps-slider::-webkit-slider-thumb{border-radius:4px}
+.gv-vote-bar,.gv-vote-bar div,.gv-bar,.gv-bar i,.pkg-run-bar,.pkg-run-bar span,.meter,.meter i,.skel-line{border-radius:2px}
+.tc-check{border-radius:5px}
+.pkg-avatar{border-radius:7px}
+.gv-faces img{border-radius:6px}
+
+/* ---- Accounts strip: always one line ----
+   The text buttons only turn into icons (names kept as tooltips) when the
+   content area is narrower than the strip needs with labels, about 840px;
+   at the 1146px minimum window there is plenty, so the labels always stay. */
+.acct-ph .vt{display:inline-flex;align-items:center;justify-content:center}
+.acct-ph .vt .material-icons-round{display:none;font-size:18px}
+@container main (max-width:1040px){
+  .acct-ph .ph-actions{gap:8px;padding-left:16px}
+}
+@container main (max-width:840px){
+  .acct-ph #layout-label{display:none}
+  .acct-ph .vt{padding:0 10px}
+  .acct-ph .vt .material-icons-round{display:block}
+  .acct-ph .vt .vt-lbl{display:none}
+}
+
+/* ---- Anti-AFK key: flush right, pulses while waiting, pops when set ---- */
+.key-pick .btn{min-width:84px;transition:min-width 260ms var(--spring),background-color 160ms var(--smooth),color 160ms var(--smooth)}
+.key-pick .btn.listening{min-width:128px;outline:none;animation:keyListen 1.2s ease-in-out infinite}
+.key-pick .btn.key-set{animation:keyPop 420ms var(--spring)}
+@keyframes keyListen{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ac) 45%,transparent)}50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--ac) 0%,transparent)}}
+@keyframes keyPop{0%{transform:scale(.9)}60%{transform:scale(1.06)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.key-pick .btn.listening,.key-pick .btn.key-set{animation:none}}
+
+/* The pages size themselves to the content area (container queries above). */
+#main{container:main/inline-size}
+
+/* ── Settings: sections, one-line rows, expandable details ── */
+.st-search{display:flex;align-items:center;gap:8px;width:300px;max-width:42%;height:40px;padding:0 12px;margin-top:4px;flex-shrink:0;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r2);color:var(--t3);cursor:text;transition:border-color var(--dur) var(--smooth)}
+.st-search:hover{border-color:var(--bd2)}
+.st-search:focus-within{border-color:var(--t3)}
+.st-search .material-icons-round{font-size:18px}
+.st-search input{flex:1;min-width:0;height:100%;background:none;border:none;outline:none;color:var(--t1);font:500 var(--fs-sm) 'Inter',sans-serif}
+.st-search input::placeholder{color:var(--t3)}
+#page-settings.searching{overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--s4) transparent}
+#page-settings.searching .tab-bar{opacity:.45}
+#page-settings.searching .sw.st{flex:none;overflow:visible;padding-bottom:8px}
+.st-hide{display:none!important}
+.st-empty{padding:48px 28px;text-align:center;color:var(--t3);font-size:var(--fs-sm)}
+.sw.st .st-sec{font-size:var(--fs-lg);font-weight:600;color:var(--t1);letter-spacing:-.01em;margin:26px 2px 10px}
+.sw.st .st-sec:first-child{margin-top:6px}
+.sw.st .sc{padding:0 20px;margin-bottom:0;border-radius:var(--r-lg)}
+.sw.st .sr{padding:16px 0;gap:24px}
+.sw.st .sc>.sr+.sr,.sw.st .sc>.sr-group+.sr{border-top:1px solid var(--bd)}
+.sw.st .sc>.sr:has(+.sr-group){padding-bottom:12px}
+.sw.st .sr-label{font-weight:600;margin-bottom:3px}
+.sr-chev{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin:-2px 0 -2px 4px;padding:0;vertical-align:middle;border:none;border-radius:var(--r-xs);background:none;color:var(--t3);cursor:pointer;transition:color var(--dur) var(--smooth),background var(--dur) var(--smooth)}
+.sr-chev:hover{color:var(--t1);background:var(--s3)}
+.sr-chev:focus-visible{outline:2px solid var(--ac);outline-offset:1px}
+.sr-chev .material-icons-round{font-size:18px;transition:transform 240ms var(--smooth)}
+.sr.open .sr-chev .material-icons-round{transform:rotate(180deg)}
+.sr-more{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows 260ms var(--smooth),opacity 200ms var(--smooth)}
+.sr-more>div{overflow:hidden;min-height:0;max-width:640px;padding-top:0;font-size:var(--fs-sm);line-height:1.55;color:var(--t3);transition:padding-top 260ms var(--smooth)}
+.sr.open .sr-more{grid-template-rows:1fr;opacity:1}
+.sr.open .sr-more>div{padding-top:6px}
+.sw.st .sr>.cdd{width:200px}
+.sw.st .sr>.cdd.cdd-wide{width:260px}
+.sw.st .sr>.cdd .cdd-trigger{min-height:40px}
+.sw.st .sr>.cdd .cdd-menu{left:auto;right:0;min-width:100%;width:max-content;max-width:340px}
+.sr-num{display:inline-flex;align-items:center;gap:10px;flex-shrink:0}
+.sr-num .sr-input{width:96px}
+.sr-num input::-webkit-outer-spin-button,.sr-num input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.sr-unit{min-width:24px;font-size:var(--fs-sm);color:var(--t2)}
+.st-key{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.st-key .sr-input{width:240px}
+.st-key .btn{height:40px;padding:0 12px}
+.sr-group{margin:0 0 16px;padding:0 18px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--r);transition:opacity var(--dur) var(--smooth)}
+.sw.st .sr-group>.sr{padding:14px 0}
+.sr-group>.sr+.sr{border-top:1px solid var(--bd)}
+.sr-group .cdd-trigger{background:var(--s1)}
+.sr-group.off{opacity:.55}
+/* still usable while off: the choices are saved for when it's turned on */
+.sr-group.off:hover,.sr-group.off:focus-within{opacity:.8}
+
+/* ---- Auto layout: the same box and button size as Cards/Compact ---- */
+.acct-ph .layout-toggle{flex-shrink:0}
+.acct-ph .layout-vt{gap:7px;padding:0 14px 0 11px;background:var(--s4);color:var(--t1);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 2px 6px rgba(0,0,0,.3);transition:background-color 160ms var(--smooth),color 160ms var(--smooth),filter 160ms var(--smooth)!important}
+html:not(.light) .acct-ph .layout-vt{background:#f5f5f7;color:#111113;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.acct-ph .layout-vt .material-icons-round{display:block;font-size:17px}
+@container main (max-width:840px){.acct-ph .layout-vt{padding:0 10px}}
+
+/* ---- native selects drawn as the app's dropdowns (see enhanceSelect) ---- */
+select.cdd-native{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;overflow:hidden}
+.cdd-select{width:100%}
+.cdd-select .cdd-trigger{min-height:40px;padding:6px 10px 6px 14px;font-size:var(--fs-sm)}
+.cdd-select .cdd-menu{min-width:100%;width:max-content;max-width:min(420px,calc(100vw - 40px))}
+.cdd-select .cdd-option{padding:8px 11px}
+.cdd-select .cdd-opt-name{font-size:var(--fs-sm)}
+.modal .cdd-select .cdd-trigger{background:var(--s1)}
+.cdd-select.ff-name{flex:1;min-width:0;height:auto;background:none;font:inherit}
+.cdd-select.ff-name .cdd-trigger{min-height:36px;height:36px;font-family:'JetBrains Mono',monospace;font-size:var(--fs-xs)}
+.cdd-select.ff-name .cdd-opt-name{font-family:'JetBrains Mono',monospace;font-size:var(--fs-xs)}
+/* the selector highlights glide as a transform (see movePill) */
+#nav-pill,.seg-pill,.tab-slider{will-change:transform}
+
+/* the details chevron sits on the text's line, centred on it */
+.sr-chev{height:1lh;margin:0 0 0 4px;vertical-align:top;position:relative;top:1.5px}
+
+/* ---- slider numbers you can type into (see initSliderNumbers) ---- */
+.fps-val-label[data-editable]{cursor:text;padding:3px 7px;margin:-3px -7px -3px -3px;border-radius:6px;border:1px solid transparent;outline:none;transition:background-color 140ms var(--smooth),border-color 140ms var(--smooth)}
+.fps-val-label[data-editable]:hover{background:var(--s3)}
+.fps-val-label[data-editable][aria-disabled=true]{cursor:default;background:none}
+.fps-val-label.editing,.fps-val-label[data-editable]:focus-visible{background:var(--s2);border-color:var(--ac);caret-color:var(--t1)}
+.fps-val-label.editing{text-align:left}
+
+/* ---- one hover for every filled button ----
+   Anything drawn in the accent colour (New group, Start All, Apply, Refresh,
+   the strip's buttons, Auto layout) goes a touch darker on hover. Buttons on
+   a dark surface (edit, delete, icons) keep their own lighter-surface hover. */
+.btn:is(.btn-primary,.btn-launch,.btn-ghost,.btn-sm):not(:disabled),
+.btn-out:not(:disabled),
+.acct-ph .layout-vt,
+.gv-play-main{transition:filter 160ms var(--smooth),background-color 160ms var(--smooth),color 160ms var(--smooth),border-color 160ms var(--smooth),box-shadow 200ms var(--smooth)!important}
+.btn:is(.btn-primary,.btn-launch,.btn-ghost):not(:disabled):hover,
+.btn-out:not(:disabled):hover,
+.acct-ph .layout-vt:hover,
+.gv-play-main:not(:disabled):hover{filter:brightness(.92)}
+/* a stopping (red) card button and a running button keep their own look */
+.card.is-live .btn.btn-launch:hover{filter:none}
+
+/* page and tab contents rising in one after another (see cascade() in renderer.js) */
+@keyframes cas-in{from{opacity:0;transform:translateY(var(--cas-lift,12px))}to{opacity:1;transform:none}}
+.cas{animation:cas-in var(--cas-dur,420ms) cubic-bezier(.16,1,.3,1) var(--cas-delay,0ms) backwards!important}
+@media (prefers-reduced-motion:reduce){.cas{animation:none!important}}
+
+/* ================= Generator ================= */
+#page-generator{overflow:hidden}
+.gen-chip{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 13px;border-radius:999px;background:var(--s1);border:1px solid var(--bd);font-size:var(--fs-sm);font-weight:600;color:var(--t2);flex-shrink:0;transition:color 160ms var(--smooth),border-color 160ms var(--smooth)}
+.gen-chip i{width:8px;height:8px;border-radius:50%;background:var(--t3);transition:background-color 160ms var(--smooth),box-shadow 160ms var(--smooth)}
+.gen-chip:is([data-state=bloxgen],[data-state=altgen]){color:var(--t1);border-color:var(--bd2)}
+.gen-chip:is([data-state=bloxgen],[data-state=altgen]) i{background:var(--green);box-shadow:0 0 0 3px var(--gd)}
+.gen-chip[data-state=bad] i{background:var(--red);box-shadow:0 0 0 3px var(--rd)}
+
+.gen-wrap{display:grid;grid-template-columns:minmax(330px,390px) minmax(0,1fr);gap:22px;align-items:stretch;overflow:hidden;min-height:0;padding-bottom:20px}
+.gen-left{display:flex;flex-direction:column;min-width:0;min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--s4) transparent;padding:0 4px 4px 0}
+.gen-right{display:flex;flex-direction:column;min-width:0;min-height:0}
+.gen-sec{display:flex;align-items:center;gap:10px;min-height:34px;margin:16px 2px 10px;font-size:var(--fs-lg);font-weight:600;letter-spacing:-.01em;color:var(--t1)}
+.gen-left>.gen-sec:first-child,.gen-right>.gen-sec:first-child{margin-top:2px}
+.gen-count{font-size:var(--fs-xs);font-weight:600;color:var(--t2);background:var(--s2);border:1px solid var(--bd);border-radius:999px;padding:2px 9px}
+.gen-count:empty{display:none}
+.gen-grow{flex:1}
+.gen-find{display:flex;align-items:center;gap:6px;width:190px;height:34px;padding:0 10px;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r2);color:var(--t3);cursor:text;transition:border-color 160ms var(--smooth),width 260ms var(--smooth)}
+.gen-find:hover{border-color:var(--bd2)}
+.gen-find:focus-within{border-color:var(--t3);width:230px}
+.gen-find .material-icons-round{font-size:17px}
+.gen-find input{flex:1;min-width:0;height:100%;background:none;border:none;outline:none;color:var(--t1);font:500 var(--fs-sm) 'Inter',sans-serif}
+.gen-find input::placeholder{color:var(--t3)}
+.gen-right:not(.has-history) .gen-find,.gen-right:not(.has-history) .gen-hist-clear{opacity:.4;pointer-events:none}
+.gen-hist-clear{height:34px;padding:0 13px}
+
+/* setup card, in the same row style as Settings */
+.gen-left .sc{padding:0 18px;margin:0;border-radius:var(--r-lg)}
+.gen-left .sc>.sr{padding:12px 0;gap:16px}
+.gen-left .sc>.sr+.sr{border-top:1px solid var(--bd)}
+.gen-left .sr-label{font-weight:600}
+.gen-keyrow{flex-direction:column;align-items:stretch;gap:0!important}
+.gen-key{display:flex;align-items:center;gap:8px;width:100%;margin-top:10px}
+.gen-key .sr-input{flex:1;width:auto;min-width:0}
+.gen-key .btn{height:40px;width:42px;padding:0;flex-shrink:0}
+.gen-left .sr>.cdd{width:180px;flex-shrink:0}
+.gen-left .sr>.cdd .cdd-trigger{min-height:40px}
+.gen-left .sr>.cdd .cdd-menu{left:auto;right:0;min-width:100%;width:max-content;max-width:300px}
+.gen-go{width:100%;justify-content:center;height:44px;margin:12px 0 0;font-size:var(--fs-md);gap:8px;flex-shrink:0}
+.gen-go .material-icons-round{font-size:18px}
+.gen-go.is-busy .material-icons-round{animation:gen-spin 900ms linear infinite}
+@keyframes gen-spin{to{transform:rotate(360deg)}}
+
+/* the account just generated */
+.gen-left .sc.gen-latest{padding:14px 16px 16px;margin-top:12px;flex-shrink:0}
+.gl-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:28px 12px;text-align:center;border:1px dashed var(--bd2);border-radius:var(--r2);color:var(--t3)}
+.gl-empty .material-icons-round{font-size:26px;margin-bottom:2px}
+.gl-empty b{font-size:var(--fs-md);font-weight:600;color:var(--t2)}
+.gl-empty .sub{font-size:var(--fs-sm);line-height:1.5}
+.gl-body{display:none}
+.gen-latest:not(.is-empty) .gl-body{display:block}
+.gen-latest:not(.is-empty) .gl-empty{display:none}
+.gl-top{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.gl-id{min-width:0}
+.gl-mono,.gh-mono{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:38px;height:38px;border-radius:10px;font-size:var(--fs-lg);font-weight:700;color:var(--t1);background:hsl(var(--h,220) 24% 24%)}
+.gl-name{font-size:var(--fs-lg);font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gl-meta{margin-top:2px;font:500 var(--fs-xs) 'JetBrains Mono',monospace;letter-spacing:.02em;color:var(--t2)}
+.gl-field{display:flex;align-items:center;gap:6px;height:40px;margin-top:8px;padding:0 6px 0 12px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--r2)}
+.gl-field label{width:70px;flex-shrink:0;font-size:var(--fs-xs);font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--t3)}
+.gl-val{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:500 var(--fs-sm) 'JetBrains Mono',monospace;color:var(--t1);user-select:text}
+.gl-val[data-shown="0"]{letter-spacing:.16em}
+.gl-icon{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:30px;height:30px;padding:0;border:none;border-radius:7px;background:transparent;color:var(--t2);cursor:pointer;transition:background-color 140ms var(--smooth),color 140ms var(--smooth)}
+.gl-icon:hover{background:var(--s3);color:var(--t1)}
+.gl-icon:disabled{opacity:.4;cursor:default}
+.gl-icon .material-icons-round{font-size:17px}
+.gl-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.gl-actions .btn{height:40px;justify-content:center}
+@keyframes gl-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.gl-body.gl-pop{animation:gl-in 380ms cubic-bezier(.16,1,.3,1)}
+
+/* history */
+#gen-history-sc{flex:1 1 0;min-height:0;display:flex;flex-direction:column;margin:0;overflow:hidden;border-radius:var(--r-lg)}
+#gen-history-list{flex:1 1 0;height:0;min-height:0;display:flex;flex-direction:column;gap:2px;overflow-y:auto;padding:6px;scrollbar-width:thin;scrollbar-color:var(--s4) transparent}
+#gen-history-sc.is-empty #gen-history-list,#gen-history-sc.no-match #gen-history-list,#gen-history-sc:not(.is-empty) #gen-history-empty,#gen-history-sc.is-empty #gen-history-nomatch,#gen-history-sc:not(.no-match) #gen-history-nomatch{display:none}
+.gen-hist-item{display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:var(--r2);color:var(--t2);cursor:default;transition:background-color 140ms var(--smooth)}
+.gen-hist-item:hover{background:var(--s3)}
+.gen-hist-item .gh-mono{width:36px;height:36px;border-radius:10px;font-size:var(--fs-md)}
+.gh-main{flex:1;min-width:0}
+.gh-user{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-md);font-weight:600;color:var(--t1)}
+.gh-sub{display:flex;align-items:center;gap:6px;min-width:0;margin-top:2px;font-size:var(--fs-xs);color:var(--t3)}
+.gh-pass{max-width:210px;padding:2px 6px;margin-left:-6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:none;border-radius:5px;background:none;color:var(--t2);font:500 var(--fs-xs) 'JetBrains Mono',monospace;cursor:pointer;transition:background-color 140ms var(--smooth),color 140ms var(--smooth)}
+.gh-pass:hover{background:var(--s4);color:var(--t1)}
+.gh-pass[data-shown="0"]{letter-spacing:.14em}
+.gh-added{padding:1px 8px;border-radius:999px;background:var(--gd);color:var(--green);font-weight:600}
+.gh-actions{display:flex;gap:2px;flex-shrink:0}
+@keyframes gh-in{from{opacity:0;transform:translateY(-6px);background:var(--s3)}to{opacity:1;transform:none}}
+.gen-hist-item.gh-new{animation:gh-in 460ms cubic-bezier(.16,1,.3,1)}
+#gen-history-sc .empty{flex:1}
+@media (prefers-reduced-motion:reduce){.gl-body.gl-pop,.gen-hist-item.gh-new{animation:none}.gen-go.is-busy .material-icons-round{animation:none}}
+/* deleting a group: the card fades away, the ones after it slide up (see pkgRemoveCard) */
+@keyframes pkg-out{to{opacity:0;transform:scale(.94) translateY(-6px)}}
+.pkg-card.pkg-leaving{animation:pkg-out 240ms cubic-bezier(.4,0,1,1) forwards!important;pointer-events:none}
+@keyframes pkg-shift{from{translate:var(--fx,0) var(--fy,0)}to{translate:0 0}}
+.pkg-card.pkg-shift{animation:pkg-shift 380ms cubic-bezier(.16,1,.3,1) both!important}
+@media (prefers-reduced-motion:reduce){.pkg-card.pkg-leaving,.pkg-card.pkg-shift{animation:none!important}}

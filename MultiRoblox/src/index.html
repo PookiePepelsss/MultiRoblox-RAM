@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://*.rbxcdn.com https://*.roblox.com; connect-src 'self' https://*.roblox.com https://core.bloxgen.net; object-src 'none'; base-uri 'self'; frame-src 'none'"/>
-<title>MultiRoblox</title>
+<title>Vanta Manager</title>
 <link rel="stylesheet" href="fonts/fonts.css"/>
 <link rel="stylesheet" href="styles.css"/>
 <script>
@@ -31,7 +31,7 @@ window.DEFAULT_THEME = 'dark';
 <body>
 <div id="titlebar">
   <div class="tb-brand">
-    <div class="tb-name">MultiRoblox</div>
+    <div class="tb-name">Vanta Manager</div>
   <button class="tb-btn" id="discord-btn" onclick="openDiscord()" aria-label="Join our Discord" style="-webkit-app-region:no-drag">
     <svg width="15" height="15" viewBox="0 0 127.14 96.36" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
       <path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z"/>
@@ -49,7 +49,7 @@ window.DEFAULT_THEME = 'dark';
     <button class="nav-item" id="nav-tracking" onclick="goTo('tracking')" aria-label="Tracking"><span class="material-icons-round">track_changes</span><span class="nav-label">Tracking</span></button>
     <button class="nav-item" id="nav-settings" onclick="goTo('settings')" aria-label="Settings"><span class="material-icons-round">settings</span><span class="nav-label">Settings</span></button>
     <button class="nav-item" id="nav-logs" onclick="goTo('logs')" aria-label="Logs"><span class="material-icons-round">terminal</span><span class="nav-label">Logs</span></button>
-    <span class="tb-running" id="tb-running" title="Roblox instances launched by MultiRoblox and still running" style="display:none"></span>
+    <span class="tb-running" id="tb-running" title="Roblox instances launched by Vanta Manager and still running" style="display:none"></span>
   </nav>
   <div class="tb-drag"></div>
   <button class="tb-btn" onclick="openModal('m-help')" style="-webkit-app-region:no-drag"><span class="material-icons-round" style="font-size:15px">help_outline</span></button>
@@ -76,15 +76,18 @@ window.DEFAULT_THEME = 'dark';
             <span class="stat-meter" id="sys-cpu" title="CPU use across the whole PC">CPU<span class="meter"><i></i></span><b>–</b></span>
             <span class="stat-meter" id="sys-mem" title="Memory use across the whole PC">Memory<span class="meter"><i></i></span><b>–</b></span>
             <span class="stat-meter" id="sys-gpu" title="GPU use across the whole PC">GPU<span class="meter"><i></i></span><b>–</b></span>
-            <label class="strip-afk strip-push" title="Keep instances past the 20-minute idle kick">Anti-AFK
+            <span class="strip-sep" aria-hidden="true"></span>
+            <label class="strip-afk" title="Keep instances past the 20-minute idle kick">Anti-AFK
               <span class="toggle"><input type="checkbox" id="sb-antiafk" onchange="toggleAntiAfk('sb')"/><span class="toggle-trk"></span></span>
             </label>
             <span class="strip-sep" aria-hidden="true"></span>
-            <button class="btn-out strip-btn" id="layout-btn" onclick="openAutoLayout()" aria-pressed="false" title="Line up your running windows on this screen"><span class="material-icons-round" id="layout-icon">grid_view</span><span class="strip-btn-label" id="layout-label">Auto layout</span></button>
-            <span class="strip-sep" aria-hidden="true"></span>
+            <div class="view-toggle layout-toggle">
+              <button class="vt layout-vt" id="layout-btn" onclick="openAutoLayout()" aria-pressed="false" title="Line up your running windows on this screen"><span class="material-icons-round" id="layout-icon">grid_view</span><span class="vt-lbl" id="layout-label">Auto layout</span></button>
+            </div>
+            <span class="strip-sep strip-push" aria-hidden="true"></span>
             <div class="view-toggle" id="acct-view">
-              <button class="vt active" id="vt-grid" onclick="setAcctView('grid')" title="Big cards with avatars">Cards</button>
-              <button class="vt" id="vt-list" onclick="setAcctView('list')" title="One slim row per account">Compact</button>
+              <button class="vt active" id="vt-grid" onclick="setAcctView('grid')" title="Cards: big cards with avatars" aria-label="Cards"><span class="material-icons-round">view_module</span><span class="vt-lbl">Cards</span></button>
+              <button class="vt" id="vt-list" onclick="setAcctView('list')" title="Compact: one slim row per account" aria-label="Compact"><span class="material-icons-round">view_list</span><span class="vt-lbl">Compact</span></button>
             </div>
             <div class="filter-wrap">
               <button class="btn-out strip-icon" id="filter-btn" onclick="toggleFilterMenu(event)" title="Filter accounts" aria-label="Filter accounts"><span class="material-icons-round">filter_list</span></button>
@@ -104,7 +107,7 @@ window.DEFAULT_THEME = 'dark';
         <div class="grid-wrap">
           <div class="grid" id="grid"></div>
           <div class="empty welcome" id="empty" style="display:none">
-            <div class="welcome-title">Welcome to MultiRoblox</div>
+            <div class="welcome-title">Welcome to Vanta Manager</div>
             <div class="welcome-sub">Run several Roblox accounts at the same time. Three steps to get going:</div>
             <div class="welcome-steps">
               <div class="welcome-step">
@@ -225,7 +228,7 @@ window.DEFAULT_THEME = 'dark';
                 <span class="fps-val-label" id="mix-fps-val" style="min-width:40px">60</span>
               </div>
             </div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Protect FPS cap</div><div class="sr-desc">Roblox resets the cap when a client closes or its in-game settings change. While this is on, MultiRoblox puts your cap back within a few seconds and again before every launch.</div></div><label class="toggle"><input type="checkbox" id="mix-fps-lock" checked onchange="mixFpsLockToggle()"/><span class="toggle-trk"></span></label></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Protect FPS cap</div><div class="sr-desc">Roblox resets the cap when a client closes or its in-game settings change. While this is on, Vanta Manager puts your cap back within a few seconds and again before every launch.</div></div><label class="toggle"><input type="checkbox" id="mix-fps-lock" checked onchange="mixFpsLockToggle()"/><span class="toggle-trk"></span></label></div>
           </div>
           <!-- Volume -->
           <div class="sc">
@@ -243,6 +246,19 @@ window.DEFAULT_THEME = 'dark';
               </div>
             </div>
           </div>
+          <!-- Custom FFlags -->
+          <div class="sc">
+            <div class="sc-head">Custom FFlags</div>
+            <div class="sr" style="padding-bottom:6px">
+              <div class="sr-left">
+                <div class="sr-desc">Only flags on Roblox's allowlist are offered, since the client ignores the rest. Each one can apply to every account or only to the accounts you pick. Used from the next launch.</div>
+              </div>
+            </div>
+            <div class="ff-list" id="ff-list"></div>
+            <div class="ff-foot">
+              <button class="btn btn-ghost" id="ff-add" onclick="ffAdd()"><span class="material-icons-round" style="font-size:15px">add</span>Add a flag</button>
+            </div>
+          </div>
           <!-- Apply / actions -->
           <div class="mix-actions">
             <button class="btn btn-danger kill-roblox-btn" onclick="mixKillAll()" id="mix-kill-btn">
@@ -255,82 +271,105 @@ window.DEFAULT_THEME = 'dark';
         </div>
       </div>
       <!-- generator page -->
-      <div class="page" id="page-generator" style="overflow-y:auto">
-        <div class="ph">
+      <div class="page" id="page-generator">
+        <div class="ph" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
           <div>
             <div class="ph-title">Generator</div>
             <div class="ph-sub">Generate a Roblox alt via BloxGen or Altgen API</div>
           </div>
+          <span class="gen-chip" id="gen-provider" data-state="none" title="Which service your key belongs to"><i></i><span id="gen-provider-text">No key yet</span></span>
         </div>
-        <div class="sw split-layout">
-          <div class="split-col">
-          <div class="sc">
-            <div class="sc-head">Setup</div>
-            <div class="sr">
-              <div class="sr-left"><div class="sr-label">API key</div></div>
-              <input type="password" id="gen-apikey" class="sr-input" placeholder="BLOX-XXXX... or MG_XXXX..." aria-label="BloxGen or Altgen API key" oninput="genOnKeyInput();saveGenKeySoon()" style="flex:1;width:auto;font-family:'Inter',sans-serif;font-size:var(--fs-sm);font-weight:500;color:var(--t1)"/>
-              <button class="btn btn-ghost" style="height:40px;padding:0 12px;flex-shrink:0" onclick="genToggleKey()" id="gen-eye-btn">
-                <span class="material-icons-round" id="gen-eye-icon" style="font-size:14px">visibility</span>
-              </button>
-            </div>
-            <div class="sr" id="gen-type-row" style="display:none">
-              <div class="sr-left"><div class="sr-label">Account type</div><div class="sr-desc" id="gen-type-desc">Fresh alt accounts</div></div>
-              <div class="cdd" id="cdd-gentype" style="width:170px">
-                <div class="cdd-trigger" id="cdd-gentype-trigger" onclick="toggleCdd('gentype')" role="button" tabindex="0" aria-label="Account type">
-                  <span class="cdd-label" id="cdd-gentype-label">Alt</span>
-                  <span class="material-icons-round cdd-arrow">expand_more</span>
+        <div class="sw gen-wrap">
+          <div class="gen-left">
+            <div class="gen-sec">Setup</div>
+            <div class="sc">
+              <div class="sr gen-keyrow">
+                <div class="sr-left"><div class="sr-label">API key</div><div class="sr-desc"><span id="gen-key-desc">Paste a BloxGen or Altgen key.</span></div>
+                  <div class="sr-more"><div>Keys starting with BLOX- use BloxGen and keys starting with MG_ use Altgen. The key is stored encrypted on this PC and only ever sent to that service.</div></div></div>
+                <div class="gen-key">
+                  <input type="password" id="gen-apikey" class="sr-input" placeholder="BLOX-XXXX... or MG_XXXX..." aria-label="BloxGen or Altgen API key" spellcheck="false" autocomplete="off" oninput="genOnKeyInput();saveGenKeySoon()"/>
+                  <button class="btn btn-ghost" onclick="genToggleKey()" id="gen-eye-btn" aria-label="Show or hide the key">
+                    <span class="material-icons-round" id="gen-eye-icon" style="font-size:16px">visibility</span>
+                  </button>
                 </div>
-                <div class="cdd-menu" id="cdd-gentype-menu">
-                  <div class="cdd-option selected" data-value="alt" onclick="genSetType('alt','Alt','Fresh alt accounts')" role="button" tabindex="0">
-                    <div class="cdd-opt-left"><div class="cdd-opt-name">Alt</div><div class="cdd-opt-desc">Fresh alt accounts</div></div>
+              </div>
+              <div class="sr" id="gen-type-row" style="display:none">
+                <div class="sr-left"><div class="sr-label">Account type</div><div class="sr-desc" id="gen-type-desc">Fresh alt accounts</div></div>
+                <div class="cdd" id="cdd-gentype">
+                  <div class="cdd-trigger" id="cdd-gentype-trigger" onclick="toggleCdd('gentype')" role="button" tabindex="0" aria-label="Account type">
+                    <span class="cdd-label" id="cdd-gentype-label">Alt</span>
+                    <span class="material-icons-round cdd-arrow">expand_more</span>
                   </div>
-                  <div class="cdd-option" data-value="+30 days old" onclick="genSetType('+30 days old','+30 days old','Accounts aged 30+ days')" role="button" tabindex="0">
-                    <div class="cdd-opt-left"><div class="cdd-opt-name">+30 days old</div><div class="cdd-opt-desc">Accounts aged 30+ days</div></div>
-                  </div>
-                  <div class="cdd-option" data-value="+1 year old" onclick="genSetType('+1 year old','+1 year old','Accounts aged 1+ year')" role="button" tabindex="0">
-                    <div class="cdd-opt-left"><div class="cdd-opt-name">+1 year old</div><div class="cdd-opt-desc">Accounts aged 1+ year</div></div>
-                  </div>
-                  <div class="cdd-option" data-value="5+ years old" onclick="genSetType('5+ years old','5+ years old','Accounts aged 5+ years')" role="button" tabindex="0">
-                    <div class="cdd-opt-left"><div class="cdd-opt-name">5+ years old</div><div class="cdd-opt-desc">Accounts aged 5+ years</div></div>
-                  </div>
-                  <div class="cdd-option" data-value="dump" onclick="genSetType('dump','Dump','Dump accounts with extra account metadata')" role="button" tabindex="0">
-                    <div class="cdd-opt-left"><div class="cdd-opt-name">Dump</div><div class="cdd-opt-desc">Extra account metadata</div></div>
+                  <div class="cdd-menu" id="cdd-gentype-menu">
+                    <div class="cdd-option selected" data-value="alt" onclick="genSetType('alt','Alt','Fresh alt accounts')" role="button" tabindex="0">
+                      <div class="cdd-opt-left"><div class="cdd-opt-name">Alt</div><div class="cdd-opt-desc">Fresh alt accounts</div></div>
+                    </div>
+                    <div class="cdd-option" data-value="+30 days old" onclick="genSetType('+30 days old','+30 days old','Accounts aged 30+ days')" role="button" tabindex="0">
+                      <div class="cdd-opt-left"><div class="cdd-opt-name">+30 days old</div><div class="cdd-opt-desc">Accounts aged 30+ days</div></div>
+                    </div>
+                    <div class="cdd-option" data-value="+1 year old" onclick="genSetType('+1 year old','+1 year old','Accounts aged 1+ year')" role="button" tabindex="0">
+                      <div class="cdd-opt-left"><div class="cdd-opt-name">+1 year old</div><div class="cdd-opt-desc">Accounts aged 1+ year</div></div>
+                    </div>
+                    <div class="cdd-option" data-value="5+ years old" onclick="genSetType('5+ years old','5+ years old','Accounts aged 5+ years')" role="button" tabindex="0">
+                      <div class="cdd-opt-left"><div class="cdd-opt-name">5+ years old</div><div class="cdd-opt-desc">Accounts aged 5+ years</div></div>
+                    </div>
+                    <div class="cdd-option" data-value="dump" onclick="genSetType('dump','Dump','Dump accounts with extra account metadata')" role="button" tabindex="0">
+                      <div class="cdd-opt-left"><div class="cdd-opt-name">Dump</div><div class="cdd-opt-desc">Extra account metadata</div></div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-          <button id="gen-btn" class="btn btn-primary" style="width:100%;justify-content:center;margin:2px 0 12px;height:42px" onclick="genCombo()">
-            <span class="material-icons-round" style="font-size:15px">bolt</span><span>Generate</span>
-          </button>
-          <div class="sc">
-            <div class="sc-head">Output</div>
-            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
-              <input type="text" id="gen-output" class="sr-input" readonly placeholder="Click Generate to create an account" style="width:100%;font-family:'Inter',sans-serif;font-weight:500;color:var(--t1);cursor:default"/>
-              <div class="gen-output-actions">
-                <button id="gen-copy-btn" class="btn btn-ghost" onclick="genCopy()" title="Copy username:password">
-                  <span class="material-icons-round" style="font-size:15px">content_copy</span>
-                  <span>Copy</span>
-                </button>
-                <button id="gen-add-btn" class="btn btn-primary" onclick="genAddToAccounts()" title="Sign in and add to your accounts">
-                  <span class="material-icons-round" style="font-size:15px">person_add</span>
-                  <span>Add</span>
-                </button>
+            <button id="gen-btn" class="btn btn-primary gen-go" onclick="genCombo()">
+              <span class="material-icons-round" id="gen-btn-icon">bolt</span><span>Generate</span>
+            </button>
+            <div class="sc gen-latest is-empty" id="gen-latest">
+              <div class="gl-empty">
+                <span class="material-icons-round">bolt</span>
+                <b>Nothing generated yet</b>
+                <span class="sub">Press Generate and the new account shows up here.</span>
               </div>
-              <div id="gen-counter" style="font-size:var(--fs-xs);font-family:'JetBrains Mono',monospace;color:var(--t3);letter-spacing:.02em"></div>
+              <div class="gl-body" id="gl-body">
+                <div class="gl-top">
+                  <span class="gl-mono" id="gl-mono">A</span>
+                  <div class="gl-id"><div class="gl-name" id="gl-name"></div><div class="gl-meta" id="gen-counter"></div></div>
+                </div>
+                <div class="gl-field"><label>Username</label><div class="gl-val" id="gl-user"></div>
+                  <button class="gl-icon" onclick="genCopyField('user')" title="Copy username" aria-label="Copy username"><span class="material-icons-round">content_copy</span></button></div>
+                <div class="gl-field"><label>Password</label><div class="gl-val gl-secret" id="gl-pass" data-shown="0"></div>
+                  <button class="gl-icon" onclick="genTogglePass()" title="Show or hide the password" aria-label="Show or hide the password"><span class="material-icons-round" id="gl-eye">visibility</span></button>
+                  <button class="gl-icon" onclick="genCopyField('pass')" title="Copy password" aria-label="Copy password"><span class="material-icons-round">content_copy</span></button></div>
+                <div class="gl-actions">
+                  <button id="gen-copy-btn" class="btn btn-ghost" onclick="genCopy()" title="Copy username:password">
+                    <span class="material-icons-round" style="font-size:15px">content_copy</span>
+                    <span>Copy both</span>
+                  </button>
+                  <button id="gen-add-btn" class="btn btn-primary" onclick="genAddToAccounts()" title="Sign in and add to your accounts">
+                    <span class="material-icons-round" style="font-size:15px">person_add</span>
+                    <span>Add</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-          </div>
-          <div class="sc is-empty" id="gen-history-sc">
-            <div class="sc-head" style="display:flex;align-items:center;justify-content:space-between;padding-right:10px">
-              History
+          <div class="gen-right">
+            <div class="gen-sec">
+              <span>History</span><span class="gen-count" id="gen-count"></span><span class="gen-grow"></span>
+              <label class="gen-find" id="gen-find"><span class="material-icons-round">search</span><input type="text" id="gen-search" placeholder="Search" aria-label="Search the history" spellcheck="false" autocomplete="off" oninput="genSearch(this.value)"/></label>
               <button class="btn btn-ghost gen-hist-clear" onclick="genClearHistory()">Clear</button>
             </div>
-            <div id="gen-history-list"></div>
-            <div class="empty" id="gen-history-empty">
-              <span class="material-icons-round">history</span>
-              <div class="empty-title">Nothing generated yet</div>
-              <div class="empty-sub">Accounts you generate show up here, so you can copy them or add them later.</div>
+            <div class="sc is-empty" id="gen-history-sc">
+              <div id="gen-history-list"></div>
+              <div class="empty" id="gen-history-empty">
+                <span class="material-icons-round">history</span>
+                <div class="empty-title">Nothing generated yet</div>
+                <div class="empty-sub">Accounts you generate show up here, so you can copy them or add them later.</div>
+              </div>
+              <div class="empty" id="gen-history-nomatch">
+                <span class="material-icons-round">search_off</span>
+                <div class="empty-title">No match</div>
+                <div class="empty-sub">No generated account has that name.</div>
+              </div>
             </div>
           </div>
         </div>
@@ -376,6 +415,10 @@ window.DEFAULT_THEME = 'dark';
             <div class="ph-title">Settings</div>
             <div class="ph-sub">App preferences &amp; themes</div>
           </div>
+          <label class="st-search">
+            <span class="material-icons-round">search</span>
+            <input type="text" id="st-search" placeholder="Search settings..." aria-label="Search settings" spellcheck="false" autocomplete="off" oninput="settingsSearch(this.value)" onkeydown="settingsSearchKey(event)"/>
+          </label>
         </div>
         <div class="tab-bar" style="flex-shrink:0">
           <button class="tab-btn active" id="stab-general" onclick="settingsTab('general')">General</button>
@@ -384,98 +427,109 @@ window.DEFAULT_THEME = 'dark';
           <button class="tab-btn" id="stab-privacy" onclick="settingsTab('privacy')">Data &amp; Privacy</button>
           <button class="tab-btn" id="stab-themes" onclick="settingsTab('themes')">Themes</button>
         </div>
-        <div class="sw" id="stab-panel-general">
-          <!-- Info row -->
+        <div class="sw st" id="stab-panel-general">
+          <div class="st-sec">Window</div>
           <div class="sc">
-            <div class="sc-head">About</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">MultiRoblox</div><div class="sr-desc" id="stat-app-ver">Version -</div></div></div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Hide to system tray</div><div class="sr-desc">Keeps Vanta Manager running when you close it.</div>
+                <div class="sr-more"><div>Running accounts stay up. Click the tray icon to reopen the window, or right-click it to quit.</div></div></div>
+              <label class="toggle"><input type="checkbox" id="set-hidetotray" onchange="toggleHideToTray()"/><span class="toggle-trk"></span></label>
+            </div>
+          </div>
+          <div class="st-sec">Multi-instance</div>
+          <div class="sc">
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Multiple Roblox instances</div><div class="sr-desc">One client per account, side by side.</div>
+                <div class="sr-more"><div>Holds Roblox's single-client lock so several clients can run at once. Turning this off releases it, and Roblox goes back to allowing one client.</div></div></div>
+              <label class="toggle"><input type="checkbox" id="set-multiinstance" checked onchange="toggleMultiInstance()"/><span class="toggle-trk"></span></label>
+            </div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Protect each client's sign-in</div><div class="sr-desc">Stops clients swapping sign-ins (error 773).</div>
+                <div class="sr-more"><div>Keeps each client on its own account when it reconnects or teleports. While accounts are running, Roblox opened outside Vanta Manager may ask you to log in.</div></div></div>
+              <label class="toggle"><input type="checkbox" id="set-protectsignin" checked onchange="toggleProtectSignIn()"/><span class="toggle-trk"></span></label>
+            </div>
+          </div>
+          <div class="st-sec">Anti-AFK</div>
+          <div class="sc">
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Keep instances active</div><div class="sr-desc">Stops Roblox's 20-minute idle kick.</div>
+                <div class="sr-more"><div>Taps a harmless key into every running instance before the kick, so idle alts stay in the game.</div></div></div>
+              <label class="toggle"><input type="checkbox" id="set-antiafk" onchange="toggleAntiAfk('set')"/><span class="toggle-trk"></span></label>
+            </div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Tap interval</div><div class="sr-desc">How long an instance can sit idle first.</div>
+                <div class="sr-more"><div>Anywhere from 5 to 17 minutes, which keeps it under the 20-minute kick.</div></div></div>
+              <span class="sr-num"><input type="number" class="sr-input" id="set-antiafk-interval" min="5" max="17" step="1" value="17" aria-label="Tap interval in minutes" onchange="antiAfkIntervalCommit()"/><span class="sr-unit">min</span></span>
+            </div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Key to press</div><div class="sr-desc">Pick one your games don't use.</div>
+                <div class="sr-more"><div>Shift is the safest. A key like W or Space would move your character.</div></div></div>
+              <div class="key-pick"><button class="btn btn-ghost" id="set-antiafk-key" onclick="antiAfkPickKey()" title="Click, then press the key you want (Esc cancels)">Shift</button></div>
+            </div>
+          </div>
+          <div class="st-sec">Accounts</div>
+          <div class="sc">
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Show the game on running tiles</div><div class="sr-desc">A tiny live picture instead of the avatar.</div>
+                <div class="sr-more"><div>Refreshed every 30 seconds and about 2 KB each, drawn by Windows without touching the game. Minimized windows keep their last picture.</div></div></div>
+              <label class="toggle"><input type="checkbox" id="set-preview" onchange="togglePreview()"/><span class="toggle-trk"></span></label>
+            </div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Relaunch on disconnect</div><div class="sr-desc">Puts a disconnected client back in its game.</div>
+                <div class="sr-more"><div>If a running instance disconnects unexpectedly, the same account is relaunched into the same game.</div></div></div>
+              <label class="toggle"><input type="checkbox" id="set-autorelaunch" onchange="toggleAutoRelaunch()"/><span class="toggle-trk"></span></label>
+            </div>
+          </div>
+          <div class="st-sec">About</div>
+          <div class="sc">
+            <div class="sr"><div class="sr-left"><div class="sr-label">Vanta Manager</div><div class="sr-desc" id="stat-app-ver">Version -</div></div></div>
             <div class="sr"><div class="sr-left"><div class="sr-label">Accounts saved</div></div><span class="badge" id="stat-count">0</span></div>
           </div>
-          <!-- Window behaviour -->
-          <div class="sc">
-            <div class="sc-head">Window</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Hide to system tray</div><div class="sr-desc">Closing the window keeps MultiRoblox running in the notification area instead of quitting, so running accounts stay up. Click the tray icon to reopen it, or right-click it to quit.</div></div><label class="toggle"><input type="checkbox" id="set-hidetotray" onchange="toggleHideToTray()"/><span class="toggle-trk"></span></label></div>
-          </div>
-          <!-- Multi-instance -->
-          <div class="sc">
-            <div class="sc-head">Multi-Instance</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Multiple Roblox instances</div><div class="sr-desc">Holds the singleton mutex so multiple clients run at once. Turning this off releases it and lets Roblox go back to allowing only one client.</div></div><label class="toggle"><input type="checkbox" id="set-multiinstance" checked onchange="toggleMultiInstance()"/><span class="toggle-trk"></span></label></div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Protect each client's sign-in</div><div class="sr-desc">Stops clients swapping accounts on reconnect or teleport (error 773). While accounts are running, Roblox opened outside MultiRoblox may ask you to log in.</div></div><label class="toggle"><input type="checkbox" id="set-protectsignin" checked onchange="toggleProtectSignIn()"/><span class="toggle-trk"></span></label></div>
-          </div>
-          <!-- Anti-AFK -->
-          <div class="sc">
-            <div class="sc-head">Anti-AFK</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Keep instances active</div><div class="sr-desc">Taps a benign key into every running instance before Roblox's ~20-minute idle kick.</div></div><label class="toggle"><input type="checkbox" id="set-antiafk" onchange="toggleAntiAfk('set')"/><span class="toggle-trk"></span></label></div>
-            <div class="sr" style="flex-direction:column;align-items:stretch;gap:10px">
-              <div class="sr-left">
-                <div class="sr-label">Tap interval</div>
-                <div class="sr-desc">How long an instance can sit idle before it gets tapped. Stays under the ~20-minute kick.</div>
-              </div>
-              <div class="mix-row">
-                <span class="material-icons-round" style="font-size:17px;color:var(--t3);flex-shrink:0">bolt</span>
-                <input type="range" class="fps-slider" id="set-antiafk-interval" min="5" max="17" step="1" value="17"
-                       oninput="antiAfkIntervalInput(this.value)" onchange="antiAfkIntervalCommit()"/>
-                <span class="fps-val-label" id="set-antiafk-interval-val" style="min-width:50px">17 min</span>
-              </div>
-            </div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Key to press</div><div class="sr-desc">Pick one your games don't use. Shift is the safest; a key like W or Space would move your character.</div></div>
-              <div class="key-pick"><button class="btn btn-ghost" id="set-antiafk-key" onclick="antiAfkPickKey()" title="Click, then press the key you want">Shift</button><button class="btn btn-ghost key-pick-reset" id="set-antiafk-key-reset" onclick="antiAfkResetKey()" title="Back to Shift" aria-label="Back to Shift"><span class="material-icons-round">restart_alt</span></button></div>
-            </div>
-          </div>
-          <!-- Account tiles -->
-          <div class="sc">
-            <div class="sc-head">Account tiles</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Show the game on running tiles</div><div class="sr-desc">Swaps a running account's profile picture for a tiny live picture of its game, refreshed every 30 seconds. About 2 KB each, drawn by Windows without touching the game. Minimized windows keep their last picture.</div></div><label class="toggle"><input type="checkbox" id="set-preview" onchange="togglePreview()"/><span class="toggle-trk"></span></label></div>
-          </div>
-          <!-- Relaunch on disconnect -->
-          <div class="sc">
-            <div class="sc-head">Relaunch on Disconnect</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Relaunch on disconnect</div><div class="sr-desc">If a running instance disconnects unexpectedly, relaunch that same account back into the same game automatically.</div></div><label class="toggle"><input type="checkbox" id="set-autorelaunch" onchange="toggleAutoRelaunch()"/><span class="toggle-trk"></span></label></div>
-          </div>
         </div>
-        <div class="sw" id="stab-panel-performance" style="display:none">
-          <!-- Memory -->
+        <div class="sw st" id="stab-panel-performance" style="display:none">
+          <div class="st-sec">Memory</div>
           <div class="sc">
-            <div class="sc-head">Memory</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Trim RAM</div><div class="sr-desc">Frees idle memory from every running instance without touching or slowing the game.</div></div><button class="btn btn-ghost" onclick="mixTrimMemory('set-trim-btn')" id="set-trim-btn"><span class="material-icons-round" style="font-size:15px">memory</span>Trim now</button></div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Auto trim</div><div class="sr-desc">Trims every running instance automatically on an interval.</div></div><label class="toggle"><input type="checkbox" id="set-autotrim" onchange="toggleAutoTrim()"/><span class="toggle-trk"></span></label></div>
-            <div class="sr" style="flex-direction:column;align-items:stretch;gap:10px">
-              <div class="sr-left">
-                <div class="sr-label">Trim interval</div>
-                <div class="sr-desc">How often auto trim runs while instances are open.</div>
-              </div>
-              <div class="mix-row">
-                <span class="material-icons-round" style="font-size:17px;color:var(--t3);flex-shrink:0">memory</span>
-                <input type="range" class="fps-slider" id="set-autotrim-interval" min="1" max="30" step="1" value="5"
-                       oninput="autoTrimIntervalInput(this.value)" onchange="autoTrimIntervalCommit()"/>
-                <span class="fps-val-label" id="set-autotrim-interval-val" style="min-width:50px">5 min</span>
-              </div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Trim RAM</div><div class="sr-desc">Frees idle memory from every running instance.</div>
+                <div class="sr-more"><div>Only memory the game isn't using is released, so nothing is closed or slowed down.</div></div></div>
+              <button class="btn btn-ghost" onclick="mixTrimMemory('set-trim-btn')" id="set-trim-btn"><span class="material-icons-round" style="font-size:15px">memory</span>Trim now</button>
+            </div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Auto trim</div><div class="sr-desc">Trims running instances on a timer.</div></div>
+              <label class="toggle"><input type="checkbox" id="set-autotrim" onchange="toggleAutoTrim()"/><span class="toggle-trk"></span></label>
+            </div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Trim interval</div><div class="sr-desc">How often auto trim runs.</div></div>
+              <span class="sr-num"><input type="number" class="sr-input" id="set-autotrim-interval" min="1" max="30" step="1" value="5" aria-label="Trim interval in minutes" onchange="autoTrimIntervalCommit()"/><span class="sr-unit">min</span></span>
+            </div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">RAM limit per instance</div><div class="sr-desc">Caps the RAM each client can hold.</div>
+                <div class="sr-more"><div>Anything above the cap is paged to disk, so the game keeps running, but too low a cap makes it stutter. 512 MB is the lowest cap; leave it empty for no limit. Applies to running clients right away, and Edit account can override it per account.</div></div></div>
+              <span class="sr-num"><input type="number" class="sr-input" id="set-ramlimit" min="0" max="16384" step="256" placeholder="Off" aria-label="RAM limit per instance in MB" onchange="ramLimitCommit()"/><span class="sr-unit">MB</span></span>
             </div>
           </div>
+          <div class="st-sec">CPU</div>
           <div class="sc">
-            <div class="sc-head">RAM Limiter</div>
-            <div class="sr" style="flex-direction:column;align-items:stretch;gap:10px">
-              <div class="sr-left">
-                <div class="sr-label">RAM limit per instance</div>
-                <div class="sr-desc">Caps how much physical RAM each Roblox instance may hold. Anything above the cap is paged to disk, so the game keeps running, but too low a cap makes it stutter. Applies to running instances right away. Override it per account in Edit account.</div>
-              </div>
-              <div class="mix-row">
-                <span class="material-icons-round" style="font-size:17px;color:var(--t3);flex-shrink:0">memory</span>
-                <input type="range" class="fps-slider" id="set-ramlimit" min="0" max="8192" step="256" value="0"
-                       oninput="ramLimitInput(this.value)" onchange="ramLimitCommit()"/>
-                <span class="fps-val-label" id="set-ramlimit-val" style="min-width:60px">Off</span>
-              </div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Lower priority when several run</div><div class="sr-desc">Leaves more CPU for the rest of your PC.</div>
+                <div class="sr-more"><div>Once more than one account is running, every client drops to Below Normal priority so Windows doesn't split the CPU evenly across idle clients. Goes back to Normal when one is left.</div></div></div>
+              <label class="toggle"><input type="checkbox" id="set-lowpriority" onchange="toggleLowPriority()"/><span class="toggle-trk"></span></label>
             </div>
           </div>
+          <div class="st-sec">Windows</div>
           <div class="sc">
-            <div class="sc-head">CPU Priority</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Lower priority when multiple accounts run</div><div class="sr-desc">Once more than one account is running, sets all of them to Below Normal priority so the OS scheduler doesn't split CPU evenly across idle instances. Reverts to Normal automatically when back down to one.</div></div><label class="toggle"><input type="checkbox" id="set-lowpriority" onchange="toggleLowPriority()"/><span class="toggle-trk"></span></label></div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Headless clients</div><div class="sr-desc">Runs clients with no window or taskbar button. They draw nothing.</div>
+                <div class="sr-more"><div>The window is minimized and then hidden, so the client has nothing to draw. The game keeps running as normal: physics, scripts and the connection carry on, and anti-AFK and tracking still work. Applies to accounts whose window is set to Default in Edit account, Performance, including ones already running. Right-click an account to show its window.</div></div></div>
+              <label class="toggle"><input type="checkbox" id="set-hidewindows" onchange="toggleHideWindows()"/><span class="toggle-trk"></span></label>
+            </div>
           </div>
+          <div class="st-sec">Graphics</div>
           <div class="sc">
-            <div class="sc-head">Rendering Engine</div>
-            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
-              <div class="sr-left" style="width:100%"><div class="sr-label">Graphics API</div><div class="sr-desc">Forces which rendering backend Roblox uses via Fast Flags. Automatic lets Roblox pick. Applies on next launch.</div></div>
-              <div class="cdd" id="cdd-rendereng" style="width:100%">
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Graphics API</div><div class="sr-desc">Which renderer Roblox uses.</div>
+                <div class="sr-more"><div>Automatic lets Roblox pick. Applies from the next launch.</div></div></div>
+              <div class="cdd" id="cdd-rendereng">
                 <div class="cdd-trigger" id="cdd-rendereng-trigger" onclick="toggleCdd('rendereng')" role="button" tabindex="0" aria-label="Rendering engine">
                   <span class="cdd-label" id="cdd-rendereng-label">Automatic</span>
                   <span class="material-icons-round cdd-arrow">expand_more</span>
@@ -500,14 +554,56 @@ window.DEFAULT_THEME = 'dark';
                 </div>
               </div>
             </div>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Advanced graphics</div><div class="sr-desc">Turns on the graphics flags below for every account. Uses much less GPU memory.</div>
+                <div class="sr-more"><div>Applies from the next launch. Turning it off takes the flags out again, so Roblox goes back to its own settings. An account can still be set to always or never use it in Edit account, Performance.</div></div></div>
+              <label class="toggle"><input type="checkbox" id="set-advgfx" onchange="agSet({ on: this.checked })"/><span class="toggle-trk"></span></label>
+            </div>
+            <div class="sr-group" id="ag-group">
+              <div class="sr">
+                <div class="sr-left"><div class="sr-label">Anti-aliasing (MSAA)</div><div class="sr-desc">Lower is faster, but edges look jagged.</div></div>
+                <div class="cdd" id="cdd-agmsaa">
+                  <div class="cdd-trigger" id="cdd-agmsaa-trigger" onclick="toggleCdd('agmsaa')" role="button" tabindex="0" aria-label="Anti-aliasing">
+                    <span class="cdd-label" id="cdd-agmsaa-label">x1</span>
+                    <span class="material-icons-round cdd-arrow">expand_more</span>
+                  </div>
+                  <div class="cdd-menu" id="cdd-agmsaa-menu">
+                    <div class="cdd-option" data-value="1" onclick="agSet({ msaa: 1 })" role="button" tabindex="0"><div class="cdd-opt-left"><div class="cdd-opt-name">x1</div><div class="cdd-opt-desc">No smoothing, fastest</div></div></div>
+                    <div class="cdd-option" data-value="2" onclick="agSet({ msaa: 2 })" role="button" tabindex="0"><div class="cdd-opt-left"><div class="cdd-opt-name">x2</div><div class="cdd-opt-desc">Light smoothing</div></div></div>
+                    <div class="cdd-option" data-value="4" onclick="agSet({ msaa: 4 })" role="button" tabindex="0"><div class="cdd-opt-left"><div class="cdd-opt-name">x4</div><div class="cdd-opt-desc">Smooth edges</div></div></div>
+                    <div class="cdd-option" data-value="8" onclick="agSet({ msaa: 8 })" role="button" tabindex="0"><div class="cdd-opt-left"><div class="cdd-opt-name">x8</div><div class="cdd-opt-desc">Smoothest, slowest</div></div></div>
+                  </div>
+                </div>
+              </div>
+              <div class="sr">
+                <div class="sr-left"><div class="sr-label">Texture quality</div><div class="sr-desc">Lower textures use less GPU memory.</div></div>
+                <div class="cdd" id="cdd-agtex">
+                  <div class="cdd-trigger" id="cdd-agtex-trigger" onclick="toggleCdd('agtex')" role="button" tabindex="0" aria-label="Texture quality">
+                    <span class="cdd-label" id="cdd-agtex-label">Lowest</span>
+                    <span class="material-icons-round cdd-arrow">expand_more</span>
+                  </div>
+                  <div class="cdd-menu" id="cdd-agtex-menu">
+                    <div class="cdd-option" data-value="0" onclick="agSet({ texture: 0 })" role="button" tabindex="0"><div class="cdd-opt-left"><div class="cdd-opt-name">Lowest</div><div class="cdd-opt-desc">Least GPU memory</div></div></div>
+                    <div class="cdd-option" data-value="1" onclick="agSet({ texture: 1 })" role="button" tabindex="0"><div class="cdd-opt-left"><div class="cdd-opt-name">Low</div><div class="cdd-opt-desc">Slightly sharper</div></div></div>
+                    <div class="cdd-option" data-value="2" onclick="agSet({ texture: 2 })" role="button" tabindex="0"><div class="cdd-opt-left"><div class="cdd-opt-name">Medium</div><div class="cdd-opt-desc">Balanced</div></div></div>
+                    <div class="cdd-option" data-value="3" onclick="agSet({ texture: 3 })" role="button" tabindex="0"><div class="cdd-opt-left"><div class="cdd-opt-name">High</div><div class="cdd-opt-desc">Full detail</div></div></div>
+                  </div>
+                </div>
+              </div>
+              <div class="sr">
+                <div class="sr-left"><div class="sr-label">Hide grass</div><div class="sr-desc">Skips drawing grass on terrain.</div></div>
+                <label class="toggle"><input type="checkbox" id="set-ag-grass" onchange="agSet({ grass: this.checked })"/><span class="toggle-trk"></span></label>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="sw" id="stab-panel-roblox" style="display:none">
+        <div class="sw st" id="stab-panel-roblox" style="display:none">
+          <div class="st-sec">Install</div>
           <div class="sc">
-            <div class="sc-head">Roblox</div>
-            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
-              <div class="sr-left" style="width:100%"><div class="sr-label">Roblox install</div><div class="sr-desc" id="install-desc">Which installation launches use: vanilla Roblox or a bootstrapper such as Bloxstrap, Fishstrap, Froststrap or Voidstrap. Auto picks whichever was updated most recently.</div></div>
-              <div class="cdd" id="cdd-install" style="width:100%">
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Roblox install</div><div class="sr-desc" id="install-desc">Vanilla Roblox or a bootstrapper.</div>
+                <div class="sr-more"><div>Bloxstrap, Fishstrap, Froststrap and Voidstrap are found too. Auto picks the install that has Roblox's current version.</div></div></div>
+              <div class="cdd cdd-wide" id="cdd-install">
                 <div class="cdd-trigger" id="cdd-install-trigger" onclick="toggleCdd('install')" role="button" tabindex="0" aria-label="Roblox install">
                   <span class="cdd-label" id="cdd-install-label">Auto</span>
                   <span class="material-icons-round cdd-arrow">expand_more</span>
@@ -517,32 +613,32 @@ window.DEFAULT_THEME = 'dark';
             </div>
           </div>
         </div>
-        <div class="sw" id="stab-panel-privacy" style="display:none">
-          <!-- Encryption -->
+        <div class="sw st" id="stab-panel-privacy" style="display:none">
+          <div class="st-sec">Encryption</div>
           <div class="sc">
-            <div class="sc-head">Encryption</div>
             <div class="sr">
               <div class="sr-left"><div class="sr-label">Algorithm</div><div class="sr-desc" id="stat-enc-algo-desc">Used to encrypt cookies stored on disk.</div></div>
               <span class="badge g" id="stat-enc-algo">AES-256-GCM</span>
             </div>
-            <div class="sr" style="flex-direction:column;align-items:flex-start;gap:8px">
-              <div class="sr-left" style="width:100%"><div class="sr-label">Encryption key</div><div class="sr-desc">Change your encryption key here. You will need to re-enter it on your next launch.</div></div>
-              <div style="width:100%;display:flex;gap:8px;align-items:center">
-                <input type="password" class="sr-input" id="custom-key" placeholder="e.g. SecureKey1234@A#" aria-label="Encryption key" style="flex:1;width:auto" oninput="onKeyInput()"/>
-                <button class="btn btn-ghost" style="height:40px;padding:0 12px" onclick="toggleKeyVisibility()">
-                  <span class="material-icons-round" style="font-size:14px" id="key-vis-icon">visibility</span>
+            <div class="sr">
+              <div class="sr-left"><div class="sr-label">Encryption key</div><div class="sr-desc">Locks your saved accounts with a passphrase.</div>
+                <div class="sr-more"><div>You'll need to enter it every time Vanta Manager starts.</div></div></div>
+              <div class="st-key">
+                <input type="password" class="sr-input" id="custom-key" placeholder="e.g. SecureKey1234@A#" aria-label="Encryption key" oninput="onKeyInput()"/>
+                <button class="btn btn-ghost" onclick="toggleKeyVisibility()" aria-label="Show or hide the key">
+                  <span class="material-icons-round" style="font-size:16px" id="key-vis-icon">visibility</span>
                 </button>
-                <button class="btn btn-primary" style="height:40px;padding:0 12px" onclick="saveKeySettings()" id="btn-save-key">Save</button>
+                <button class="btn btn-primary" onclick="saveKeySettings()" id="btn-save-key">Save</button>
               </div>
             </div>
           </div>
-          <!-- Data -->
+          <div class="st-sec">Data</div>
           <div class="sc">
-            <div class="sc-head">Data &amp; Privacy</div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Storage</div><div class="sr-desc">Cookies are encrypted and stored locally. Nothing leaves your device.</div></div><span class="badge g">Local only</span></div>
-            <div class="sr"><div class="sr-left"><div class="sr-label">Clear all accounts</div><div class="sr-desc">Remove all saved accounts and sign-in data.</div></div><button class="btn btn-danger" onclick="clearAll()">Clear all</button></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Storage</div><div class="sr-desc">Cookies are encrypted and stay on this PC.</div></div><span class="badge g">Local only</span></div>
+            <div class="sr"><div class="sr-left"><div class="sr-label">Clear all accounts</div><div class="sr-desc">Removes every saved account and sign-in.</div></div><button class="btn btn-danger" onclick="clearAll()">Clear all</button></div>
           </div>
         </div>
+        <div class="st-empty" id="st-empty" hidden>No settings match your search.</div>
         <!-- Themes tab panel -->
         <div class="sw" id="stab-panel-themes" style="display:none">
           <div class="themes-grid" id="themes-grid-inner">
@@ -864,6 +960,7 @@ window.DEFAULT_THEME = 'dark';
     <div class="gv-seg login-tabs" id="edit-tabs">
       <button data-tab="details" onclick="editTab('details')">Details</button>
       <button data-tab="launch" onclick="editTab('launch')">Launching</button>
+      <button data-tab="perf" onclick="editTab('perf')">Performance</button>
     </div>
     <div id="edit-panel-details">
       <div class="field">
@@ -903,6 +1000,34 @@ window.DEFAULT_THEME = 'dark';
         <label for="in-ramlimit">RAM limit (MB)</label>
         <input type="number" id="in-ramlimit" min="0" max="65536" step="256" placeholder="Use the global limit"/>
         <div class="field-hint" id="ramlimit-hint">Empty or 0 uses the limit from Settings. Minimum 512.</div>
+      </div>
+    </div>
+    <div id="edit-panel-perf" style="display:none">
+      <div class="field">
+        <label for="in-launch-fps">FPS cap</label>
+        <select id="in-launch-fps" class="field-select"></select>
+      </div>
+      <div class="field">
+        <label for="in-launch-gfx">Graphics quality</label>
+        <select id="in-launch-gfx" class="field-select"></select>
+      </div>
+      <div class="field">
+        <label>Window after it starts</label>
+        <div class="gv-seg edit-win-seg" id="in-launch-window">
+          <button type="button" data-v="" onclick="setEditWindow('')">Default</button>
+          <button type="button" data-v="normal" onclick="setEditWindow('normal')">Normal</button>
+          <button type="button" data-v="small" onclick="setEditWindow('small')">Small</button>
+          <button type="button" data-v="minimized" onclick="setEditWindow('minimized')">Minimized</button>
+          <button type="button" data-v="hidden" onclick="setEditWindow('hidden')">Headless</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Advanced graphics</label>
+        <div class="gv-seg edit-win-seg" id="in-launch-adv">
+          <button type="button" data-v="" onclick="setEditAdv('')">Same as Settings</button>
+          <button type="button" data-v="on" onclick="setEditAdv('on')">On</button>
+          <button type="button" data-v="off" onclick="setEditAdv('off')">Off</button>
+        </div>
       </div>
     </div>
     <div class="modal-actions">

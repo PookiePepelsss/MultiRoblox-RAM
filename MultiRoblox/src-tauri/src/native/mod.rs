@@ -8,6 +8,7 @@
 //   memory      per-instance RAM limiter and memory readout
 //   watch       the shared poll that notices instances closing
 //   launch      the launch pipeline and its cancellation registry
+//   profile     per-account FPS, graphics, custom FFlags and window at launch
 //   windows_view  laying the windows out small in rows, and their tiny previews
 mod daemon;
 mod helper_exe;
@@ -15,6 +16,7 @@ mod install;
 mod launch;
 mod memory;
 mod process;
+pub mod profile;
 mod sysstats;
 mod watch;
 mod windows_view;

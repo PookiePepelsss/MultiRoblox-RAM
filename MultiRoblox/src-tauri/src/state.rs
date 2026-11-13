@@ -65,11 +65,15 @@ impl AppState {
             // A request timeout would cap the whole exchange including the
             // body, which would break the Chrome download in login.rs; it
             // streams a several-hundred-MB zip through this same client.
+            // A browser user-agent on every request by default; without it
+            // the requests that don't set one went out with none at all.
             http: reqwest::Client::builder()
+                .user_agent(crate::roblox_api::UA.as_str())
                 .connect_timeout(std::time::Duration::from_secs(15))
                 .build()
                 .expect("reqwest client"),
             http_no_redirect: reqwest::Client::builder()
+                .user_agent(crate::roblox_api::UA.as_str())
                 .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(std::time::Duration::from_secs(15))
                 .build()

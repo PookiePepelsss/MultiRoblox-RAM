@@ -257,19 +257,232 @@ fn selected_root(all: &[Root]) -> Option<Root> {
     all.iter().find(|r| path_key(&r.path) == key).cloned()
 }
 
-/// Picks the build to launch. The newest build wins; RobloxPlayerBeta's
-/// own mtime tracks the last real client update, which a bootstrapper's mod
-/// overlay never touches, so it reliably points at the install actually in
-/// use. A root chosen in Settings narrows both searches to that root, and is
-/// ignored (rather than failing every launch) if it holds no usable build.
-pub fn pick_install() -> Option<Install> {
+// The build Roblox is currently serving ("version-<hash>"), as Roblox itself
+// reports it. Launching any other build directly makes the client see it's
+// out of date and run Roblox's updater, which reinstalls and closes the
+// clients that are already running so it can replace their files: from the
+// outside that looks like random crashes followed by a reinstall. Cached so
+// launches in a burst ask once; a failed lookup is cached briefly too, so
+// being offline doesn't slow every launch down.
+/// What Roblox says is live: the version folder name and the version number
+/// (release, changelist), e.g. ("version-4ea8e…", (747, 7471481)).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Live {
+    pub folder: String,
+    pub number: Option<(u32, u32)>,
+}
+
+static LIVE_VERSION: Mutex<Option<(Instant, Option<Live>)>> = Mutex::new(None);
+const LIVE_TTL: Duration = Duration::from_secs(10 * 60);
+const LIVE_FAIL_TTL: Duration = Duration::from_secs(60);
+const LIVE_URL: &str = "https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer";
+
+fn live_version_cached() -> Option<Option<Live>> {
+    let cache = LIVE_VERSION.lock().unwrap_or_else(|e| e.into_inner());
+    let (at, value) = cache.as_ref()?;
+    let ttl = if value.is_some() { LIVE_TTL } else { LIVE_FAIL_TTL };
+    (at.elapsed() < ttl).then(|| value.clone())
+}
+
+/// "0.747.0.7471481" or "0, 747, 0, 7471481" -> (747, 7471481). The second
+/// part is the release and the last the changelist, which only ever grows;
+/// the third part varies between channels and says nothing about age.
+pub fn parse_version_number(s: &str) -> Option<(u32, u32)> {
+    let parts: Vec<u32> = s
+        .split(|c: char| c == '.' || c == ',')
+        .map(|p| p.trim().parse::<u32>())
+        .collect::<Result<_, _>>()
+        .ok()?;
+    (parts.len() == 4).then(|| (parts[1], parts[3]))
+}
+
+/// The live build, asking Roblox when the cache is stale or `force` is set.
+pub async fn refresh_live_version(http: &reqwest::Client, force: bool) -> Option<Live> {
+    if !force {
+        if let Some(v) = live_version_cached() {
+            return v;
+        }
+    }
+    let fetched = async {
+        let res = http
+            .get(LIVE_URL)
+            .header("Accept", "application/json")
+            .timeout(Duration::from_secs(4))
+            .send()
+            .await
+            .ok()?
+            .error_for_status()
+            .ok()?;
+        let v: Value = res.json().await.ok()?;
+        let folder = v.get("clientVersionUpload")?.as_str()?.trim().to_string();
+        let number = v.get("version").and_then(Value::as_str).and_then(parse_version_number);
+        (folder.starts_with("version-") && folder.len() <= 64).then_some(Live { folder, number })
+    }
+    .await;
+    *LIVE_VERSION.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), fetched.clone()));
+    fetched
+}
+
+/// The version number stamped into an exe ("0, 747, 0, 7471481"), cached by
+/// path and file time so each build is read once.
+static EXE_VERSIONS: Mutex<Vec<(PathBuf, SystemTime, Option<(u32, u32)>)>> = Mutex::new(Vec::new());
+
+fn exe_version(install: &Install) -> Option<(u32, u32)> {
+    let mut cache = EXE_VERSIONS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, _, v)) = cache.iter().find(|(p, t, _)| *p == install.exe && *t == install.modified) {
+        return *v;
+    }
+    let v = read_file_version(&install.exe).and_then(|s| parse_version_number(&s));
+    cache.retain(|(p, _, _)| *p != install.exe);
+    cache.push((install.exe.clone(), install.modified, v));
+    v
+}
+
+#[cfg(windows)]
+fn read_file_version(exe: &Path) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
+
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let path: Vec<u16> = exe.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    unsafe {
+        let size = GetFileVersionInfoSizeW(PCWSTR(path.as_ptr()), None);
+        if size == 0 || size > 4 * 1024 * 1024 {
+            return None;
+        }
+        let mut data = vec![0u8; size as usize];
+        GetFileVersionInfoW(PCWSTR(path.as_ptr()), 0, size, data.as_mut_ptr().cast()).ok()?;
+        // The string table is keyed by language and code page; take the first.
+        let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut len: u32 = 0;
+        let key = wide("\\VarFileInfo\\Translation");
+        if !VerQueryValueW(data.as_ptr().cast(), PCWSTR(key.as_ptr()), &mut ptr, &mut len).as_bool() || len < 4 {
+            return None;
+        }
+        let lang = *(ptr as *const u16);
+        let cp = *(ptr as *const u16).add(1);
+        let key = wide(&format!("\\StringFileInfo\\{:04x}{:04x}\\FileVersion", lang, cp));
+        if !VerQueryValueW(data.as_ptr().cast(), PCWSTR(key.as_ptr()), &mut ptr, &mut len).as_bool() || len == 0 {
+            return None;
+        }
+        let chars = std::slice::from_raw_parts(ptr as *const u16, len as usize);
+        let s = String::from_utf16_lossy(chars);
+        Some(s.trim_end_matches('\0').trim().to_string())
+    }
+}
+
+#[cfg(not(windows))]
+fn read_file_version(_exe: &Path) -> Option<String> {
+    None
+}
+
+/// The version folder Roblox's own launcher is registered to, when that is a
+/// player build (vanilla registers the exe inside its version folder; a
+/// bootstrapper registers its own exe instead, which says nothing here).
+fn handler_version_dir() -> Option<PathBuf> {
+    let exe = protocol_handler_command().and_then(|c| command_exe(&c))?;
+    let dir = exe.parent()?;
+    let in_versions = dir
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|n| n.eq_ignore_ascii_case("Versions"));
+    (in_versions && exe.file_name().is_some_and(|n| n.eq_ignore_ascii_case(PLAYER_EXE)))
+        .then(|| dir.to_path_buf())
+}
+
+/// The roots a launch may use: the one chosen in Settings when it holds a
+/// usable build (ignored rather than failing every launch otherwise), else all.
+fn scoped_roots() -> Vec<Root> {
     let all = roots();
-    let scoped: Vec<Root> = match selected_root(&all) {
+    match selected_root(&all) {
         Some(r) if !installs_in(&r).is_empty() => vec![r],
         _ => all,
+    }
+}
+
+/// Whether a build is the live one or newer: by folder name first, then by
+/// the version stamped in its exe (a build from another channel, or one
+/// installed after the live answer was cached, has a different folder name
+/// but is not out of date).
+fn is_current(install: &Install, live: &Live, version_of: &dyn Fn(&Install) -> Option<(u32, u32)>) -> bool {
+    if install.version().eq_ignore_ascii_case(&live.folder) {
+        return true;
+    }
+    match (live.number, version_of(install)) {
+        (Some(want), Some(have)) => have >= want,
+        _ => false,
+    }
+}
+
+/// Picks the build to launch, in this order:
+///   1. the live build (or a newer one) in the roots allowed by Settings;
+///   2. the live build (or a newer one) anywhere, since the chosen root's
+///      out-of-date build would only make Roblox reinstall itself;
+///   3. the build Roblox's own launcher is registered to;
+///   4. the newest build on disk.
+/// The newest-file rule alone is not enough: a machine can hold several
+/// builds installed minutes apart (an old channel build, a half-finished
+/// update), and the newest file is not always the live one. Starting a stale
+/// one makes Roblox update and reinstall, closing the clients already open.
+pub fn pick_install() -> Option<Install> {
+    let scoped: Vec<Install> = scoped_roots().iter().flat_map(installs_in).collect();
+    let everywhere: Vec<Install> = roots().iter().flat_map(installs_in).collect();
+    choose_install(
+        scoped,
+        everywhere,
+        live_version_cached().flatten().as_ref(),
+        handler_version_dir().as_deref(),
+        &exe_version,
+    )
+}
+
+fn choose_install(
+    scoped: Vec<Install>,
+    everywhere: Vec<Install>,
+    live: Option<&Live>,
+    handler_dir: Option<&Path>,
+    version_of: &dyn Fn(&Install) -> Option<(u32, u32)>,
+) -> Option<Install> {
+    // Several roots can hold the same build; the newest copy of it wins.
+    let newest_where = |list: &[Install], keep: &dyn Fn(&Install) -> bool| {
+        list.iter().filter(|i| keep(i)).max_by_key(|i| i.modified).cloned()
     };
-    let installs: Vec<Install> = scoped.iter().flat_map(installs_in).collect();
-    installs.into_iter().max_by_key(|i| i.modified)
+    if let Some(live) = live {
+        for list in [&scoped, &everywhere] {
+            if let Some(i) = newest_where(list, &|i| i.version().eq_ignore_ascii_case(&live.folder)) {
+                return Some(i);
+            }
+            if let Some(i) = newest_where(list, &|i| is_current(i, live, version_of)) {
+                return Some(i);
+            }
+        }
+    }
+    if let Some(dir) = handler_dir {
+        let key = path_key(dir);
+        if let Some(i) = newest_where(&scoped, &|i| path_key(&i.dir) == key) {
+            return Some(i);
+        }
+    }
+    newest_where(&scoped, &|_| true)
+}
+
+/// Some(live folder) when Roblox has released a build that no install on
+/// this PC has yet, so a launch would only make Roblox's updater run. Only
+/// said when it's certain: Roblox answered, no install anywhere is the live
+/// build or newer, and the build that would launch is plain Roblox
+/// (bootstrappers may be on a channel of their own and update themselves).
+pub fn update_pending() -> Option<String> {
+    let live = live_version_cached().flatten()?;
+    let install = pick_install()?;
+    if !install.root.vanilla || is_current(&install, &live, &exe_version) {
+        return None;
+    }
+    let any_current = roots()
+        .iter()
+        .flat_map(installs_in)
+        .any(|i| is_current(&i, &live, &exe_version));
+    (!any_current).then_some(live.folder)
 }
 
 /// Where FFlags are read from: the bootstrapper's Modifications overlay (its
@@ -377,6 +590,95 @@ mod tests {
             root_of_handler(Path::new(r"C:\Games\Fishstrap\Fishstrap.exe")),
             Some(PathBuf::from(r"C:\Games\Fishstrap"))
         );
+    }
+
+    fn build(root: &str, version: &str, age_secs: u64) -> Install {
+        let path = PathBuf::from(root);
+        let dir = path.join("Versions").join(version);
+        Install {
+            root: Root { name: root.into(), path, vanilla: root == "Roblox", is_default: false },
+            exe: dir.join(PLAYER_EXE),
+            dir,
+            modified: SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000 - age_secs),
+        }
+    }
+
+    fn live(folder: &str, number: Option<(u32, u32)>) -> Live {
+        Live { folder: folder.into(), number }
+    }
+    fn no_versions(_: &Install) -> Option<(u32, u32)> {
+        None
+    }
+    fn pick(list: Vec<Install>, l: Option<&Live>, reg: Option<&Path>) -> Option<Install> {
+        choose_install(list.clone(), list, l, reg, &no_versions)
+    }
+
+    #[test]
+    fn the_live_build_wins_over_a_newer_stale_file() {
+        // The real case: a stale build whose exe is a few minutes newer.
+        let list = vec![build("Roblox", "version-live", 300), build("Roblox", "version-stale", 100)];
+        let p = pick(list, Some(&live("version-live", None)), None).unwrap();
+        assert_eq!(p.version(), "version-live");
+    }
+
+    #[test]
+    fn the_registered_build_is_next_when_roblox_cant_be_asked() {
+        let list = vec![build("Roblox", "version-reg", 300), build("Roblox", "version-stale", 100)];
+        let reg = PathBuf::from("Roblox").join("Versions").join("version-reg");
+        let p = pick(list, None, Some(&reg)).unwrap();
+        assert_eq!(p.version(), "version-reg");
+    }
+
+    #[test]
+    fn falls_back_to_the_newest_build() {
+        let list = vec![build("Roblox", "version-old", 300), build("Bloxstrap", "version-new", 100)];
+        let p = pick(list, Some(&live("version-missing", None)), None).unwrap();
+        assert_eq!(p.version(), "version-new");
+        assert!(pick(Vec::new(), None, None).is_none());
+    }
+
+    #[test]
+    fn a_build_at_or_past_the_live_number_counts_as_current() {
+        // Installed after the live answer was cached, or from another channel.
+        let ver = |i: &Install| match i.version() {
+            "version-newer" => Some((748, 7480001)),
+            "version-older" => Some((747, 7471038)),
+            _ => None,
+        };
+        let l = live("version-gone", Some((747, 7471481)));
+        let newer = build("Roblox", "version-newer", 300);
+        let older = build("Roblox", "version-older", 100);
+        assert!(is_current(&newer, &l, &ver));
+        assert!(!is_current(&older, &l, &ver), "same release, smaller changelist");
+        let list = vec![newer, older];
+        let p = choose_install(list.clone(), list, Some(&l), None, &ver).unwrap();
+        assert_eq!(p.version(), "version-newer");
+    }
+
+    #[test]
+    fn the_live_build_in_another_root_beats_a_stale_chosen_root() {
+        let scoped = vec![build("Roblox", "version-stale", 100)];
+        let everywhere = vec![build("Roblox", "version-stale", 100), build("Bloxstrap", "version-live", 300)];
+        let p = choose_install(scoped, everywhere, Some(&live("version-live", None)), None, &no_versions).unwrap();
+        assert_eq!(p.version(), "version-live");
+    }
+
+    /// Reads the builds installed on this machine; run by hand with --ignored.
+    #[test]
+    #[ignore]
+    fn print_installed_builds() {
+        for i in roots().iter().flat_map(installs_in) {
+            println!("{} {} {:?} raw={:?} exe={}", i.root.name, i.version(), exe_version(&i), read_file_version(&i.exe), i.exe.display());
+        }
+        println!("pick: {:?}", pick_install().map(|i| i.version().to_string()));
+    }
+
+    #[test]
+    fn version_numbers_parse_both_ways_roblox_writes_them() {
+        assert_eq!(parse_version_number("0.747.0.7471481"), Some((747, 7471481)));
+        assert_eq!(parse_version_number("0, 747, 662, 7471038"), Some((747, 7471038)));
+        assert_eq!(parse_version_number("version-abc"), None);
+        assert_eq!(parse_version_number("1.2.3"), None);
     }
 
     #[test]

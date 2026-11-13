@@ -1,4 +1,4 @@
-// RobloxNative.exe -- precompiled native helper for MultiRoblox. It replaced
+// RobloxNative.exe -- precompiled native helper for Vanta Manager. It replaced
 // three PowerShell scripts (mutex.ps1, closehandles.ps1, audiovol.ps1).
 //
 // Why: every PowerShell invocation paid for powershell.exe startup AND an
@@ -10,10 +10,10 @@
 // Usage:
 //   RobloxNative.exe daemon
 //
-// One resident process for the entire MultiRoblox session: it holds the
+// One resident process for the entire Vanta Manager session: it holds the
 // singleton mutexes, runs anti-AFK and the PID watcher on background threads,
 // and serves everything else as requests over stdin/stdout. It exits when
-// stdin hits EOF -- i.e. the moment MultiRoblox itself is gone -- so the
+// stdin hits EOF -- i.e. the moment Vanta Manager itself is gone -- so the
 // helper can never outlive its parent or pile up one-per-launch.
 //
 // The single-shot subcommands that predate daemon mode (mutex, closehandles,
@@ -87,10 +87,10 @@ using System.Threading;
 // product. Code signing would be the real fix and is deliberately not done,
 // so this metadata is one of the few signals left; shipping something
 // anonymous makes a false positive far more likely.
-[assembly: AssemblyTitle("MultiRoblox Native Helper")]
-[assembly: AssemblyDescription("Multi-instance, window and audio helper for MultiRoblox")]
+[assembly: AssemblyTitle("Vanta Manager Native Helper")]
+[assembly: AssemblyDescription("Multi-instance, window and audio helper for Vanta Manager")]
 [assembly: AssemblyCompany("PookiePepelsss")]
-[assembly: AssemblyProduct("MultiRoblox")]
+[assembly: AssemblyProduct("Vanta Manager")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 PookiePepelsss")]
 [assembly: AssemblyVersion("1.2.6.0")]
 [assembly: AssemblyFileVersion("1.2.6.0")]
@@ -210,7 +210,7 @@ internal static class Protocol
 // ── Daemon: the one and only helper process ─────────────────────────────────
 internal static class Daemon
 {
-    // Named per user session (no "Global\") -- MultiRoblox is a per-user app.
+    // Named per user session (no "Global\") -- Vanta Manager is a per-user app.
     // Bump the suffix if the line protocol ever changes incompatibly; the
     // name must stay in sync with another_helper_running() in helper.rs.
     const string SingletonName = "MultiRoblox_NativeHelper_v1";
@@ -264,13 +264,16 @@ internal static class Daemon
         }
         finally
         {
-            // stdin EOF means MultiRoblox is gone -- exited cleanly, crashed,
+            // stdin EOF means Vanta Manager is gone -- exited cleanly, crashed,
             // or was force-killed. Either way this process must not survive
             // it, so there is never an orphaned helper holding Roblox's mutex.
             // Stopping the workers first lets anti-AFK put the system
             // foreground-lock timeout back; returning from Main would kill
             // its background thread before its cleanup runs.
             StopWorkers();
+            // A window this helper hid would otherwise stay invisible, with no
+            // taskbar button, once nothing is left that can show it again.
+            HiddenWindows.ShowAll();
         }
         return 0;
     }
@@ -302,6 +305,7 @@ internal static class Daemon
                 case "capture":      HandleCapture(id, p); break;
                 case "preview":      HandlePreview(id, p); break;
                 case "tile":         HandleTile(id, p); break;
+                case "winmode":      HandleWinMode(id, p); break;
                 case "untile":
                     _layoutKeep.Stop();
                     Protocol.Reply(id, WindowLayout.Untile().ToString(CultureInfo.InvariantCulture));
@@ -313,6 +317,7 @@ internal static class Daemon
                     // threads outright, so anti-AFK's cleanup -- which restores
                     // the system foreground-lock timeout -- would never run.
                     StopWorkers();
+                    HiddenWindows.ShowAll();
                     Environment.Exit(0);
                     break;
                 default:
@@ -385,21 +390,120 @@ internal static class Daemon
         Protocol.Reply(id, "ok");
     }
 
-    // Allocation-light: one list and one builder for the life of the thread;
-    // the process scan itself reuses a native buffer.
-    static void RunPidWatch(WaitHandle stop, int intervalMs)
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(int access, bool inherit, int pid);
+    const int SYNCHRONIZE = 0x00100000;
+    // WaitAny takes at most 64 handles, one of which is the stop signal.
+    const int MaxWatchedProcesses = 63;
+
+    // Waits on the Roblox processes themselves instead of scanning on a short
+    // timer: Windows wakes this thread the moment one exits, so a close is
+    // seen at once, and between exits the process list is only re-read every
+    // `rescanMs` to pick up newly started clients. The list is only sent when
+    // it changed. A failed scan is not "zero Roblox processes": reporting it
+    // as an empty list would make the app treat every instance as closed, so
+    // that pass is skipped.
+    static void RunPidWatch(WaitHandle stop, int rescanMs)
     {
         var pids = new List<int>();
         var text = new StringBuilder(64);
-        do
+        var waits = new Dictionary<int, ProcessWaitHandle>();
+        // Exited but possibly still listed for a moment: never reported alive
+        // again, and never waited on again (it would wake this loop at once).
+        var exited = new HashSet<int>();
+        string last = null;
+        try
         {
-            // A failed scan is not "zero Roblox processes". Reporting it as
-            // an empty list would make the app treat every instance as
-            // closed, so skip the tick and let the next one report.
-            if (RobloxProcesses.Find(pids))
-                Protocol.Emit("PIDS", RobloxProcesses.Join(pids, text));
+            while (true)
+            {
+                if (RobloxProcesses.Find(pids))
+                {
+                    exited.IntersectWith(pids);
+                    pids.RemoveAll(exited.Contains);
+                    pids.Sort();
+                    string now = RobloxProcesses.Join(pids, text);
+                    if (now != last) { Protocol.Emit("PIDS", now); last = now; }
+
+                    var gone = new List<int>();
+                    foreach (int known in waits.Keys) if (!pids.Contains(known)) gone.Add(known);
+                    foreach (int g in gone) { waits[g].Dispose(); waits.Remove(g); }
+                    foreach (int pid in pids)
+                    {
+                        if (waits.Count >= MaxWatchedProcesses) break;
+                        if (waits.ContainsKey(pid)) continue;
+                        IntPtr h = OpenProcess(SYNCHRONIZE, false, pid);
+                        if (h != IntPtr.Zero) waits[pid] = new ProcessWaitHandle(h);
+                    }
+                }
+
+                var set = new WaitHandle[waits.Count + 1];
+                var order = new int[waits.Count + 1];
+                set[0] = stop;
+                int k = 1;
+                foreach (KeyValuePair<int, ProcessWaitHandle> w in waits) { set[k] = w.Value; order[k] = w.Key; k++; }
+                int hit = WaitHandle.WaitAny(set, rescanMs);
+                if (hit == 0) return;
+                if (hit > 0 && hit < set.Length)
+                {
+                    int pid = order[hit];
+                    exited.Add(pid);
+                    waits[pid].Dispose();
+                    waits.Remove(pid);
+                }
+            }
         }
-        while (!stop.WaitOne(intervalMs));
+        finally
+        {
+            foreach (ProcessWaitHandle w in waits.Values) w.Dispose();
+        }
+    }
+
+    sealed class ProcessWaitHandle : WaitHandle
+    {
+        public ProcessWaitHandle(IntPtr handle)
+        {
+            SafeWaitHandle = new Microsoft.Win32.SafeHandles.SafeWaitHandle(handle, true);
+        }
+    }
+
+    // winmode|pid|min           -> minimized without taking focus
+    // winmode|pid|small|w|h     -> game area resized to w x h, where it is
+    // winmode|pid|hide          -> minimized, then hidden (no window, no taskbar button)
+    // winmode|pid|show          -> a hidden window back on screen, in front
+    // winmode|pid|unhide        -> a hidden window back on the taskbar, minimized
+    // "0" when the window isn't there yet (the caller tries again), else "1".
+    static void HandleWinMode(string id, string[] p)
+    {
+        int pid;
+        if (!Protocol.TryParseInt(Protocol.Arg(p, 2), out pid) || pid <= 0)
+        {
+            Protocol.Fail(id, "Invalid PID");
+            return;
+        }
+        string mode = (Protocol.Arg(p, 3) ?? "").Trim().ToLowerInvariant();
+        if (mode == "hide") { Protocol.Reply(id, HiddenWindows.Hide(pid) ? "1" : "0"); return; }
+        if (mode == "show") { Protocol.Reply(id, HiddenWindows.Show(pid) ? "1" : "0"); return; }
+        if (mode == "unhide") { Protocol.Reply(id, HiddenWindows.Unhide(pid) ? "1" : "0"); return; }
+        IntPtr hwnd = WindowFocus.LargestWindowOf(pid);
+        if (hwnd == IntPtr.Zero)
+        {
+            Protocol.Reply(id, "0");
+            return;
+        }
+        if (mode == "min")
+        {
+            WindowFocus.ShowWindow(hwnd, 7); // SW_SHOWMINNOACTIVE
+            Protocol.Reply(id, "1");
+            return;
+        }
+        if (mode == "small")
+        {
+            int w, h;
+            if (!Protocol.TryParseInt(Protocol.Arg(p, 4), out w)) w = 640;
+            if (!Protocol.TryParseInt(Protocol.Arg(p, 5), out h)) h = 360;
+            Protocol.Reply(id, WindowLayout.ShrinkOne(hwnd, w, h) ? "1" : "0");
+            return;
+        }
+        Protocol.Fail(id, "unknown window mode: " + mode);
     }
 
     static void HandleAntiAfk(string id, string[] p)
@@ -1446,7 +1550,7 @@ internal static class WindowFocus
 //
 // It is set once per anti-AFK run rather than per pass on purpose: the call
 // only succeeds while this process may change the foreground, which is
-// typically true when the user has just toggled anti-AFK in MultiRoblox and
+// typically true when the user has just toggled anti-AFK in Vanta Manager and
 // typically false 18 minutes later mid-game.
 internal static class ForegroundLockTimeout
 {
@@ -1505,6 +1609,170 @@ internal static class ForegroundLockTimeout
             _overridden = false;
             try { SystemParametersInfo(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, new IntPtr((long)_saved), 0); }
             catch { }
+        }
+    }
+}
+
+// ── Hidden windows ──────────────────────────────────────────────────────────
+// "Hidden" accounts: the window is minimized first (a minimized Roblox draws
+// nothing) and then hidden, so it has no window and no taskbar button either.
+// The window keeps its minimized state while hidden. Only ShowWindow is used,
+// the same call the taskbar makes; nothing is read from or put into the client.
+//
+// Other code only looks for visible windows, so the ones hidden here are
+// remembered: anti-AFK and captures show them for a moment and hide them again,
+// and every one is put back on screen (minimized) when this helper exits.
+internal static class HiddenWindows
+{
+    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+
+    delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr lParam);
+    [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr hWnd);
+
+    const int SW_HIDE = 0;
+    const int SW_SHOWMINNOACTIVE = 7;
+
+    static readonly object _lock = new object();
+    static readonly Dictionary<int, IntPtr> _byPid = new Dictionary<int, IntPtr>();
+
+    // The remembered window of pid, if it still belongs to that process.
+    static IntPtr Valid(int pid)
+    {
+        IntPtr h;
+        if (!_byPid.TryGetValue(pid, out h)) return IntPtr.Zero;
+        uint owner;
+        if (!IsWindow(h) || GetWindowThreadProcessId(h, out owner) == 0 || owner != (uint)pid)
+        {
+            _byPid.Remove(pid); // closed: nothing to show any more
+            return IntPtr.Zero;
+        }
+        return h;
+    }
+
+    public static IntPtr Of(int pid)
+    {
+        lock (_lock) return Valid(pid);
+    }
+
+    // A window hiding left behind that this helper no longer remembers (it was
+    // restarted since): invisible, minimized, titled, and owned by the process.
+    // Only used when someone asks for the window back, so an unrelated hidden
+    // window of Roblox is never touched on its own.
+    static IntPtr FindStranded(int pid)
+    {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows(delegate(IntPtr h, IntPtr l)
+        {
+            uint owner;
+            GetWindowThreadProcessId(h, out owner);
+            if (owner != (uint)pid || IsWindowVisible(h) || GetWindowTextLength(h) == 0 || !WindowFocus.IsIconic(h)) return true;
+            found = h;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    public static bool Hide(int pid)
+    {
+        lock (WindowFocus.Gate)
+        lock (_lock)
+        {
+            IntPtr h = WindowFocus.LargestWindowOf(pid);
+            if (h == IntPtr.Zero)
+            {
+                // Already hidden by us (Roblox hasn't shown it again): done.
+                IntPtr known = Valid(pid);
+                if (known == IntPtr.Zero)
+                {
+                    known = FindStranded(pid);
+                    if (known != IntPtr.Zero) _byPid[pid] = known; // remembered again
+                }
+                return known != IntPtr.Zero && !IsWindowVisible(known);
+            }
+            if (!WindowFocus.IsIconic(h))
+            {
+                WindowFocus.ShowWindow(h, SW_SHOWMINNOACTIVE);
+                Thread.Sleep(120);
+            }
+            WindowFocus.ShowWindow(h, SW_HIDE);
+            _byPid[pid] = h;
+            return true;
+        }
+    }
+
+    public static bool Show(int pid)
+    {
+        lock (WindowFocus.Gate)
+        {
+            IntPtr h;
+            lock (_lock)
+            {
+                h = Valid(pid);
+                _byPid.Remove(pid);
+            }
+            if (h == IntPtr.Zero) h = WindowFocus.LargestWindowOf(pid);
+            if (h == IntPtr.Zero) h = FindStranded(pid);
+            if (h == IntPtr.Zero) return false;
+            WindowFocus.ShowWindow(h, WindowFocus.SW_RESTORE);
+            WindowFocus.TryForeground(h);
+            return true;
+        }
+    }
+
+    // Back on the taskbar but still minimized, without taking focus: for
+    // showing many at once, where popping each one up would be in the way.
+    public static bool Unhide(int pid)
+    {
+        lock (WindowFocus.Gate)
+        {
+            IntPtr h;
+            lock (_lock)
+            {
+                h = Valid(pid);
+                _byPid.Remove(pid);
+            }
+            if (h == IntPtr.Zero) h = FindStranded(pid);
+            if (h == IntPtr.Zero) return false;
+            WindowFocus.ShowWindow(h, SW_SHOWMINNOACTIVE);
+            return true;
+        }
+    }
+
+    // Anti-AFK's list of windows, plus the hidden ones of the given processes.
+    public static void AddTo(List<int> pids, Dictionary<uint, IntPtr> windows)
+    {
+        lock (_lock)
+        {
+            foreach (int pid in pids)
+            {
+                if (windows.ContainsKey((uint)pid)) continue;
+                IntPtr h = Valid(pid);
+                if (h != IntPtr.Zero) windows[(uint)pid] = h;
+            }
+        }
+    }
+
+    // After a window was shown for a tap or a capture: hidden again if it's one of ours.
+    public static void HideAgainIfHidden(IntPtr hWnd)
+    {
+        bool ours;
+        lock (_lock) ours = _byPid.ContainsValue(hWnd);
+        if (!ours || !IsWindow(hWnd)) return;
+        if (!WindowFocus.IsIconic(hWnd)) WindowFocus.ShowWindow(hWnd, SW_SHOWMINNOACTIVE);
+        WindowFocus.ShowWindow(hWnd, SW_HIDE);
+    }
+
+    // On exit: every hidden window back on the taskbar, minimized.
+    public static void ShowAll()
+    {
+        lock (_lock)
+        {
+            foreach (var kv in _byPid)
+                if (IsWindow(kv.Value)) WindowFocus.ShowWindow(kv.Value, SW_SHOWMINNOACTIVE);
+            _byPid.Clear();
         }
     }
 }
@@ -1570,6 +1838,7 @@ internal static class AntiAfk
             {
                 if (!RobloxProcesses.Find(pids)) continue;
                 WindowFocus.FindMainWindows(pids, windows);
+                HiddenWindows.AddTo(pids, windows);
 
                 long now = clock.ElapsedMilliseconds;
                 gone.Clear();
@@ -1679,6 +1948,7 @@ internal static class AntiAfk
         finally
         {
             if (wasMinimised) WindowFocus.ShowWindow(hWnd, WindowFocus.SW_MINIMIZE);
+            HiddenWindows.HideAgainIfHidden(hWnd);
         }
     }
 }
@@ -1764,6 +2034,26 @@ internal static class WindowLayout
         {
             SetStyle(hwnd, style);
             SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+    }
+
+    // Makes one window's game area cw x ch where it stands, for an account set
+    // to start small. A maximized window is restored first. False when the
+    // window can't be resized right now (minimized, hung or gone).
+    public static bool ShrinkOne(IntPtr hwnd, int cw, int ch)
+    {
+        lock (_sync)
+        {
+            if (!IsWindow(hwnd) || WindowFocus.IsIconic(hwnd) || IsHungAppWindow(hwnd)) return false;
+            cw = Math.Max(160, Math.Min(cw, 1280));
+            ch = Math.Max(90, Math.Min(ch, 720));
+            if ((StyleOf(hwnd) & WS_MAXIMIZE) != 0) WindowFocus.ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            RECT win, client;
+            if (!GetWindowRect(hwnd, out win) || !GetClientRect(hwnd, out client)) return false;
+            int frameW = Math.Max(0, (win.Right - win.Left) - (client.Right - client.Left));
+            int frameH = Math.Max(0, (win.Bottom - win.Top) - (client.Bottom - client.Top));
+            FreeResize(hwnd, 0, 0, cw + frameW, ch + frameH, true);
+            return true;
         }
     }
 
@@ -1927,11 +2217,8 @@ internal static class WindowLayout
 internal static class WindowPreview
 {
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
-    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
 
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
-    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd, out RECT r);
-    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref POINT p);
     [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
 
     // Includes DirectX content, which a plain PrintWindow leaves black.
@@ -1941,6 +2228,7 @@ internal static class WindowPreview
     public static string Jpeg(int pid, int maxWidth, int quality)
     {
         IntPtr hwnd = WindowFocus.LargestWindowOf(pid);
+        if (hwnd == IntPtr.Zero && HiddenWindows.Of(pid) != IntPtr.Zero) return "MIN";
         if (hwnd == IntPtr.Zero) throw new Exception("Roblox window not found");
         if (WindowFocus.IsIconic(hwnd)) return "MIN";
 
@@ -1958,18 +2246,11 @@ internal static class WindowPreview
                 try { drew = PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT); }
                 finally { g.ReleaseHdc(hdc); }
             }
-            if (!drew || WindowCapture.IsBlank(whole)) return "BLANK";
-
-            // Just the game's picture: no title bar, no edges.
-            RECT c;
-            POINT origin = new POINT();
-            Rectangle area = new Rectangle(0, 0, width, height);
-            if (GetClientRect(hwnd, out c) && ClientToScreen(hwnd, ref origin))
-            {
-                Rectangle client = new Rectangle(origin.X - r.Left, origin.Y - r.Top, c.Right - c.Left, c.Bottom - c.Top);
-                client.Intersect(area);
-                if (client.Width > 0 && client.Height > 0) area = client;
-            }
+            // Just the game's picture: no title bar, no edges. The blank check
+            // looks at this part only; the title bar always draws, so checking
+            // the whole window let a white game area through as a real picture.
+            Rectangle area = WindowCapture.ClientAreaIn(hwnd, r.Left, r.Top, width, height);
+            if (!drew || WindowCapture.IsBlank(whole, area)) return "BLANK";
 
             int tw = Math.Max(8, Math.Min(maxWidth, area.Width));
             int th = Math.Max(8, (int)((long)area.Height * tw / area.Width));
@@ -2014,6 +2295,9 @@ internal static class WindowCapture
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT value, int size);
     [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
+    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
+    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hWnd, ref POINT p);
 
     const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
     // Includes DirectX content, which a plain PrintWindow leaves black.
@@ -2059,6 +2343,7 @@ internal static class WindowCapture
             finally
             {
                 if (wasMinimised) WindowFocus.ShowWindow(hwnd, WindowFocus.SW_MINIMIZE);
+                HiddenWindows.HideAgainIfHidden(hwnd);
                 if ((tookFocus || wasMinimised) && previousFg != hwnd) WindowFocus.RestoreForeground(previousFg);
             }
         }
@@ -2079,34 +2364,65 @@ internal static class WindowCapture
         crop.Intersect(new Rectangle(0, 0, width, height));
         if (crop.Width <= 0 || crop.Height <= 0) return null;
 
-        // 24bpp: the capture has no meaningful alpha, and dropping the channel
-        // makes the PNG smaller and quicker to encode.
-        using (var whole = new Bitmap(width, height, PixelFormat.Format24bppRgb))
+        // Judged on the game area alone: the title bar always draws, so a white
+        // or black game area inside a normal frame is still a failed render.
+        Rectangle game = ClientAreaIn(hwnd, r.Left, r.Top, width, height);
+
+        // A window that isn't in front (or was just restored) can hand back an
+        // empty frame the first time; a couple of short retries usually get a
+        // real one before falling back to the screen copy, which takes focus.
+        for (int attempt = 0; attempt < 3; attempt++)
         {
-            bool drew;
-            using (var g = Graphics.FromImage(whole))
+            if (attempt > 0) Thread.Sleep(150);
+            // 24bpp: the capture has no meaningful alpha, and dropping the
+            // channel makes the PNG smaller and quicker to encode.
+            using (var whole = new Bitmap(width, height, PixelFormat.Format24bppRgb))
             {
-                IntPtr hdc = g.GetHdc();
-                try { drew = PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT); }
-                finally { g.ReleaseHdc(hdc); }
+                bool drew;
+                using (var g = Graphics.FromImage(whole))
+                {
+                    IntPtr hdc = g.GetHdc();
+                    try { drew = PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT); }
+                    finally { g.ReleaseHdc(hdc); }
+                }
+                if (drew && !IsBlank(whole, game)) return whole.Clone(crop, PixelFormat.Format24bppRgb);
             }
-            if (!drew || IsBlank(whole)) return null;
-            return whole.Clone(crop, PixelFormat.Format24bppRgb);
         }
+        return null;
     }
 
-    // A failed render comes back as one solid colour. Sampling a grid is enough
-    // to tell, and cheap next to encoding the PNG.
+    // Where the game's picture (the client area) sits inside a bitmap of the
+    // whole window whose top-left is at (left, top) on screen. The whole
+    // bitmap if the window won't say.
+    internal static Rectangle ClientAreaIn(IntPtr hwnd, int left, int top, int width, int height)
+    {
+        Rectangle all = new Rectangle(0, 0, width, height);
+        RECT c;
+        POINT origin = new POINT();
+        if (!GetClientRect(hwnd, out c) || !ClientToScreen(hwnd, ref origin)) return all;
+        Rectangle client = new Rectangle(origin.X - left, origin.Y - top, c.Right - c.Left, c.Bottom - c.Top);
+        client.Intersect(all);
+        return client.Width > 0 && client.Height > 0 ? client : all;
+    }
+
     internal static bool IsBlank(Bitmap image)
     {
-        const int Steps = 12;
-        Color first = image.GetPixel(0, 0);
+        return IsBlank(image, new Rectangle(0, 0, image.Width, image.Height));
+    }
+
+    // A failed render comes back as one flat colour (usually white or black).
+    // Sampling a grid is enough to tell, and cheap next to encoding the PNG.
+    // A small tolerance, because a failed frame isn't always exactly uniform.
+    internal static bool IsBlank(Bitmap image, Rectangle area)
+    {
+        const int Steps = 16, Tolerance = 6;
+        Color first = image.GetPixel(area.Left, area.Top);
         for (int y = 0; y < Steps; y++)
         {
             for (int x = 0; x < Steps; x++)
             {
-                Color c = image.GetPixel(x * (image.Width - 1) / (Steps - 1), y * (image.Height - 1) / (Steps - 1));
-                if (c.ToArgb() != first.ToArgb()) return false;
+                Color c = image.GetPixel(area.Left + x * (area.Width - 1) / (Steps - 1), area.Top + y * (area.Height - 1) / (Steps - 1));
+                if (Math.Abs(c.R - first.R) > Tolerance || Math.Abs(c.G - first.G) > Tolerance || Math.Abs(c.B - first.B) > Tolerance) return false;
             }
         }
         return true;
@@ -2116,13 +2432,20 @@ internal static class WindowCapture
     {
         if (!WindowFocus.TryForeground(hwnd))
             throw new Exception("Could not bring the Roblox window to the front, so nothing was captured");
-        Thread.Sleep(90);
-
+        // Long enough for a window that was behind others to draw a fresh frame;
+        // one more try if the first copy still caught it before that.
         Rectangle area = CaptureArea(hwnd, hasCrop, xFrac, yFrac, wFrac, hFrac);
-        var bitmap = new Bitmap(area.Width, area.Height, PixelFormat.Format24bppRgb);
-        using (var g = Graphics.FromImage(bitmap))
+        Bitmap bitmap = null;
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            g.CopyFromScreen(area.Left, area.Top, 0, 0, area.Size, CopyPixelOperation.SourceCopy);
+            Thread.Sleep(attempt == 0 ? 200 : 350);
+            if (bitmap != null) bitmap.Dispose();
+            bitmap = new Bitmap(area.Width, area.Height, PixelFormat.Format24bppRgb);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.CopyFromScreen(area.Left, area.Top, 0, 0, area.Size, CopyPixelOperation.SourceCopy);
+            }
+            if (!IsBlank(bitmap)) break;
         }
         return bitmap;
     }
@@ -2130,6 +2453,8 @@ internal static class WindowCapture
     static IntPtr MainWindowOf(int pid)
     {
         IntPtr hwnd = WindowFocus.LargestWindowOf(pid);
+        if (hwnd != IntPtr.Zero) return hwnd;
+        hwnd = HiddenWindows.Of(pid);
         if (hwnd != IntPtr.Zero) return hwnd;
 
         Process process;

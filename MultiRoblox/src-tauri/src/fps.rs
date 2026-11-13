@@ -26,7 +26,7 @@ use tauri::AppHandle;
 /// Written for "unlimited"; Roblox treats any cap this high as uncapped.
 pub const UNLIMITED: i64 = 9999;
 const DEFAULT_CAP: i64 = 60;
-/// The cap the user chose in MultiRoblox (absent until they choose one).
+/// The cap the user chose in Vanta Manager (absent until they choose one).
 pub const CAP_KEY: &str = "fpsCap";
 /// Whether that cap is defended against overwrites (default on).
 pub const LOCK_KEY: &str = "fpsCapLock";
@@ -234,12 +234,58 @@ pub fn write(cap: f64) -> Result<i64, String> {
     }) {
         eprintln!("[fps] could not remember the cap: {e}");
     }
+    // An account's own cap is in the file while its client starts; the
+    // shared one lands when that ends.
+    if OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+        return Ok(value);
+    }
     apply(value)?;
     Ok(value)
 }
 
-/// The cap to defend, if the user set one and the lock is on.
+/// An account's own cap while its client is starting: (cap, what the file
+/// held before, to put back when no shared cap is defended).
+static OVERRIDE: std::sync::Mutex<Option<(i64, Option<i64>)>> = std::sync::Mutex::new(None);
+
+/// Writes an account's own cap for the client about to start, and defends it
+/// (instead of the shared one) until end_override.
+pub fn begin_override(value: i64) -> Result<(), String> {
+    {
+        let mut o = OVERRIDE.lock().unwrap_or_else(|e| e.into_inner());
+        match o.as_mut() {
+            Some(cur) => cur.0 = value,
+            None => {
+                let prior = read_file().ok().and_then(|(_, xml)| read_cap_from(&xml));
+                *o = Some((value, prior));
+            }
+        }
+    }
+    apply(value).map(|_| ())
+}
+
+/// Puts the shared cap back: the defended one, else whatever was there before.
+pub fn end_override() {
+    let Some((_, prior)) = OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+        return;
+    };
+    let back = shared_wanted().or(prior);
+    if let Some(v) = back {
+        if let Err(e) = apply(v) {
+            eprintln!("[fps] could not put the shared cap back: {e}");
+        }
+    }
+}
+
+/// The cap to defend: an account's own while its client starts, else the
+/// shared one if the user set one and the lock is on.
 fn wanted() -> Option<i64> {
+    if let Some((v, _)) = *OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) {
+        return Some(v);
+    }
+    shared_wanted()
+}
+
+fn shared_wanted() -> Option<i64> {
     if !crate::settings::get_bool(LOCK_KEY, true) {
         return None;
     }

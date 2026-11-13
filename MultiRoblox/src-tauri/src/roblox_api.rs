@@ -2,7 +2,29 @@ use crate::state::AppState;
 use serde_json::Value;
 use std::time::Duration;
 
-pub(crate) const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+/// A normal Chrome user-agent for the web requests the app makes as an
+/// account (sign-in checks, auth tickets, server lists). It names the Chrome
+/// version of the Edge WebView2 installed on this PC, which updates itself,
+/// so it stays current instead of aging into an unusual one; a fixed string
+/// falls further behind with every Chrome release. This only affects the
+/// app's own requests to roblox.com, not the game client.
+pub(crate) static UA: once_cell::sync::Lazy<String> = once_cell::sync::Lazy::new(|| {
+    let major = tauri::webview_version()
+        .ok()
+        .and_then(|v| chrome_major(&v))
+        .unwrap_or(FALLBACK_CHROME_MAJOR);
+    ua_for(major)
+});
+const FALLBACK_CHROME_MAJOR: u32 = 142;
+
+fn chrome_major(version: &str) -> Option<u32> {
+    version.trim().split('.').next()?.parse::<u32>().ok().filter(|m| (100..1000).contains(m))
+}
+
+/// Chrome's reduced user-agent: only the major version is real.
+fn ua_for(major: u32) -> String {
+    format!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36")
+}
 
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -113,7 +135,7 @@ async fn csrf_from_endpoint(state: &AppState, cookie: &str, endpoint: &str) -> O
         .http
         .post(&url)
         .header("Cookie", format!(".ROBLOSECURITY={}", cookie))
-        .header("User-Agent", UA)
+        .header("User-Agent", UA.as_str())
         .header("Accept", "application/json")
         .header("Content-Type", "application/json")
         .header("Content-Length", "0")
@@ -182,8 +204,10 @@ pub async fn get_auth_ticket(
     }
 
     let mut token = csrf_token;
-    let delays = [0u64, 2000, 5000];
+    let delays = [0u64, 1500, 3000];
     let mut last_status: u16 = 0;
+    // Why the last attempt got no answer at all, for the error message.
+    let mut last_failure: Option<&'static str> = None;
 
     for &delay_ms in &delays {
         if delay_ms > 0 {
@@ -195,18 +219,27 @@ pub async fn get_auth_ticket(
             .header("Cookie", format!(".ROBLOSECURITY={}", cookie))
             .header("Referer", "https://www.roblox.com")
             .header("Origin", "https://www.roblox.com")
-            .header("User-Agent", UA)
+            .header("User-Agent", UA.as_str())
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .header("Content-Length", "0")
-            .timeout(Duration::from_secs(8))
+            .timeout(Duration::from_secs(6))
             .body("");
         if let Some(t) = &token {
             req = req.header("X-CSRF-TOKEN", t.as_str());
         }
         let res = match req.send().await {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(e) => {
+                last_failure = Some(if e.is_timeout() {
+                    "Roblox took too long to answer"
+                } else if e.is_connect() {
+                    "could not connect to Roblox"
+                } else {
+                    "the connection to Roblox failed"
+                });
+                continue;
+            }
         };
         let status = res.status().as_u16();
         last_status = status;
@@ -235,6 +268,19 @@ pub async fn get_auth_ticket(
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<u64>().ok())
                 .unwrap_or(8);
+            // A long wait here used to hold the launch (and every launch
+            // queued behind it) for as long as Roblox asked, then fail
+            // anyway. Say so straight away instead.
+            if retry_after > MAX_RATE_LIMIT_WAIT_SECS {
+                return TicketResult {
+                    ok: false,
+                    ticket: None,
+                    error: Some(format!(
+                        "Roblox is limiting sign-ins right now. Try again in about {} seconds.",
+                        retry_after
+                    )),
+                };
+            }
             tokio::time::sleep(Duration::from_secs(retry_after)).await;
             token = get_csrf_token(state, cookie).await;
             if token.is_none() {
@@ -263,25 +309,31 @@ pub async fn get_auth_ticket(
         }
     }
     if last_status != 0 {
+        let why = match last_status {
+            401 | 403 => "Roblox refused this account's sign-in; its cookie may have expired".to_string(),
+            429 => "Roblox is limiting sign-ins right now".to_string(),
+            500..=599 => format!("Roblox's sign-in service is having problems (HTTP {})", last_status),
+            s => format!("Roblox answered HTTP {}", s),
+        };
         return TicketResult {
             ok: false,
             ticket: None,
-            error: Some(format!(
-                "Auth ticket request failed (HTTP {}) after 3 attempts. Try again in a moment.",
-                last_status
-            )),
+            error: Some(format!("{}. Try again in a moment.", why)),
         };
     }
     TicketResult {
         ok: false,
         ticket: None,
-        error: Some(
-            // Only reached when no attempt got any HTTP response at all.
-            "Could not reach Roblox to get an auth ticket. Check your connection and try again."
-                .into(),
-        ),
+        // Only reached when no attempt got any HTTP response at all.
+        error: Some(format!(
+            "Couldn't sign in: {}. Check your connection and try again.",
+            last_failure.unwrap_or("could not reach Roblox")
+        )),
     }
 }
+
+/// Longest Retry-After a launch waits out before giving up with a message.
+const MAX_RATE_LIMIT_WAIT_SECS: u64 = 10;
 
 pub fn invalidate_ticket(state: &AppState, cookie: &str) {
     state.ticket_cache.lock().unwrap().remove(cookie);
@@ -324,7 +376,7 @@ async fn get_json(state: &AppState, url: &str, cookie: Option<&str>) -> Option<V
         .http
         .get(url)
         .header("Accept", "application/json")
-        .header("User-Agent", UA)
+        .header("User-Agent", UA.as_str())
         .timeout(Duration::from_secs(5));
     if let Some(cookie) = cookie {
         req = req.header("Cookie", format!(".ROBLOSECURITY={}", cookie));
@@ -391,7 +443,7 @@ pub async fn follow_redirect(state: &AppState, url: &str) -> String {
     match state
         .http_no_redirect
         .get(url)
-        .header("User-Agent", UA)
+        .header("User-Agent", UA.as_str())
         .timeout(Duration::from_secs(8))
         .send()
         .await
@@ -516,7 +568,7 @@ async fn post_raw(
         .header("Cookie", format!(".ROBLOSECURITY={}", cookie))
         .header("X-CSRF-TOKEN", csrf)
         .header("Content-Type", "application/json")
-        .header("User-Agent", UA)
+        .header("User-Agent", UA.as_str())
         .timeout(Duration::from_secs(8))
         .body(body.to_string())
         .send()
@@ -551,7 +603,7 @@ pub async fn get_access_code(
         .get(&url)
         .header("Cookie", format!(".ROBLOSECURITY={}", cookie))
         .header("Referer", "https://www.roblox.com")
-        .header("User-Agent", UA)
+        .header("User-Agent", UA.as_str())
         .timeout(Duration::from_secs(5))
         .send()
         .await
@@ -578,7 +630,7 @@ pub async fn get_json_public(state: &AppState, url: &str) -> Result<Value, Strin
         .http
         .get(url)
         .header("Accept", "application/json")
-        .header("User-Agent", UA)
+        .header("User-Agent", UA.as_str())
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -716,6 +768,14 @@ pub async fn follow_user_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_agent_uses_the_installed_chrome_major() {
+        assert_eq!(chrome_major("142.0.3595.80"), Some(142));
+        assert_eq!(chrome_major("garbage"), None);
+        assert_eq!(chrome_major("9.1"), None);
+        assert!(ua_for(142).contains("Chrome/142.0.0.0 Safari/537.36"));
+    }
 
     #[test]
     fn place_id_from_a_bare_id() {
@@ -862,7 +922,7 @@ pub async fn headshots_for_tokens(state: &AppState, tokens: &[String]) -> Result
         .http
         .post("https://thumbnails.roblox.com/v1/batch")
         .header("Accept", "application/json")
-        .header("User-Agent", UA)
+        .header("User-Agent", UA.as_str())
         .timeout(Duration::from_secs(10))
         .json(&body)
         .send()

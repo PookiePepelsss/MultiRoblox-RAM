@@ -418,6 +418,9 @@ async fn do_launch(
         );
         return launch_error("This account no longer exists.");
     };
+    // Timed so a slow launch says in the log which part was slow.
+    let started = std::time::Instant::now();
+    let mut slow: Vec<String> = Vec::new();
     if already_running(app, state, account_id).await {
         return json!({
             "success": false,
@@ -435,6 +438,40 @@ async fn do_launch(
     } else {
         &stored.cookie
     };
+
+    // Launch the build Roblox is serving right now. A stale one makes Roblox
+    // run its updater, which reinstalls and closes every client already open.
+    // When the live build isn't installed yet, stop here rather than trigger
+    // that once per account: one normal Roblox start installs it.
+    super::install::refresh_live_version(&state.http, false).await;
+    let mut pending = super::install::update_pending();
+    if pending.is_some() {
+        // Never say so from a stale answer: Roblox may have updated since it
+        // was cached. Ask again; an unanswered check blocks nothing.
+        super::install::invalidate_cache();
+        if super::install::refresh_live_version(&state.http, true).await.is_some() {
+            pending = super::install::update_pending();
+        } else {
+            pending = None;
+        }
+    }
+    if let Some(live) = pending {
+        let why = format!(
+            "Roblox has an update ({}) that isn't installed yet. Open Roblox once from the website or the Start menu so it can update, then launch again.",
+            live
+        );
+        log_launch_failure(app, account_id, &stored, &why);
+        return launch_error(why);
+    }
+    if let Some(install) = super::install::pick_install() {
+        emit_log(
+            app,
+            "info",
+            "launch",
+            &format!("Using Roblox {} from {}", install.version(), install.root.name),
+            Some(json!({ "accountId": account_id })),
+        );
+    }
 
     // Mutex only here. The singleton-handle scan is deliberately NOT done
     // yet; see the call just before the spawn loop below.
@@ -475,6 +512,10 @@ async fn do_launch(
 
     let ticket_result =
         crate::roblox_api::get_auth_ticket(state, cookie, Some(csrf_token.clone())).await;
+    let signin_secs = started.elapsed().as_secs();
+    if signin_secs >= 6 {
+        slow.push(format!("signing in {}s", signin_secs));
+    }
     let ticket = match ticket_result.ticket {
         Some(ticket) if ticket_result.ok => ticket,
         _ => {
@@ -483,9 +524,9 @@ async fn do_launch(
                 app,
                 account_id,
                 &stored,
-                &format!("auth ticket error - {}", why),
+                &format!("auth ticket error after {}s - {}", started.elapsed().as_secs(), why),
             );
-            return launch_error(format!("Failed to get auth ticket: {}", why));
+            return launch_error(why);
         }
     };
     // Last point before we start spawning processes; after this the client
@@ -523,6 +564,10 @@ async fn do_launch(
 
     daemon::protect_sign_in_for_launch(app, state).await;
 
+    // This account's own FPS cap, graphics and FFlags go into Roblox's files
+    // now; the shared ones go back once the client has read them.
+    let profile = super::profile::prepare(state, account_id).await;
+
     let mut spawned_pid: Option<u32> = None;
     for attempt in 0..3 {
         if attempt > 0 {
@@ -530,6 +575,7 @@ async fn do_launch(
             // The retry backoff is the longest stretch of this whole path;
             // bail out here rather than making the user wait it out.
             if cancelled() {
+                super::profile::after_spawn(app, &profile, None);
                 return cancelled_result();
             }
         }
@@ -545,10 +591,15 @@ async fn do_launch(
         if let Err(e) = crate::fps::enforce() {
             eprintln!("[fps] before launch: {e}");
         }
+        let scan = std::time::Instant::now();
         close_singleton_handles(app, state).await;
+        if scan.elapsed().as_secs() >= 3 {
+            slow.push(format!("preparing the client {}s", scan.elapsed().as_secs()));
+        }
         // Target resolution and the handle scan above can take seconds; a
         // Kill or removal that landed meanwhile must stop the spawn.
         if cancelled() {
+            super::profile::after_spawn(app, &profile, None);
             return cancelled_result();
         }
         spawned_pid = spawn_roblox_direct(&uri);
@@ -557,6 +608,7 @@ async fn do_launch(
         }
     }
     let Some(pid) = spawned_pid else {
+        super::profile::after_spawn(app, &profile, None);
         daemon::release_sign_in_if_idle(app, state).await;
         log_launch_failure(
             app,
@@ -575,6 +627,7 @@ async fn do_launch(
             Duration::from_secs(4),
         )
         .await;
+        super::profile::after_spawn(app, &profile, None);
         daemon::release_sign_in_if_idle(app, state).await;
         return cancelled_result();
     }
@@ -583,6 +636,9 @@ async fn do_launch(
         .lock()
         .unwrap()
         .insert(account_id.to_string(), pid);
+    // Puts the shared values back once this client has read its own, and
+    // shrinks or minimizes its window if the account is set to.
+    super::profile::after_spawn(app, &profile, Some(pid));
     // Fired the instant the process exists, not after the trailing
     // bookkeeping below or the JSON round-trip back to the caller; that gap,
     // stacked behind CSRF/ticket fetches and the inter-launch stagger for
@@ -621,7 +677,15 @@ async fn do_launch(
         app,
         "ok",
         "launch",
-        &format!("Launched Roblox for {}", info.display(account_id)),
+        &format!(
+            "Launched Roblox for {}{}",
+            info.display(account_id),
+            if slow.is_empty() {
+                String::new()
+            } else {
+                format!(" (took {}s: {})", started.elapsed().as_secs(), slow.join(", "))
+            }
+        ),
         Some(json!({
             "accountId": account_id,
             "username": info.username,

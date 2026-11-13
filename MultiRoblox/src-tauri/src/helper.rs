@@ -1,9 +1,9 @@
 // The single resident RobloxNative.exe for the whole app session.
 //
-// There is exactly one. It starts with MultiRoblox, holds the singleton
+// There is exactly one. It starts with Vanta Manager, holds the singleton
 // mutexes for the whole session, runs anti-AFK and the PID watcher on its own
 // background threads, and answers everything else as a request over a pipe.
-// It dies with MultiRoblox: explicitly on clean exit, and otherwise because
+// It dies with Vanta Manager: explicitly on clean exit, and otherwise because
 // closing our end of its stdin gives it EOF; which covers a crash or a
 // Task Manager kill, where no shutdown code of ours would ever run.
 use crate::state::AppState;
@@ -32,7 +32,7 @@ type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<String, String>>>>>
 /// from being re-spawned on every status poll.
 const SPAWN_RETRY_BACKOFF_MS: i64 = 10_000;
 
-/// True when a helper owned by someone else (another MultiRoblox instance) is
+/// True when a helper owned by someone else (another Vanta Manager instance) is
 /// already running. Checked before spawning, because the daemon's own
 /// singleton guard can only reject a duplicate *after* it has been started;
 /// and the frontend polls status every 3s, so "spawn, get rejected, exit"
@@ -328,7 +328,7 @@ async fn spawn(app: &AppHandle, state: &AppState, exe: &Path) -> Option<Arc<Help
         }
 
         // It bowed out because another helper owns the singleton name; most
-        // likely a second copy of MultiRoblox is open and swept us. Respawning
+        // likely a second copy of Vanta Manager is open and swept us. Respawning
         // would just lose the same race again, so stop and say so plainly.
         if duplicate_r.load(Ordering::SeqCst) {
             eprintln!("[helper] another helper already owns the singleton; not restarting");
@@ -336,7 +336,7 @@ async fn spawn(app: &AppHandle, state: &AppState, exe: &Path) -> Option<Arc<Help
                 &app_r,
                 "warn",
                 "system",
-                "Another MultiRoblox instance owns the native helper - close it and restart this one",
+                "Another Vanta Manager instance owns the native helper - close it and restart this one",
                 None,
             );
             return;
@@ -351,7 +351,7 @@ async fn spawn(app: &AppHandle, state: &AppState, exe: &Path) -> Option<Arc<Help
                 &app_r,
                 "err",
                 "system",
-                "Native helper keeps stopping - giving up. Restart MultiRoblox to try again.",
+                "Native helper keeps stopping - giving up. Restart Vanta Manager to try again.",
                 None,
             );
             return;

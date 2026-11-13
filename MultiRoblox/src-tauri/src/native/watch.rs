@@ -19,6 +19,9 @@ static LAST_PUSHED_COUNT: AtomicI64 = AtomicI64::new(-1);
 // within about a second of Roblox actually closing.
 const MISS_THRESHOLD: u32 = 3;
 pub const POLL_INTERVAL: Duration = Duration::from_millis(300);
+/// How often the helper re-reads the process list for new clients. Exits are
+/// reported immediately regardless; a new client has LAUNCH_DELAY_MS of grace.
+const PID_RESCAN: Duration = Duration::from_millis(2000);
 /// Grace period after a launch before misses count: a client that is still
 /// starting up can briefly not show up as alive.
 const LAUNCH_DELAY_MS: i64 = 15_000;
@@ -53,7 +56,9 @@ pub(super) fn stop_watch_poll_if_idle(state: &AppState) {
 // which helper.rs drops straight into watch_pid_cache. Idempotent; asking
 // twice just re-arms the same thread inside the same process.
 async fn ensure_pid_watcher(app: &AppHandle, state: &AppState) {
-    let cmd = format!("watch|{}", POLL_INTERVAL.as_millis());
+    // The helper waits on the Roblox processes themselves and reports an exit
+    // the moment it happens; this is only how often it looks for new ones.
+    let cmd = format!("watch|{}", PID_RESCAN.as_millis());
     let _ = crate::helper::call(app, state, &cmd, crate::helper::DEFAULT_TIMEOUT).await;
 }
 

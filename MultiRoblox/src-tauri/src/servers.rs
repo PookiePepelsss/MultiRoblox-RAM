@@ -58,7 +58,7 @@ async fn send(
             .request(method.clone(), url)
             .header("Cookie", format!(".ROBLOSECURITY={}", cookie))
             .header("X-CSRF-TOKEN", token.as_str())
-            .header("User-Agent", UA)
+            .header("User-Agent", UA.as_str())
             .header("Accept", "application/json")
             .header("Referer", "https://www.roblox.com")
             .timeout(Duration::from_secs(15));
@@ -196,7 +196,7 @@ pub async fn price(state: &AppState, place_id: &str) -> Result<Value, String> {
     let page = state
         .http
         .get(&url)
-        .header("User-Agent", UA)
+        .header("User-Agent", UA.as_str())
         .timeout(Duration::from_secs(15))
         .send()
         .await

@@ -1,3 +1,5 @@
+// The folder is still called "multiroblox" (the app is now Vanta Manager): renaming
+// it would orphan every existing user's saved accounts and settings.
 // Hardcoded to match the old Electron build's userData path; Tauri's
 // default app_data_dir() would pick a different folder and orphan existing
 // users' saved data on upgrade.

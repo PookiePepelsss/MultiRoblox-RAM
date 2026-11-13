@@ -25,11 +25,43 @@ pub fn hide_to_tray_enabled() -> bool {
 }
 
 pub fn show_main_window(app: &AppHandle) {
+    set_low_memory(app, false);
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+}
+
+/// While the window is hidden in the tray, lets its web view hand most of
+/// its memory back to Windows (WebView2's low memory target); showing it
+/// again asks for normal. Scripts keep running either way, so timed tracking
+/// and the rest of the app carry on while hidden.
+pub fn set_low_memory(app: &AppHandle, low: bool) {
+    #[cfg(windows)]
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.with_webview(move |view| {
+            use webview2_com::Microsoft::Web::WebView2::Win32::{
+                ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
+                COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+            };
+            use windows_core::Interface;
+            let level = if low {
+                COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+            } else {
+                COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+            };
+            unsafe {
+                if let Ok(core) = view.controller().CoreWebView2() {
+                    if let Ok(v19) = core.cast::<ICoreWebView2_19>() {
+                        let _ = v19.SetMemoryUsageTargetLevel(level);
+                    }
+                }
+            }
+        });
+    }
+    #[cfg(not(windows))]
+    let _ = (app, low);
 }
 
 /// Builds the tray icon if it isn't already there. Idempotent, so the settings
@@ -39,14 +71,14 @@ pub fn ensure_tray(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let show = MenuItem::with_id(app, "tray-show", "Open MultiRoblox", true, None::<&str>)
+    let show = MenuItem::with_id(app, "tray-show", "Open Vanta Manager", true, None::<&str>)
         .map_err(|e| e.to_string())?;
     let quit = MenuItem::with_id(app, "tray-quit", "Quit", true, None::<&str>)
         .map_err(|e| e.to_string())?;
     let menu = Menu::with_items(app, &[&show, &quit]).map_err(|e| e.to_string())?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip("MultiRoblox")
+        .tooltip("Vanta Manager")
         .menu(&menu)
         // Left click is handled below as "open the window"; without this the
         // menu pops on left click too, which is not the Windows convention.
